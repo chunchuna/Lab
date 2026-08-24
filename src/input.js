@@ -1,4 +1,7 @@
 import { VIEW_W, VIEW_H } from './config.js';
+import { isTouchDevice } from './controls.js';
+
+let touchMode = false;
 
 export const keys = new Set();
 export const pressed = new Set();
@@ -11,12 +14,13 @@ export function layout() {
   if (!stageEl) return;
   const ww = window.innerWidth;
   const wh = window.innerHeight;
-  const scale = Math.max(1, Math.min(ww / VIEW_W, wh / VIEW_H));
+  const scale = Math.min(ww / VIEW_W, wh / VIEW_H);
   const w = Math.round(VIEW_W * scale);
   const h = Math.round(VIEW_H * scale);
   stageEl.style.width = w + 'px';
   stageEl.style.height = h + 'px';
-  stageEl.style.fontSize = (scale * 7.6).toFixed(2) + 'px';
+  // 手机屏幕物理尺寸小，UI 需要相对更大才点得中
+  stageEl.style.fontSize = (scale * (touchMode ? 9.0 : 7.6)).toFixed(2) + 'px';
   const r = stageEl.getBoundingClientRect();
   view.scale = scale;
   view.left = r.left;
@@ -25,8 +29,18 @@ export function layout() {
 
 export function initInput(stage, onKey) {
   stageEl = stage;
+  touchMode = isTouchDevice();
   layout();
   window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', () => setTimeout(layout, 120));
+
+  // 触屏：任意点击可以唤醒音频 / 跳过标题
+  window.addEventListener('pointerdown', (e) => {
+    if (onKey) onKey('__pointer', e);
+  });
+  // 禁止移动端的滚动、双击缩放、长按菜单
+  document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
 
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();

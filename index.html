@@ -142,6 +142,17 @@
       </div>
 
       <div id="cursor"><svg viewBox="0 0 40 40" width="40" height="40"><g id="cursor-g"></g></svg></div>
+
+      <!-- 触屏操作层 -->
+      <div id="pad" class="hidden">
+        <div class="stick" id="stick-move"><b>移动</b><i></i></div>
+        <div class="stick" id="stick-aim"><b>朝向</b><i></i></div>
+        <button class="pbtn fire hidden" data-act="fire" data-hold="1"><span>开枪</span></button>
+        <button class="pbtn act hidden" data-act="interact"><span>互动</span></button>
+        <button class="pbtn sm hidden" data-act="reload"><span>换弹</span></button>
+        <button class="pbtn sm hidden" data-act="flash"><span>手电</span></button>
+        <button class="pbtn corner" data-act="bag"><span>背包</span></button>
+      </div>
     </div>
   </div>
   <script type="module" src="src/main.js"></script>

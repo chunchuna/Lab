@@ -15,6 +15,9 @@ import * as SFX from './audio.js';
 import * as INV from './inventory.js';
 import { inv } from './inventory.js';
 import { initInput, keys, mouse, justPressed, endFrame, view } from './input.js';
+import {
+  pad, initControls, setButton, setPadVisible, endFrameControls, screenDirToWorld,
+} from './controls.js';
 import { clamp, flicker, lerp } from './util.js';
 
 const canvas = document.getElementById('game');
@@ -48,10 +51,14 @@ const game = {
   lastPrompt: '',
 };
 
-/* 静态光源的可见多边形只需算一次 */
+/* 静态光源的可见多边形只需算一次，并按满功率烘焙成贴图：
+   每帧只剩一次 drawImage，省掉 5 组渐变填充与模糊合成。 */
 for (const L of level.lights) {
   L.vis = computeVisibility(L.x, L.y, level.segments);
+  L.tex = lighting.bakeLight({ x: L.x, y: L.y, r: L.r, color: L.color, vis: L.vis, cam: CAM });
 }
+/* 关闭视线遮挡时裁剪遮罩是固定的，同样预烘焙（含模糊） */
+const ROOM_MASK = lighting.bakeMask(level.roomVis, CAM);
 
 /* ------------------------------------------------------------------ *
  * 输入
@@ -62,10 +69,7 @@ initInput(stage, (k) => {
   SFX.resume();
 
   if (game.state === 'title') {
-    UI.hideTitle();
-    game.state = 'wake';
-    game.phase = 0;
-    SFX.sfxBeep(180, 0.4, 0.05);
+    startWake();
     return;
   }
   if (game.state !== 'play') return;
@@ -87,11 +91,35 @@ initInput(stage, (k) => {
   else if (k === 'r') startReload();
 });
 
+/** 触屏按钮与键盘走同一套逻辑 */
+function doAction(act) {
+  SFX.initAudio();
+  SFX.resume();
+  if (game.state === 'title') {
+    startWake();
+    return;
+  }
+  if (game.state !== 'play') return;
+  if (act === 'bag') toggleBag();
+  else if (game.bagOpen) return;
+  else if (act === 'interact') tryInteract();
+  else if (act === 'reload') startReload();
+  else if (act === 'flash') doToggleFlash();
+}
+
+function startWake() {
+  UI.hideTitle();
+  game.state = 'wake';
+  game.phase = 0;
+  SFX.sfxBeep(180, 0.4, 0.05);
+}
+
 function toggleBag() {
   game.bagOpen = !game.bagOpen;
   INV.setOpen(game.bagOpen);
   UI.setPrompt(null);
   game.lastPrompt = '';
+  setPadVisible(!game.bagOpen);
   SFX.sfxClick();
 }
 
@@ -156,17 +184,33 @@ function dist(ax, ay, bx, by) {
   return Math.hypot(ax - bx, ay - by);
 }
 
+/** 按当前装备情况显示/隐藏触屏按钮，避免屏幕被无用按钮占满 */
+const padState = {};
+function syncPadButtons() {
+  const gun = !!handOf('pistol');
+  const flash = INV.has('flashlight');
+  if (padState.fire !== gun) {
+    padState.fire = gun;
+    setButton('fire', gun);
+    setButton('reload', gun);
+  }
+  if (padState.flash !== flash) {
+    padState.flash = flash;
+    setButton('flash', flash);
+  }
+}
+
 function currentInteract() {
   const p = game.player;
   if (dist(p.x, p.y, DOOR_SPOT.x, DOOR_SPOT.y) < 1.9) {
-    return { id: 'door', text: game.doorTried ? '再次尝试人脸识别' : '使用人脸识别面板' };
+    return { id: 'door', text: game.doorTried ? '再次尝试人脸识别' : '使用人脸识别面板', short: '识别' };
   }
   if (dist(p.x, p.y, LOCKER_SPOT.x, LOCKER_SPOT.y) < 1.7) {
-    if (!game.locker.open) return { id: 'locker', text: '打开应急储物柜' };
-    if (!game.locker.looted) return { id: 'loot', text: '取出柜内物品' };
-    return { id: 'lockerEmpty', text: '储物柜已空' };
+    if (!game.locker.open) return { id: 'locker', text: '打开应急储物柜', short: '开柜' };
+    if (!game.locker.looted) return { id: 'loot', text: '取出柜内物品', short: '拿取' };
+    return { id: 'lockerEmpty', text: '储物柜已空', short: '空柜' };
   }
-  if (dist(p.x, p.y, BED_POS.x, BED_POS.y + 1.1) < 1.5) return { id: 'bed', text: '查看实验床' };
+  if (dist(p.x, p.y, BED_POS.x, BED_POS.y + 1.1) < 1.5) return { id: 'bed', text: '查看实验床', short: '查看' };
   return null;
 }
 
@@ -178,8 +222,10 @@ function tryInteract() {
     game.doorTried = true;
     SFX.sfxBeep(1400, 0.06, 0.12);
     UI.setPrompt(null);
+    setPadVisible(false);
     UI.startScan(() => {
       game.state = 'play';
+      setPadVisible(true);
       UI.msg('人脸识别系统错误 —— 门禁保持锁定。', 'warn');
       UI.setObjective('门打不开，在房间里找找别的办法');
       SFX.sfxThud();
@@ -302,8 +348,12 @@ function blocked(x, y) {
   return false;
 }
 
-function movePlayer(dt) {
-  const p = game.player;
+/** 统一移动意图：摇杆给屏幕方向，键盘给世界轴向 */
+function moveIntent() {
+  if (pad.enabled && pad.move.mag > 0.1) {
+    const w = screenDirToWorld(pad.move.x, pad.move.y);
+    return { x: w.x, y: w.y, mag: Math.min(1, (pad.move.mag - 0.1) / 0.75) };
+  }
   let ix = 0;
   let iy = 0;
   if (keys.has('w') || keys.has('arrowup')) {
@@ -323,22 +373,29 @@ function movePlayer(dt) {
     iy -= 1;
   }
   const len = Math.hypot(ix, iy);
-  p.moving = len > 0;
+  if (!len) return { x: 0, y: 0, mag: 0 };
+  return { x: ix / len, y: iy / len, mag: 1 };
+}
+
+function movePlayer(dt) {
+  const p = game.player;
+  const mv = moveIntent();
+  p.moving = mv.mag > 0.02;
   if (!p.moving) {
     p.walk = lerp(p.walk, 0, Math.min(1, dt * 10));
     return;
   }
-  let spd = PLAYER_SPEED;
+  let spd = PLAYER_SPEED * mv.mag;
   if (game.gun.reload > 0) spd *= 0.72;
-  const dx = (ix / len) * spd * dt;
-  const dy = (iy / len) * spd * dt;
+  const dx = mv.x * spd * dt;
+  const dy = mv.y * spd * dt;
   if (!blocked(p.x + dx, p.y)) p.x += dx;
   else if (!blocked(p.x + dx * 0.35, p.y)) p.x += dx * 0.35;
   if (!blocked(p.x, p.y + dy)) p.y += dy;
   else if (!blocked(p.x, p.y + dy * 0.35)) p.y += dy * 0.35;
 
-  p.walk += dt * 5.4;
-  p.stepT -= dt;
+  p.walk += dt * 5.4 * (0.5 + mv.mag * 0.5);
+  p.stepT -= dt * mv.mag;
   if (p.stepT <= 0) {
     p.stepT = 0.42;
     SFX.sfxStep();
@@ -352,10 +409,15 @@ function movePlayer(dt) {
 
 function updateAim() {
   const p = game.player;
-  const w = toWorld(mouse.x - CAM.x, mouse.y - CAM.y);
-  const a = Math.atan2(w.y - p.y, w.x - p.x);
-  p.aim = a;
-  p.aimScreen = normScreenDir(a);
+  if (pad.enabled) {
+    // 右摇杆给的是屏幕方向，转成世界角度
+    const w = screenDirToWorld(pad.aim.x, pad.aim.y);
+    p.aim = Math.atan2(w.y, w.x);
+  } else {
+    const w = toWorld(mouse.x - CAM.x, mouse.y - CAM.y);
+    p.aim = Math.atan2(w.y - p.y, w.x - p.x);
+  }
+  p.aimScreen = normScreenDir(p.aim);
 }
 
 function normScreenDir(a) {
@@ -431,15 +493,17 @@ function update(dt) {
     syncHUD();
   }
 
-  if (mouse.down && handOf('pistol')) fire();
+  if ((mouse.down || pad.firing) && handOf('pistol')) fire();
 
-  // 互动提示
+  // 互动提示：键鼠用底部提示条，触屏用上下文按钮
   const it = currentInteract();
   const text = it ? it.text : '';
   if (text !== game.lastPrompt) {
     game.lastPrompt = text;
-    UI.setPrompt(text || null);
+    if (pad.enabled) setButton('interact', !!text, it ? it.short || '互动' : '互动');
+    else UI.setPrompt(text || null);
   }
+  if (pad.enabled) syncPadButtons();
 
   if (g.reload > 0 || game.t % 0.25 < dt) syncHUD();
 }
@@ -664,7 +728,8 @@ function render() {
     } else if (L.id === 'spark') {
       power = game.sparkPower * 0.85;
     }
-    lighting.add({ x: L.x, y: L.y, r: L.r, color: L.color, power, vis: L.vis, cam });
+    if (game.noBake) lighting.add({ x: L.x, y: L.y, r: L.r, color: L.color, power, vis: L.vis, cam });
+    else lighting.addBaked(L.tex, power, shx, shy);
   }
   SFX.setBuzz(1 - buzzLevel);
 
@@ -704,7 +769,14 @@ function render() {
 
   // losOcclusion 打开时用玩家可见多边形裁剪光照（看不见视野外的东西）；
   // 关闭时只用房间轮廓做裁剪，光线遮挡（阴影）依然保留。
-  if (!game.noLight) lighting.finish(ctx, game.losOcclusion ? pvis : level.roomVis, cam);
+  if (!game.noLight) {
+    const mask = game.losOcclusion
+      ? pvis
+      : game.noBake
+        ? level.roomVis
+        : { tex: ROOM_MASK, dx: shx, dy: shy };
+    lighting.finish(ctx, mask, cam);
+  }
 
   /* --- 自发光元素（灯具本身）--- */
   for (const f of level.fixtures) {
@@ -744,8 +816,38 @@ function render() {
     }
   }
 
+  // 触屏：画面内准星（没有鼠标指针，用世界内的十字表示朝向）
+  if (pad.enabled && game.state === 'play' && !game.bagOpen) {
+    const armed = !!handOf('pistol');
+    const d = armed ? 2.9 : 2.0;
+    const rx = px + Math.cos(p.aim) * d;
+    const ry = py + Math.sin(p.aim) * d;
+    const sx = cam.x + (rx - ry) * HW;
+    const sy = cam.y + (rx + ry) * HH;
+    const k = armed ? 1 : 0.62;
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = armed ? 'rgba(255,120,100,0.95)' : 'rgba(150,225,220,0.8)';
+    ctx.lineWidth = 1;
+    const r = 4.5 + game.gun.recoil * 3;
+    for (const [ax, ay] of [
+      [0, -1],
+      [0, 1],
+      [-1, 0],
+      [1, 0],
+    ]) {
+      ctx.beginPath();
+      ctx.moveTo(sx + ax * (r * 0.45), sy + ay * (r * 0.45) * 0.6);
+      ctx.lineTo(sx + ax * r, sy + ay * r * 0.6);
+      ctx.stroke();
+    }
+    ctx.fillStyle = armed ? 'rgba(255,200,190,0.95)' : 'rgba(200,245,240,0.85)';
+    ctx.fillRect(sx - 0.6, sy - 0.6, 1.4 * k, 1.4 * k);
+    ctx.restore();
+  }
+
   // 准星
-  const showCur = (game.state === 'play' || game.state === 'wake') && !game.bagOpen;
+  const showCur = (game.state === 'play' || game.state === 'wake') && !game.bagOpen && !pad.enabled;
   if (showCur !== game.curShown) {
     game.curShown = showCur;
     UI.showCursor(showCur);
@@ -762,6 +864,13 @@ function render() {
 
 UI.initUI();
 INV.initInventory();
+initControls(doAction);
+if (pad.enabled) {
+  setButton('interact', false);
+  setButton('fire', false);
+  setButton('reload', false);
+  setButton('flash', false);
+}
 syncHUD();
 UI.setLosState(game.losOcclusion);
 UI.setObjective('离开这个房间');
@@ -773,6 +882,7 @@ function frame(now) {
   update(dt);
   render();
   endFrame();
+  endFrameControls();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -781,3 +891,5 @@ requestAnimationFrame(frame);
 window.__game = game;
 window.__level = level;
 window.__inv = INV;
+window.__pad = pad;
+window.__render = render; // 供性能基准脚本直接测量渲染耗时

@@ -1,4 +1,5 @@
 node_modules/
 shots/
+dist/
 .DS_Store
 *.log

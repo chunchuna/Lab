@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const BASE = path.dirname(fileURLToPath(import.meta.url));
+// 可选参数指定根目录，例如 `node server.js dist` 用来验证打包产物
+const ROOT = process.argv[2] ? path.resolve(BASE, process.argv[2]) : BASE;
 const PORT = Number(process.env.PORT) || 5173;
 
 const MIME = {

@@ -15,6 +15,10 @@ html, body {
   height: 100%;
   background: #000;
   overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   font-family: var(--ui-font);
   color: #cfe0e2;
   -webkit-font-smoothing: antialiased;
@@ -533,12 +537,46 @@ html, body {
   margin-top: auto;
   padding-top: 0.9em;
   border-top: 1px solid rgba(127, 227, 220, 0.14);
-  min-height: 6em;
+  /* 预留标题 + 三行描述，避免不同物品文案把整窗撑开 */
+  height: 8.4em;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-.bi-head { display: flex; align-items: baseline; gap: 0.8em; }
-.bi-name { font-size: 1.4em; color: #dcecec; letter-spacing: 0.06em; }
-.bi-tag { font-size: 0.95em; color: var(--amber); border: 1px solid rgba(224, 169, 75, 0.4); padding: 0 0.4em; }
-.bi-desc { margin-top: 0.45em; font-size: 1.1em; line-height: 1.6; color: #7f9698; }
+.bi-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8em;
+  flex: none;
+  min-width: 0;
+}
+.bi-name {
+  font-size: 1.4em;
+  color: #dcecec;
+  letter-spacing: 0.06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.bi-tag {
+  font-size: 0.95em;
+  color: var(--amber);
+  border: 1px solid rgba(224, 169, 75, 0.4);
+  padding: 0 0.4em;
+  flex: none;
+}
+.bi-desc {
+  margin-top: 0.45em;
+  font-size: 1.1em;
+  line-height: 1.6;
+  color: #7f9698;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
 
 .drag-ghost {
   position: fixed;
@@ -553,6 +591,146 @@ html, body {
   filter: drop-shadow(0 0.2em 0.5em rgba(0, 0, 0, 0.8));
 }
 .drag-ghost canvas { width: 100%; height: 100%; image-rendering: pixelated; }
+
+/* ---------- 触屏操作层 ---------- */
+#pad { position: absolute; inset: 0; pointer-events: none; }
+#pad.off { opacity: 0; pointer-events: none !important; }
+
+#pad .stick {
+  position: absolute;
+  bottom: 1.2em;
+  width: 10em;
+  height: 10em;
+  opacity: 0.78;
+  border-radius: 50%;
+  border: 1px solid rgba(160, 200, 202, 0.28);
+  background: radial-gradient(circle, rgba(10, 22, 24, 0.42), rgba(4, 10, 11, 0.26));
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#pad .stick b {
+  position: absolute;
+  bottom: 0.5em;
+  font-size: 0.95em;
+  font-weight: 400;
+  color: rgba(150, 180, 182, 0.4);
+  letter-spacing: 0.2em;
+}
+#pad .stick i {
+  width: 4.4em;
+  height: 4.4em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, rgba(190, 230, 228, 0.55), rgba(90, 130, 132, 0.42));
+  border: 1px solid rgba(200, 240, 238, 0.5);
+  will-change: transform;
+}
+#pad .stick.held { border-color: rgba(127, 227, 220, 0.6); }
+#pad .stick.held i { background: radial-gradient(circle at 40% 35%, rgba(210, 250, 246, 0.8), rgba(110, 170, 168, 0.6)); }
+#stick-move { left: 1.2em; }
+#stick-aim { right: 1.2em; }
+#pad .stick.held { opacity: 1; }
+
+#pad .pbtn {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  border-radius: 50%;
+  border: 1px solid rgba(170, 205, 208, 0.4);
+  background: radial-gradient(circle at 40% 32%, rgba(24, 44, 46, 0.72), rgba(6, 14, 16, 0.66));
+  color: #d6ecec;
+  font-family: inherit;
+  font-size: inherit; /* button 默认不继承字号，不写这行 em 尺寸会按 UA 的 13.3px 算 */
+  letter-spacing: 0.1em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+#pad .pbtn.held { background: radial-gradient(circle at 40% 32%, rgba(60, 110, 108, 0.9), rgba(20, 44, 46, 0.8)); }
+/* 注意：字号只设在内层 span 上。若设在按钮本身，width/height 的 em
+   会按按钮自己的字号计算，导致尺寸与布局算错。 */
+#pad .pbtn span { font-size: 1.15em; }
+
+/* 右手拇指弧线：开枪最大最靠内，换弹/手电在外侧，互动更高一层 */
+#pad .pbtn.fire {
+  right: 16.8em;
+  bottom: 2.2em;
+  width: 10em;
+  height: 10em;
+  border-color: rgba(255, 120, 100, 0.5);
+  background: radial-gradient(circle at 40% 32%, rgba(70, 26, 22, 0.8), rgba(20, 8, 8, 0.72));
+  color: #ffd9d0;
+}
+#pad .pbtn.fire span { font-size: 1.4em; }
+#pad .pbtn.fire.held { background: radial-gradient(circle at 40% 32%, rgba(190, 70, 55, 0.92), rgba(70, 22, 18, 0.85)); }
+#pad .pbtn.act {
+  right: 28.3em;
+  bottom: 13.75em;
+  width: 8.4em;
+  height: 8.4em;
+  border-color: rgba(127, 227, 220, 0.6);
+  background: radial-gradient(circle at 40% 32%, rgba(20, 56, 56, 0.8), rgba(6, 18, 20, 0.72));
+  animation: pulseGlow 1.8s ease-in-out infinite;
+}
+#pad .pbtn.sm { width: 6.8em; height: 6.8em; }
+#pad .pbtn.sm span { font-size: 1.05em; }
+#pad .pbtn[data-act='reload'] { right: 18.4em; bottom: 14.3em; }
+#pad .pbtn[data-act='flash'] { right: 28.9em; bottom: 3.3em; }
+#pad .pbtn.corner {
+  right: 1.65em;
+  top: 1.65em;
+  width: 6.8em;
+  height: 6.8em;
+  border-radius: 0.4em;
+}
+#pad .pbtn.corner span { font-size: 1.05em; }
+
+/* ---------- 触屏下的 HUD 重排 ---------- */
+body.touch #help { display: none; }
+body.touch #cursor { display: none; }
+/* 双手面板挪到左上，避开左摇杆 */
+body.touch #hands {
+  left: 1.2em;
+  bottom: auto;
+  top: 4.4em;
+  gap: 0.4em;
+}
+body.touch .hand { width: 5em; padding: 0.25em; }
+body.touch .hand .slot { height: 2.8em; }
+body.touch .hand .icon { width: 2.6em; height: 2.6em; }
+body.touch .hand .label { font-size: 0.95em; }
+body.touch .hand .item { font-size: 0.9em; }
+body.touch .hand .label .key { display: none; }
+/* 弹药挪到右上，让开左上角给双手、右上角给背包键 */
+body.touch #ammo {
+  right: 9.8em;
+  bottom: auto;
+  top: 1.65em;
+}
+body.touch #ammo-row { font-size: 1.5em; }
+body.touch #ammo-row .unit { display: none; }
+body.touch .bullet { width: 0.45em; height: 1.5em; }
+body.touch #reload-bar { width: 6em; }
+/* 字幕移到顶部中间：底部整片区域留给拇指 */
+body.touch #messages {
+  bottom: auto;
+  top: 1.2em;
+  width: 40%;
+  left: 47%;
+}
+body.touch .msg { font-size: 1.15em; padding: 0.2em 0.6em; }
+/* 触屏用上下文按钮代替 E 提示 */
+body.touch #prompt { display: none !important; }
+/* 背包面板放大，保证手指可点 */
+body.touch .bag-panel { width: 68em; }
+body.touch .cell { min-height: 5.4em; }
+body.touch .hand-slot { width: 7.4em; height: 7.4em; }
+body.touch .hand-slot.left { left: -8em; }
+body.touch .hand-slot.right { right: -8em; }
 
 /* ---------- 准星 ---------- */
 #cursor {

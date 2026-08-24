@@ -23,12 +23,11 @@ await wait(4200);
 
 // 直接给予装备
 await page.evaluate(() => {
-  const g = window.__game;
-  g.inv.owned.add('pistol');
-  g.inv.owned.add('flashlight');
-  g.inv.left = 'flashlight';
-  g.inv.right = 'pistol';
-  g.inv.flashOn = true;
+  window.__inv.addItem('flashlight');
+  window.__inv.addItem('pistol');
+  window.__inv.addItem('mag', 2);
+  window.__inv.quickEquip('flashlight');
+  window.__inv.quickEquip('pistol');
   document.querySelectorAll('#messages,#help,#prompt,#objective').forEach((e) => (e.style.display = 'none'));
 });
 
@@ -49,7 +48,7 @@ for (const [name, x, y, mx, my] of cases) {
 }
 
 // 手电筒关闭：只有环境光
-await page.evaluate(() => { window.__game.inv.flashOn = false; window.__game.player.x = 7; window.__game.player.y = 5; });
+await page.evaluate(() => { window.__inv.inv.flashOn = false; window.__game.player.x = 7; window.__game.player.y = 5; });
 await wait(300);
 await page.screenshot({ path: OUT + 'L-ambient.png' });
 

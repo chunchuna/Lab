@@ -69,40 +69,28 @@ export class Lighting {
     if (any) g.fill();
   }
 
-  /**
-   * 添加一盏灯。
-   * o = { x, y, r, color:[r,g,b], power, vis, cam, cone, blur }
-   */
-  add(o) {
-    if (o.power <= 0.004) return;
+  /** 把一盏灯的径向渐变 ∩ 可见多边形渲染到 g 上 */
+  _renderLight(g, o, power) {
     const cam = o.cam;
     const cx = cam.x + (o.x - o.y) * HW;
     const cy = cam.y + (o.x + o.y) * HH - (o.zOff || 0);
     const rad = o.r * RSX;
-    if (cx + rad < 0 || cx - rad > this.w || cy + rad * ELLIPSE_SQUASH < -40 || cy - rad * ELLIPSE_SQUASH > this.h + 40) {
-      if (!o.vis) return;
-    }
-
-    const s = this.scratch.g;
-    s.setTransform(1, 0, 0, 1, 0, 0);
-    s.globalCompositeOperation = 'source-over';
-    s.clearRect(0, 0, this.w, this.h);
 
     const [r, g_, b] = o.color;
-    const p = Math.min(1, o.power);
-    s.save();
-    s.translate(cx, cy);
-    s.scale(1, o.squash === undefined ? ELLIPSE_SQUASH : o.squash);
-    const grd = s.createRadialGradient(0, 0, rad * 0.04, 0, 0, rad);
+    const p = Math.min(1, power);
+    g.save();
+    g.translate(cx, cy);
+    g.scale(1, o.squash === undefined ? ELLIPSE_SQUASH : o.squash);
+    const grd = g.createRadialGradient(0, 0, rad * 0.04, 0, 0, rad);
     grd.addColorStop(0, `rgba(${r},${g_},${b},${p})`);
     grd.addColorStop(0.34, `rgba(${r},${g_},${b},${p * 0.82})`);
     grd.addColorStop(0.68, `rgba(${r},${g_},${b},${p * 0.38})`);
     grd.addColorStop(1, `rgba(${r},${g_},${b},0)`);
-    s.fillStyle = grd;
-    s.beginPath();
-    s.arc(0, 0, rad, 0, Math.PI * 2);
-    s.fill();
-    s.restore();
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(0, 0, rad, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
 
     if (o.vis) {
       const m = this.mask.g;
@@ -110,16 +98,66 @@ export class Lighting {
       m.globalCompositeOperation = 'source-over';
       m.clearRect(0, 0, this.w, this.h);
       this._shape(m, o.vis, cam);
-      s.globalCompositeOperation = 'destination-in';
-      s.filter = `blur(${o.blur === undefined ? this.softness : o.blur}px)`;
-      s.drawImage(this.mask.c, 0, 0);
-      s.filter = 'none';
-      s.globalCompositeOperation = 'source-over';
+      g.globalCompositeOperation = 'destination-in';
+      g.filter = `blur(${o.blur === undefined ? this.softness : o.blur}px)`;
+      g.drawImage(this.mask.c, 0, 0);
+      g.filter = 'none';
+      g.globalCompositeOperation = 'source-over';
     }
+  }
+
+  /**
+   * 添加一盏灯。
+   * o = { x, y, r, color:[r,g,b], power, vis, cam, blur }
+   */
+  add(o) {
+    if (o.power <= 0.004) return;
+    const cam = o.cam;
+    const cx = cam.x + (o.x - o.y) * HW;
+    const rad = o.r * RSX;
+    if (!o.vis && (cx + rad < 0 || cx - rad > this.w)) return;
+
+    const s = this.scratch.g;
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.globalCompositeOperation = 'source-over';
+    s.clearRect(0, 0, this.w, this.h);
+    this._renderLight(s, o, o.power);
 
     const l = this.light.g;
     l.globalCompositeOperation = 'lighter';
     l.drawImage(this.scratch.c, 0, 0);
+    l.globalCompositeOperation = 'source-over';
+  }
+
+  /**
+   * 静态光源在整局游戏里位置和遮挡都不变，只有亮度在闪。
+   * 预先按满功率烘焙成贴图，每帧只需一次 drawImage + globalAlpha。
+   */
+  bakeLight(o) {
+    const { c, g } = makeCanvas(this.w, this.h);
+    this._renderLight(g, o, 1);
+    return c;
+  }
+
+  /** 预烘焙的裁剪遮罩（关闭视线遮挡时房间轮廓是固定的），模糊也一次性做掉 */
+  bakeMask(vis, cam) {
+    const t = makeCanvas(this.w, this.h);
+    this._shape(t.g, vis, cam);
+    const { c, g } = makeCanvas(this.w, this.h);
+    g.filter = `blur(${this.softness}px)`;
+    g.drawImage(t.c, 0, 0);
+    g.filter = 'none';
+    return c;
+  }
+
+  /** 画一张烘焙好的光照贴图，alpha 即当前亮度；dx/dy 用于跟随镜头抖动 */
+  addBaked(tex, alpha, dx = 0, dy = 0) {
+    if (alpha <= 0.004) return;
+    const l = this.light.g;
+    l.globalCompositeOperation = 'lighter';
+    l.globalAlpha = Math.min(1, alpha);
+    l.drawImage(tex, dx, dy);
+    l.globalAlpha = 1;
     l.globalCompositeOperation = 'source-over';
   }
 
@@ -133,15 +171,22 @@ export class Lighting {
     l.globalCompositeOperation = 'source-over';
   }
 
-  /** 用玩家视野裁剪光照，并把黑暗合成到主画布 */
-  finish(ctx, playerVis, cam, darkColor = 'rgba(3,6,9,1)') {
+  /**
+   * 用遮罩裁剪光照，再把黑暗合成到主画布。
+   * mask 可以是可见多边形（每帧计算）或预烘焙的贴图 { tex, dx, dy }。
+   */
+  finish(ctx, mask, cam, darkColor = 'rgba(3,6,9,1)') {
     const l = this.light.g;
-    if (playerVis) {
+    if (mask && mask.tex) {
+      l.globalCompositeOperation = 'destination-in';
+      l.drawImage(mask.tex, mask.dx || 0, mask.dy || 0);
+      l.globalCompositeOperation = 'source-over';
+    } else if (mask) {
       const m = this.mask.g;
       m.setTransform(1, 0, 0, 1, 0, 0);
       m.globalCompositeOperation = 'source-over';
       m.clearRect(0, 0, this.w, this.h);
-      this._shape(m, playerVis, cam);
+      this._shape(m, mask, cam);
       l.globalCompositeOperation = 'destination-in';
       l.filter = `blur(${this.softness}px)`;
       l.drawImage(this.mask.c, 0, 0);
