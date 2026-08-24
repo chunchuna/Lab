@@ -106,6 +106,41 @@ export function speckle(g, x, y, w, h, rand, n, colors, sw = 1, sh = 1) {
   }
 }
 
+/**
+ * 生成精灵的描边环（只有轮廓，中间是空的）。
+ * 做法：把剪影按 8 个方向偏移叠画，再用 destination-out 挖掉原剪影。
+ * 结果缓存下来，每帧只需一次 drawImage —— 描边画在光照之后，
+ * 所以夜里也能看清。
+ */
+const ringCache = new Map();
+export function outlineRing(img, color = '#ded8c8', r = 1) {
+  const key = img;
+  let cached = ringCache.get(key);
+  if (cached) return cached;
+
+  const sil = makeCanvas(img.width, img.height);
+  sil.g.drawImage(img, 0, 0);
+  sil.g.globalCompositeOperation = 'source-in';
+  sil.g.fillStyle = color;
+  sil.g.fillRect(0, 0, img.width, img.height);
+
+  const pad = r + 1;
+  const { c, g } = makeCanvas(img.width + pad * 2, img.height + pad * 2);
+  for (const [dx, dy] of [
+    [-r, 0], [r, 0], [0, -r], [0, r],
+    [-r, -r], [r, -r], [-r, r], [r, r],
+  ]) {
+    g.drawImage(sil.c, pad + dx, pad + dy);
+  }
+  g.globalCompositeOperation = 'destination-out';
+  g.drawImage(sil.c, pad, pad);
+  g.globalCompositeOperation = 'source-over';
+
+  cached = { img: c, pad };
+  ringCache.set(key, cached);
+  return cached;
+}
+
 /** 生成一个精灵：w,d 为足迹（瓦片），h 为高度（高度单位） */
 export function makeProp(w, d, h, draw, pad = 6) {
   const s = (w + d) / 2;

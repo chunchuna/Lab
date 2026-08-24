@@ -98,22 +98,33 @@ html, body {
 .msg.fade { opacity: 0; transition: opacity 0.5s linear; }
 
 /* ---------- 互动提示 ---------- */
+/* 定位由 JS 写 transform，跟随互动物在世界中的位置 */
 #prompt {
   position: absolute;
-  left: 50%;
-  bottom: 4em;
-  transform: translateX(-50%);
+  left: 0;
+  top: 0;
   background: var(--surface);
-  padding: 0.32em 1em;
-  font-size: 1.5em;
+  padding: 0.3em 0.85em;
+  font-size: 1.35em;
   display: flex;
   align-items: center;
-  gap: 0.9em;
+  white-space: nowrap;
+  will-change: transform;
 }
 
-/* 按键提示就是普通文字，不做成键帽 */
-.key { letter-spacing: 0.1em; }
-.key.small { letter-spacing: 0.06em; }
+/* 键帽：亮底暗字的小方块，只用两个颜色表现"这是一个键" */
+.kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  padding: 0.1em 0.32em;
+  margin-right: 0.35em;
+  background: var(--text);
+  color: var(--surface);
+  font-style: normal;
+  font-size: 0.92em;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
 
 /* ---------- 双手装备 ---------- */
 #hands {
@@ -136,7 +147,8 @@ html, body {
   justify-content: center;
 }
 .hand .icon { width: 3.8em; height: 3.8em; image-rendering: pixelated; }
-.hand .label { font-size: 1.05em; letter-spacing: 0.1em; opacity: 0.62; }
+.hand .label { font-size: 1.05em; letter-spacing: 0.1em; opacity: 0.72; }
+.hand .label .kbd { margin-right: 0; margin-left: 0.3em; }
 .hand .item { font-size: 1.05em; margin-top: 0.1em; }
 /* 空手用降低不透明度表示，不用反色 —— 反色在这套风格里专表"菜单选中" */
 .hand:not(.active) .item { opacity: 0.45; }
@@ -278,7 +290,7 @@ html, body {
   font-size: 1.05em;
   letter-spacing: 0.1em;
 }
-.hand-slot .hs-label i { font-style: normal; margin-left: 0.4em; opacity: 0.62; }
+.hand-slot .hs-label .kbd { margin-right: 0; margin-left: 0.35em; }
 .hand-slot.filled { background: rgba(222, 216, 200, 0.22); }
 .hand-slot .count { position: absolute; right: 0.3em; bottom: 0.15em; font-size: 1em; }
 
@@ -302,7 +314,13 @@ html, body {
 .reject { animation: rejectBlink 0.24s steps(2) 2; }
 @keyframes rejectBlink { 50% { background: rgba(222, 216, 200, 0.45); } }
 
-.bag-info { margin-top: auto; padding-top: 0.9em; min-height: 6em; }
+/* 高度写死：描述文字长短不同会撑动整个面板，切物品时面板跳动 */
+.bag-info {
+  margin-top: auto;
+  padding-top: 0.9em;
+  height: 8.6em;
+  overflow: hidden;
+}
 .bi-head { display: flex; align-items: baseline; gap: 1em; }
 .bi-name { font-size: 1.4em; letter-spacing: 0.06em; }
 .bi-tag { font-size: 0.95em; opacity: 0.62; }
@@ -435,6 +453,7 @@ body.touch .hand { width: 5em; padding: 0.25em; }
 body.touch .hand .slot { height: 2.8em; }
 body.touch .hand .icon { width: 2.6em; height: 2.6em; }
 body.touch .hand .label { font-size: 0.95em; }
+body.touch .hand .label .kbd { display: none; }
 body.touch .hand .item { font-size: 0.9em; }
 body.touch #ammo { right: 9.8em; bottom: auto; top: 1.65em; }
 body.touch #ammo-row { font-size: 1.5em; }

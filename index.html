@@ -24,21 +24,21 @@
       <div id="messages"></div>
 
       <!-- 互动提示 -->
+      <!-- 互动提示：由 JS 定位到互动物在世界中的位置 -->
       <div id="prompt" class="hidden">
-        <span class="key">E</span><span id="prompt-text"></span>
+        <i class="kbd">E</i><span id="prompt-text"></span>
       </div>
-      <!-- 提示：按键写成普通文字，不做键帽 -->
 
       <!-- 左下：双手装备 -->
       <div id="hands">
         <div class="hand" id="hand-left">
           <div class="slot"><canvas class="icon" width="48" height="48"></canvas></div>
-          <div class="label">左手 1</div>
+          <div class="label">左手 <i class="kbd">1</i></div>
           <div class="item">空</div>
         </div>
         <div class="hand" id="hand-right">
           <div class="slot"><canvas class="icon" width="48" height="48"></canvas></div>
-          <div class="label">右手 2</div>
+          <div class="label">右手 <i class="kbd">2</i></div>
           <div class="item">空</div>
         </div>
       </div>
@@ -55,7 +55,7 @@
 
       <!-- 操作说明：一行，只列不言自明之外的按键 -->
       <div id="help">
-        <span>I 背包</span><span>F 手电</span><span>R 换弹</span><span>V 视线 <b id="los-state">关</b></span><span>H 隐藏</span>
+        <span><i class="kbd">I</i>背包</span><span><i class="kbd">F</i>手电</span><span><i class="kbd">R</i>换弹</span><span><i class="kbd">V</i>视线 <b id="los-state">关</b></span><span><i class="kbd">H</i>隐藏</span>
       </div>
 
       <!-- 背包 -->
@@ -63,7 +63,7 @@
         <div class="bag-panel">
           <div class="bag-head">
             <span class="bag-title-t">装备与背包</span>
-            <span class="bag-close">I 关闭</span>
+            <span class="bag-close"><i class="kbd">I</i>关闭</span>
           </div>
           <div class="bag-body">
             <div class="bag-portrait">
@@ -72,12 +72,12 @@
                 <div class="hand-slot left" data-slot="left">
                   <canvas class="icon" width="56" height="56"></canvas>
                   <span class="count"></span>
-                  <span class="hs-label">左手 <i>1</i></span>
+                  <span class="hs-label">左手 <i class="kbd">1</i></span>
                 </div>
                 <div class="hand-slot right" data-slot="right">
                   <canvas class="icon" width="56" height="56"></canvas>
                   <span class="count"></span>
-                  <span class="hs-label">右手 <i>2</i></span>
+                  <span class="hs-label">右手 <i class="kbd">2</i></span>
                 </div>
               </div>
               <div class="portrait-name">研究员 · 未知身份<span>SUBJECT-07</span></div>

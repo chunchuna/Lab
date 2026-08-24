@@ -4,7 +4,8 @@ import {
 } from './config.js';
 import { CAM, toWorld, wallNorthPt } from './iso.js';
 import {
-  buildLevel, DOOR, DOOR_SPOT, LOCKER_SPOT, BED_POS, PLAYER_START, SCANNER, SPARK_SRC, SCREEN_SRC,
+  buildLevel, DOOR, DOOR_SPOT, LOCKER_POS, LOCKER_SPOT, BED_POS, PLAYER_START, SCANNER,
+  SPARK_SRC, SCREEN_SRC,
 } from './level.js';
 import { computeVisibility, computeVisibilityCone, raycast, lineOfSight } from './visibility.js';
 import { Lighting } from './lighting.js';
@@ -197,14 +198,29 @@ function syncPadButtons() {
 function currentInteract() {
   const p = game.player;
   if (dist(p.x, p.y, DOOR_SPOT.x, DOOR_SPOT.y) < 1.9) {
-    return { id: 'door', text: game.doorTried ? '再次尝试人脸识别' : '使用人脸识别面板', short: '识别' };
+    return {
+      id: 'door',
+      text: game.doorTried ? '再次尝试人脸识别' : '使用人脸识别面板',
+      short: '识别',
+      target: 'door',
+      anchor: { x: DOOR_SPOT.x, y: 0.1, z: 2.55 },
+    };
   }
   if (dist(p.x, p.y, LOCKER_SPOT.x, LOCKER_SPOT.y) < 1.7) {
-    if (!game.locker.open) return { id: 'locker', text: '打开应急储物柜', short: '开柜' };
-    if (!game.locker.looted) return { id: 'loot', text: '取出柜内物品', short: '拿取' };
-    return { id: 'lockerEmpty', text: '储物柜已空', short: '空柜' };
+    const anchor = { x: LOCKER_POS.x, y: LOCKER_POS.y, z: 2.5 };
+    if (!game.locker.open) return { id: 'locker', text: '打开应急储物柜', short: '开柜', target: 'locker', anchor };
+    if (!game.locker.looted) return { id: 'loot', text: '取出柜内物品', short: '拿取', target: 'locker', anchor };
+    return { id: 'lockerEmpty', text: '储物柜已空', short: '空柜', target: 'locker', anchor };
   }
-  if (dist(p.x, p.y, BED_POS.x, BED_POS.y + 1.1) < 1.5) return { id: 'bed', text: '查看实验床', short: '查看' };
+  if (dist(p.x, p.y, BED_POS.x, BED_POS.y + 1.1) < 1.5) {
+    return {
+      id: 'bed',
+      text: '查看实验床',
+      short: '查看',
+      target: 'bed',
+      anchor: { x: BED_POS.x, y: BED_POS.y, z: 1.35 },
+    };
+  }
   return null;
 }
 
@@ -448,8 +464,8 @@ function update(dt) {
       game.state = 'play';
       game.player.x = PLAYER_START.x;
       game.player.y = PLAYER_START.y;
-      UI.msg('头很痛……这里是七号实验室。电力系统好像出了大问题。');
-      setTimeout(() => UI.msg('先想办法出去。门在那边。'), 3200);
+      UI.msg('我在这里睡了多久……');
+      setTimeout(() => UI.msg('外面发生了什么……'), 2800);
     }
     return;
   }
@@ -489,8 +505,9 @@ function update(dt) {
 
   if ((mouse.down || pad.firing) && handOf('pistol')) fire();
 
-  // 互动提示：键鼠用底部提示条，触屏用上下文按钮
+  // 互动提示：键鼠把提示摆到物体上，触屏用上下文按钮
   const it = currentInteract();
+  game.interact = it;
   const text = it ? it.text : '';
   if (text !== game.lastPrompt) {
     game.lastPrompt = text;
@@ -571,6 +588,46 @@ function drawFixture(g, cam, f, intensity) {
     g.fillRect(-L - 10, -12, L * 2 + 20, 26);
     g.globalCompositeOperation = 'source-over';
   }
+  g.restore();
+}
+
+/**
+ * 给当前可互动的物体描边。画在光照之后，所以夜里也看得清。
+ * 门是烘焙在静态墙面里的，没有独立精灵，只能按墙面坐标勾门框。
+ */
+function drawHighlight(g, cam) {
+  const it = game.interact;
+  if (!it || !it.target || game.bagOpen || game.state !== 'play') return;
+  const a = 0.5 + 0.32 * (0.5 + 0.5 * Math.sin(game.t * 3.4));
+
+  if (it.target === 'door') {
+    const pts = [
+      wallNorthPt(DOOR.u0 - 6, DOOR.top - 6, cam.x, cam.y),
+      wallNorthPt(DOOR.u1 + 6, DOOR.top - 6, cam.x, cam.y),
+      wallNorthPt(DOOR.u1 + 6, DOOR.bottom, cam.x, cam.y),
+      wallNorthPt(DOOR.u0 - 6, DOOR.bottom, cam.x, cam.y),
+    ];
+    g.save();
+    g.globalAlpha = a;
+    g.strokeStyle = '#ded8c8';
+    g.lineWidth = 2; // 与精灵描边环（8 向偏移 r=1）的视觉粗细对齐
+    g.beginPath();
+    g.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
+    g.closePath();
+    g.stroke();
+    g.restore();
+    return;
+  }
+
+  const pr = level.props.find((q) => q.id === it.target);
+  if (!pr) return;
+  const ring = A.outlineRing(pr.s.img);
+  const sx = cam.x + (pr.x - pr.y) * HW;
+  const sy = cam.y + (pr.x + pr.y) * HH;
+  g.save();
+  g.globalAlpha = a;
+  g.drawImage(ring.img, Math.round(sx - pr.s.ox - ring.pad), Math.round(sy - pr.s.oy - ring.pad));
   g.restore();
 }
 
@@ -780,6 +837,7 @@ function render() {
     else i = flicker(game.t * 1.7, L.seed, 0.35) * (Math.sin(game.t * 0.7) > -0.6 ? 1 : 0.15);
     drawFixture(ctx, cam, f, i * 0.9);
   }
+  drawHighlight(ctx, cam);
   drawEmissive(ctx, cam);
 
   // 火花闪光的额外辉光
@@ -838,6 +896,15 @@ function render() {
     ctx.fillStyle = armed ? 'rgba(255,200,190,0.95)' : 'rgba(200,245,240,0.85)';
     ctx.fillRect(sx - 0.6, sy - 0.6, 1.4 * k, 1.4 * k);
     ctx.restore();
+  }
+
+  // 互动提示跟随物体：世界坐标 -> 画布坐标 -> 舞台 CSS 像素
+  const it = game.interact;
+  if (!pad.enabled && it && it.anchor && !game.bagOpen && game.state === 'play') {
+    const an = it.anchor;
+    const ax = cam.x + (an.x - an.y) * HW;
+    const ay = cam.y + (an.x + an.y) * HH - an.z * TILE_Z;
+    UI.setPromptAt(ax * view.scale, ay * view.scale, VIEW_W * view.scale, VIEW_H * view.scale);
   }
 
   // 准星

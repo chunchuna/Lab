@@ -72,6 +72,21 @@ export function setPrompt(text) {
   }
 }
 
+/**
+ * 把互动提示摆到互动物所在的位置（传入舞台内的 CSS 像素坐标）。
+ * 锚点是提示条的底边中点，即"浮在物体上方"，并夹住不让它出屏。
+ */
+export function setPromptAt(x, y, stageW, stageH) {
+  const w = el.prompt.offsetWidth;
+  const h = el.prompt.offsetHeight;
+  const m = 6;
+  let px = x - w / 2;
+  let py = y - h;
+  px = Math.max(m, Math.min(stageW - w - m, px));
+  py = Math.max(m, Math.min(stageH - h - m, py));
+  el.prompt.style.transform = `translate(${Math.round(px)}px, ${Math.round(py)}px)`;
+}
+
 export function toggleHelp() {
   el.help.classList.toggle('hidden');
 }
