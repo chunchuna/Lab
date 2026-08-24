@@ -893,3 +893,14 @@ window.__level = level;
 window.__inv = INV;
 window.__pad = pad;
 window.__render = render; // 供性能基准脚本直接测量渲染耗时
+/** 跳过标题与起床过场，供测试脚本快进（每个页面省 4 秒多） */
+window.__skipIntro = () => {
+  UI.hideTitle();
+  game.state = 'play';
+  game.phase = 9;
+  game.fade = 0;
+  game.player.x = PLAYER_START.x;
+  game.player.y = PLAYER_START.y;
+  SFX.initAudio();
+  setPadVisible(true);
+};
