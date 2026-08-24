@@ -155,6 +155,15 @@
       </div>
     </div>
   </div>
+
+  <!-- 竖屏提示。必须放在 #stage 外面：#stage 有 transform，会成为
+       position:fixed 的包含块，放里面会被它的 overflow:hidden 裁掉 -->
+  <div id="rotate">
+    <div class="rot-phone"></div>
+    <p class="rot-t">请横屏游玩</p>
+    <p class="rot-s">ROTATE YOUR DEVICE</p>
+  </div>
+
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

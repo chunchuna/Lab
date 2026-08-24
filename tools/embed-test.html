@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>iframe 嵌入测试（模拟 itch.io）</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1a1a1a; }
+  /* itch.io 就是把游戏放在一个固定尺寸的 iframe 里 */
+  #wrap { padding: 20px; }
+  iframe { display: block; border: 0; width: 960px; height: 540px; background: #000; }
+</style>
+</head>
+<body>
+  <div id="wrap"><iframe id="g" src="/index.html"></iframe></div>
+</body>
+</html>

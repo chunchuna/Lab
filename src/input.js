@@ -21,6 +21,8 @@ export function layout() {
   stageEl.style.height = h + 'px';
   // 手机屏幕物理尺寸小，UI 需要相对更大才点得中
   stageEl.style.fontSize = (scale * (touchMode ? 9.0 : 7.6)).toFixed(2) + 'px';
+  // 竖屏时画面会被压到很小，引导用户转横屏（浏览器里无法强制）
+  document.body.classList.toggle('portrait', touchMode && wh > ww * 1.05);
   const r = stageEl.getBoundingClientRect();
   view.scale = scale;
   view.left = r.left;
