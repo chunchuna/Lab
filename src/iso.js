@@ -23,21 +23,30 @@ export const RADIUS_SX = HW * Math.SQRT2;
 export const RADIUS_SY = HH * Math.SQRT2;
 export const ELLIPSE_SQUASH = HH / HW;
 
-/** 场景包围盒（未加相机偏移） */
-export const BOUNDS = {
-  x0: -ROOM_H * HW,
-  x1: ROOM_W * HW,
-  y0: -WALL_H * TILE_Z,
-  y1: (ROOM_W + ROOM_H) * HH,
-};
-BOUNDS.w = BOUNDS.x1 - BOUNDS.x0;
-BOUNDS.h = BOUNDS.y1 - BOUNDS.y0;
+/** 某个 w×h 区域的屏幕包围盒（未加相机偏移） */
+export function boundsFor(w, h, wallH = WALL_H) {
+  const b = {
+    x0: -h * HW,
+    x1: w * HW,
+    y0: -wallH * TILE_Z,
+    y1: (w + h) * HH,
+  };
+  b.w = b.x1 - b.x0;
+  b.h = b.y1 - b.y0;
+  return b;
+}
 
-/** 相机偏移：让整个房间居中 */
-export const CAM = {
-  x: Math.round(VIEW_W / 2 - (BOUNDS.x0 + BOUNDS.x1) / 2),
-  y: Math.round(VIEW_H / 2 - (BOUNDS.y0 + BOUNDS.y1) / 2) + 4,
-};
+/** 相机偏移：让整个区域在视口内居中。每个区域尺寸不同，各自算一份 */
+export function camFor(b) {
+  return {
+    x: Math.round(VIEW_W / 2 - (b.x0 + b.x1) / 2),
+    y: Math.round(VIEW_H / 2 - (b.y0 + b.y1) / 2) + 4,
+  };
+}
+
+/** 实验室房间（保留给旧代码引用） */
+export const BOUNDS = boundsFor(ROOM_W, ROOM_H);
+export const CAM = camFor(BOUNDS);
 
 /** 地板空间变换：1 瓦片 = TILE_W x TILE_W 的正方形 */
 export function floorTransform(g, ox, oy) {

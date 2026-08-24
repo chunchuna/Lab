@@ -861,6 +861,62 @@ export function drawLying(g, ox, oy, t) {
 }
 
 /* ------------------------------------------------------------------ *
+ * 火焰：按水平像素带堆叠，不用平滑渐变
+ * ------------------------------------------------------------------ */
+
+export function drawFlames(g, cx, cy, w, h, t, seed = 0) {
+  const bands = 14;
+  const cols = ['#3a1608', '#7a2c0a', '#c2560f', '#e8871c', '#f5bb3e', '#ffe6a0'];
+  for (let i = 0; i < bands; i++) {
+    const k = i / (bands - 1); // 0 底部 1 顶部
+    const wob = Math.sin(t * 7.3 + i * 0.9 + seed) * 0.5 + Math.sin(t * 11.7 + i * 1.7 + seed * 2) * 0.5;
+    const bw = w * (1 - k * 0.82) * (0.75 + 0.25 * (Math.sin(t * 9 + i + seed) * 0.5 + 0.5));
+    const bx = cx - bw / 2 + wob * w * 0.16 * k;
+    const by = cy - k * h;
+    const ci = Math.min(cols.length - 1, Math.round(k * (cols.length - 1) + (Math.sin(t * 13 + i * 2.3) > 0.5 ? 1 : 0)));
+    g.fillStyle = cols[ci];
+    g.fillRect(Math.round(bx), Math.round(by), Math.max(1, Math.round(bw)), Math.ceil(h / bands) + 1);
+  }
+  // 火星
+  for (let i = 0; i < 5; i++) {
+    const p = (t * 1.4 + i * 0.37 + seed) % 1;
+    const sx = cx + Math.sin(t * 5 + i * 2.1) * w * 0.5;
+    const sy = cy - h * (0.7 + p * 0.9);
+    g.fillStyle = p > 0.7 ? '#8a3a12' : '#f5bb3e';
+    g.fillRect(Math.round(sx), Math.round(sy), 1, 1);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 楼梯：逐级抬高的等距台阶
+ * ------------------------------------------------------------------ */
+
+export function makeStairs(steps, wTiles, dir, seed = 1) {
+  const rand = mulberry32(seed);
+  const rise = 0.26;
+  const run = 0.42;
+  const totalD = steps * run;
+  return makeProp(wTiles + 0.3, totalD + 0.4, steps * rise + 0.4, (g, ox, oy) => {
+    for (let i = 0; i < steps; i++) {
+      const z = i * rise;
+      const y0 = dir > 0 ? -totalD / 2 + i * run : totalD / 2 - (i + 1) * run;
+      const top = shade('#4a5054', 0.06 - i * 0.004);
+      isoBox(g, ox, oy, -wTiles / 2, y0, z, wTiles, run, rise, top, '#333a3d', '#272d30');
+      // 防滑条
+      const p = P(ox, oy, -wTiles / 2, y0, z + rise);
+      g.fillStyle = 'rgba(0,0,0,0.28)';
+      g.fillRect(p[0] + 2, p[1] + 1, wTiles * TILE_W * 0.5 - 4, 1.4);
+      if (rand() > 0.72) {
+        g.fillStyle = 'rgba(63,18,16,0.5)';
+        g.beginPath();
+        g.ellipse(p[0] + 4 + rand() * 14, p[1] + 3 + rand() * 4, 3 + rand() * 5, 2 + rand() * 3, 0, 0, 6.3);
+        g.fill();
+      }
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ *
  * HUD 图标
  * ------------------------------------------------------------------ */
 

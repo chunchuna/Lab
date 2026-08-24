@@ -1,5 +1,7 @@
 import { HW, HH, TILE_W, TILE_Z, ROOM_W, ROOM_H, WALL_H } from './config.js';
-import { BOUNDS, floorTransform, wallNorthTransform, wallWestTransform, wallNorthPt } from './iso.js';
+import {
+  BOUNDS, boundsFor, camFor, floorTransform, wallNorthTransform, wallWestTransform, wallNorthPt,
+} from './iso.js';
 import { makeCanvas, mulberry32, shade } from './util.js';
 import * as A from './art.js';
 
@@ -836,7 +838,43 @@ export function buildLevel() {
     { x: 0, y: 0, seg: wallSegs.w },
   ];
 
-  return { statics, sprites, props, colliders, segments, lights, fixtures, roomVis };
+  const bounds = boundsFor(ROOM_W, ROOM_H);
+  return {
+    id: 'lab',
+    name: '七号实验室',
+    w: ROOM_W,
+    h: ROOM_H,
+    wallH: WALL_H,
+    bounds,
+    cam: camFor(bounds),
+    statics,
+    sprites,
+    props,
+    colliders,
+    segments,
+    lights,
+    fixtures,
+    roomVis,
+    fg: null,
+    spawns: {
+      start: { x: PLAYER_START.x, y: PLAYER_START.y },
+      fromCorr: { x: DOOR_SPOT.x, y: 1.5 },
+    },
+    // 门被打穿后才通往走廊，链接由 main.js 按 doorBroken 状态启用
+    links: [
+      {
+        x: DOOR_SPOT.x,
+        y: DOOR_SPOT.y,
+        r: 1.9,
+        to: 'corr2',
+        spawn: 'fromLab',
+        text: '走出实验室',
+        short: '出去',
+        anchor: { x: DOOR_SPOT.x, y: 0.1, z: 2.55 },
+        needsDoorOpen: true,
+      },
+    ],
+  };
 }
 
 /** 火花发射点（世界坐标） */
