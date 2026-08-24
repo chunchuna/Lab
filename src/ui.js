@@ -79,7 +79,7 @@ export function toggleHelp() {
 export function setLosState(on) {
   if (el.los) {
     el.los.textContent = on ? '开' : '关';
-    el.los.style.color = on ? 'var(--cyan)' : '#6a7b7d';
+    el.los.style.opacity = on ? '1' : '0.55';
   }
 }
 
@@ -141,18 +141,17 @@ export function setCursor(mode) {
   cursorMode = mode;
   if (mode === 'cross') {
     el.cursorG.innerHTML = `
-      <circle cx="20" cy="20" r="9.5" fill="none" stroke="rgba(255,90,70,0.35)" stroke-width="1"/>
-      <g stroke="#ff7a63" stroke-width="1.6" stroke-linecap="round" id="ticks">
-        <line x1="20" y1="6" x2="20" y2="13"/>
-        <line x1="20" y1="27" x2="20" y2="34"/>
-        <line x1="6" y1="20" x2="13" y2="20"/>
-        <line x1="27" y1="20" x2="34" y2="20"/>
+      <g stroke="#ded8c8" stroke-width="2" id="ticks">
+        <line x1="20" y1="7" x2="20" y2="14"/>
+        <line x1="20" y1="26" x2="20" y2="33"/>
+        <line x1="7" y1="20" x2="14" y2="20"/>
+        <line x1="26" y1="20" x2="33" y2="20"/>
       </g>
-      <circle cx="20" cy="20" r="1.3" fill="#ffd9d0"/>`;
+      <rect x="19" y="19" width="2" height="2" fill="#ded8c8"/>`;
   } else {
     el.cursorG.innerHTML = `
-      <circle cx="20" cy="20" r="5" fill="none" stroke="rgba(160,230,225,0.55)" stroke-width="1"/>
-      <circle cx="20" cy="20" r="1.2" fill="rgba(200,245,240,0.9)"/>`;
+      <rect x="16" y="19.5" width="8" height="1.5" fill="rgba(222,216,200,0.7)"/>
+      <rect x="19.5" y="16" width="1.5" height="8" fill="rgba(222,216,200,0.7)"/>`;
   }
 }
 
@@ -219,7 +218,8 @@ export function updateScan(dt) {
     if (s.err) d.className = 'e';
     d.textContent = s.log;
     el.scanLog.appendChild(d);
-    el.scanLog.scrollTop = el.scanLog.scrollHeight;
+    // 只保留最近几行：滚动会把顶部那行切成半截，看起来像渲染错误
+    while (el.scanLog.children.length > 6) el.scanLog.removeChild(el.scanLog.firstChild);
     if (s.fail) {
       scan.failed = true;
       el.scan.classList.add('err');
@@ -296,27 +296,13 @@ function drawScanFace(t, failed) {
     H = 330;
   g.clearRect(0, 0, W, H);
 
-  const acc = failed ? '#ff4b3e' : '#79e3dc';
-  const accDim = failed ? 'rgba(255,75,62,0.28)' : 'rgba(121,227,220,0.24)';
+  const acc = '#ded8c8';
+  const accDim = 'rgba(222,216,200,0.3)';
   const jit = failed ? (Math.random() - 0.5) * 3.2 : 0;
 
   // 背景
-  g.fillStyle = '#030809';
+  g.fillStyle = '#16161a';
   g.fillRect(0, 0, W, H);
-  g.strokeStyle = failed ? 'rgba(255,75,62,0.06)' : 'rgba(121,227,220,0.06)';
-  g.lineWidth = 1;
-  for (let x = 0; x < W; x += 22) {
-    g.beginPath();
-    g.moveTo(x, 0);
-    g.lineTo(x, H);
-    g.stroke();
-  }
-  for (let y = 0; y < H; y += 22) {
-    g.beginPath();
-    g.moveTo(0, y);
-    g.lineTo(W, y);
-    g.stroke();
-  }
 
   g.save();
   g.translate(jit, jit * 0.6);
@@ -325,15 +311,11 @@ function drawScanFace(t, failed) {
   if (t > 0.7) {
     const a = Math.min(1, (t - 0.7) / 0.6);
     g.globalAlpha = a * 0.55;
-    const grd = g.createRadialGradient(220, 150, 10, 220, 150, 120);
-    grd.addColorStop(0, 'rgba(120,150,155,0.5)');
-    grd.addColorStop(1, 'rgba(20,30,32,0)');
-    g.fillStyle = grd;
+    g.fillStyle = 'rgba(222,216,200,0.14)';
     g.beginPath();
     g.ellipse(220, 150, 66, 90, 0, 0, 6.3);
     g.fill();
     // 肩
-    g.fillStyle = 'rgba(60,80,84,0.4)';
     g.beginPath();
     g.ellipse(220, 320, 120, 62, 0, 0, 6.3);
     g.fill();
@@ -399,21 +381,16 @@ function drawScanFace(t, failed) {
     }
   }
 
-  // 扫描线
+  // 扫描线：一条实线，不做渐变拖尾
   if (t > 1.0 && t < 6.0) {
     const sy = 40 + ((t * 105) % 250);
-    const grd = g.createLinearGradient(0, sy - 22, 0, sy + 6);
-    grd.addColorStop(0, failed ? 'rgba(255,75,62,0)' : 'rgba(121,227,220,0)');
-    grd.addColorStop(1, failed ? 'rgba(255,75,62,0.26)' : 'rgba(121,227,220,0.22)');
-    g.fillStyle = grd;
-    g.fillRect(140, sy - 22, 160, 28);
-    g.fillStyle = failed ? 'rgba(255,140,120,0.9)' : 'rgba(190,255,250,0.9)';
-    g.fillRect(140, sy, 160, 1.4);
+    g.fillStyle = acc;
+    g.fillRect(140, sy, 160, 2);
   }
 
-  // 失败叠加
+  // 失败叠加：反色色块 + 划叉，不用红色
   if (failed) {
-    g.strokeStyle = 'rgba(255,75,62,0.85)';
+    g.strokeStyle = acc;
     g.lineWidth = 3;
     g.beginPath();
     g.moveTo(150, 58);
@@ -421,30 +398,27 @@ function drawScanFace(t, failed) {
     g.moveTo(290, 58);
     g.lineTo(150, 258);
     g.stroke();
-    g.fillStyle = 'rgba(255,75,62,0.14)';
-    for (let i = 0; i < 12; i++) {
-      const yy = Math.random() * H;
-      g.fillRect(0, yy, W, 1 + Math.random() * 5);
-    }
-    g.fillStyle = '#ff4b3e';
-    g.font = 'bold 22px monospace';
-    g.fillText('NO MATCH', 152, 300);
+    g.fillStyle = acc;
+    g.fillRect(148, 284, 148, 26);
+    g.fillStyle = '#24242a';
+    g.font = 'bold 20px monospace';
+    g.fillText('NO MATCH', 158, 303);
   }
 
   g.restore();
 
   // 静电噪点
-  g.globalAlpha = 0.05 + (failed ? 0.1 : 0.02);
-  for (let i = 0; i < 220; i++) {
-    g.fillStyle = Math.random() > 0.5 ? '#fff' : '#000';
+  g.globalAlpha = failed ? 0.1 : 0.04;
+  for (let i = 0; i < 180; i++) {
+    g.fillStyle = Math.random() > 0.5 ? '#ded8c8' : '#000';
     g.fillRect(Math.random() * W, Math.random() * H, 1.5, 1.5);
   }
   g.globalAlpha = 1;
 
   // 角标信息
-  g.fillStyle = failed ? 'rgba(255,75,62,0.75)' : 'rgba(121,227,220,0.6)';
+  g.fillStyle = 'rgba(222,216,200,0.6)';
   g.font = '10px monospace';
-  g.fillText('CAM-01  IR+RGB  60FPS', 8, 16);
-  g.fillText(failed ? 'STATE: FAULT' : 'STATE: SCANNING', 8, 322);
+  g.fillText('CAM-01', 8, 16);
+  g.fillText(failed ? '故障' : '扫描中', 8, 322);
   g.fillText((t * 1000).toFixed(0).padStart(6, '0') + 'ms', 372, 322);
 }

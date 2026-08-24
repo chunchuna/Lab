@@ -81,12 +81,10 @@ initInput(stage, (k) => {
   else if (game.bagOpen) {
     if (k === '1') equipToggle('flashlight');
     else if (k === '2') equipToggle('pistol');
-    else if (k === 'q') doSwapHands();
     else if (k === 'f') doToggleFlash();
   } else if (k === 'e') tryInteract();
   else if (k === '1') equipToggle('flashlight');
   else if (k === '2') equipToggle('pistol');
-  else if (k === 'q') doSwapHands();
   else if (k === 'f') doToggleFlash();
   else if (k === 'r') startReload();
 });
@@ -106,6 +104,8 @@ function doAction(act) {
   else if (act === 'reload') startReload();
   else if (act === 'flash') doToggleFlash();
 }
+
+/* 左右手互换的快捷键已移除：实际用处不大，背包里把物品拖到另一只手即可。 */
 
 function startWake() {
   UI.hideTitle();
@@ -148,12 +148,6 @@ function equipToggle(item) {
   if (r === 'unequipped') UI.msg('收起了' + INV.ITEMS[item].name + '。');
   else if (r === 'left' || r === 'right') UI.msg((r === 'left' ? '左手' : '右手') + '装备：' + INV.ITEMS[item].name, 'good');
   else if (r === 'full') UI.msg('背包已满。', 'warn');
-}
-function doSwapHands() {
-  if (!inv.left && !inv.right) return;
-  INV.swapHands();
-  SFX.sfxClick();
-  UI.msg('左右手互换。');
 }
 function doToggleFlash() {
   if (!INV.has('flashlight')) return;

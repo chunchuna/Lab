@@ -864,33 +864,11 @@ export function drawPortrait(g, W, H, o = {}) {
   g.translate((W - 120 * s) / 2, (H - 200 * s) / 2);
   g.scale(s, s);
 
-  // 背景
-  const bg = g.createLinearGradient(0, 0, 0, 200);
-  bg.addColorStop(0, '#0b1416');
-  bg.addColorStop(1, '#050a0b');
-  g.fillStyle = bg;
-  g.fillRect(0, 0, 120, 200);
-  g.strokeStyle = 'rgba(121,227,220,0.055)';
-  g.lineWidth = 1;
-  for (let x = 0; x <= 120; x += 10) {
-    g.beginPath();
-    g.moveTo(x, 0);
-    g.lineTo(x, 200);
-    g.stroke();
-  }
-  for (let y = 0; y <= 200; y += 10) {
-    g.beginPath();
-    g.moveTo(0, y);
-    g.lineTo(120, y);
-    g.stroke();
-  }
-  const spot = g.createRadialGradient(60, 80, 8, 60, 90, 78);
-  spot.addColorStop(0, 'rgba(121,227,220,0.11)');
-  spot.addColorStop(1, 'rgba(121,227,220,0)');
-  g.fillStyle = spot;
+  // 背景：一块纯色，不加网格和光斑
+  g.fillStyle = '#1b1b20';
   g.fillRect(0, 0, 120, 200);
   // 地面阴影
-  g.fillStyle = 'rgba(0,0,0,0.5)';
+  g.fillStyle = 'rgba(0,0,0,0.45)';
   g.beginPath();
   g.ellipse(60, 192, 30, 6, 0, 0, 6.3);
   g.fill();

@@ -134,13 +134,6 @@ export function quickEquip(id) {
   return hand;
 }
 
-export function swapHands() {
-  const t = inv.left;
-  inv.left = inv.right;
-  inv.right = t;
-  changed();
-}
-
 export function toggleFlash() {
   inv.flashOn = !inv.flashOn;
   changed();

@@ -12,7 +12,6 @@
     <canvas id="game" width="640" height="360"></canvas>
 
     <div id="hud">
-      <div id="scanlines"></div>
       <div id="vignette"></div>
 
       <!-- 目标 -->
@@ -28,17 +27,18 @@
       <div id="prompt" class="hidden">
         <span class="key">E</span><span id="prompt-text"></span>
       </div>
+      <!-- 提示：按键写成普通文字，不做键帽 -->
 
       <!-- 左下：双手装备 -->
       <div id="hands">
         <div class="hand" id="hand-left">
           <div class="slot"><canvas class="icon" width="48" height="48"></canvas></div>
-          <div class="label">左手 <span class="key small">1</span></div>
+          <div class="label">左手 1</div>
           <div class="item">空</div>
         </div>
         <div class="hand" id="hand-right">
           <div class="slot"><canvas class="icon" width="48" height="48"></canvas></div>
-          <div class="label">右手 <span class="key small">2</span></div>
+          <div class="label">右手 2</div>
           <div class="item">空</div>
         </div>
       </div>
@@ -53,28 +53,17 @@
         <div id="reload-bar"><i></i></div>
       </div>
 
-      <!-- 操作说明 -->
+      <!-- 操作说明：一行，只列不言自明之外的按键 -->
       <div id="help">
-        <div class="help-title">操作 <span class="key small">H</span> 隐藏</div>
-        <ul>
-          <li><span class="key small">W A S D</span> 移动</li>
-          <li><span class="key small">E</span> 互动</li>
-          <li><span class="key small">I</span> 打开背包（拖动装备）</li>
-          <li><span class="key small">1</span> / <span class="key small">2</span> 快速装备手电 / 手枪</li>
-          <li><span class="key small">Q</span> 左右手互换</li>
-          <li><span class="key small">F</span> 手电筒开关</li>
-          <li><span class="key small">鼠标左键</span> 开枪 · <span class="key small">R</span> 换弹</li>
-          <li><span class="key small">V</span> 视线遮挡 <b id="los-state">关</b></li>
-        </ul>
+        <span>I 背包</span><span>F 手电</span><span>R 换弹</span><span>V 视线 <b id="los-state">关</b></span><span>H 隐藏</span>
       </div>
 
       <!-- 背包 -->
       <div id="bag" class="hidden">
         <div class="bag-panel">
           <div class="bag-head">
-            <span class="dot"></span>
-            <span class="bag-title-t">装 备 与 背 包</span>
-            <span class="bag-close"><span class="key small">I</span> 关闭</span>
+            <span class="bag-title-t">装备与背包</span>
+            <span class="bag-close">I 关闭</span>
           </div>
           <div class="bag-body">
             <div class="bag-portrait">
@@ -109,9 +98,7 @@
       <div id="scan" class="hidden">
         <div class="scan-panel">
           <div class="scan-head">
-            <span class="dot"></span>
-            <span class="scan-title">BIO-ID 门禁终端 &nbsp;/&nbsp; FACIAL RECOGNITION</span>
-            <span class="scan-node">NODE&nbsp;L7-D01</span>
+            <span class="scan-title">门禁人脸识别终端</span>
           </div>
           <div class="scan-body">
             <canvas id="scan-canvas" width="440" height="330"></canvas>
@@ -137,7 +124,7 @@
           <h1>LAB&nbsp;7</h1>
           <div class="t-line"></div>
           <p class="t-desc">通讯中断 · 主电源不稳定 · 门禁离线</p>
-          <p class="t-key">按 <span class="key">任意键</span> 醒来</p>
+          <p class="t-key">按任意键醒来</p>
         </div>
       </div>
 
