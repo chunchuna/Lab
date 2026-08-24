@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>LAB 7 — 隔离实验室</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" width="640" height="360"></canvas>
+
+    <div id="hud">
+      <div id="scanlines"></div>
+      <div id="vignette"></div>
+
+      <!-- 目标 -->
+      <div id="objective">
+        <span class="tag">目标</span>
+        <span id="objective-text">离开这个房间</span>
+      </div>
+
+      <!-- 字幕 / 提示消息 -->
+      <div id="messages"></div>
+
+      <!-- 互动提示 -->
+      <div id="prompt" class="hidden">
+        <span class="key">E</span><span id="prompt-text"></span>
+      </div>
+
+      <!-- 左下：双手装备 -->
+      <div id="hands">
+        <div class="hand" id="hand-left">
+          <div class="slot"><canvas class="icon" width="48" height="48"></canvas></div>
+          <div class="label">左手 <span class="key small">1</span></div>
+          <div class="item">空</div>
+        </div>
+        <div class="hand" id="hand-right">
+          <div class="slot"><canvas class="icon" width="48" height="48"></canvas></div>
+          <div class="label">右手 <span class="key small">2</span></div>
+          <div class="item">空</div>
+        </div>
+      </div>
+
+      <!-- 右下：弹药 -->
+      <div id="ammo" class="hidden">
+        <div id="ammo-mag"></div>
+        <div id="ammo-row">
+          <span id="ammo-count">6</span><span class="sep">/</span><span id="ammo-spare">2</span>
+          <span class="unit">备用弹匣</span>
+        </div>
+        <div id="reload-bar"><i></i></div>
+      </div>
+
+      <!-- 操作说明 -->
+      <div id="help">
+        <div class="help-title">操作 <span class="key small">H</span> 隐藏</div>
+        <ul>
+          <li><span class="key small">W A S D</span> 移动</li>
+          <li><span class="key small">E</span> 互动</li>
+          <li><span class="key small">I</span> 打开背包（拖动装备）</li>
+          <li><span class="key small">1</span> / <span class="key small">2</span> 快速装备手电 / 手枪</li>
+          <li><span class="key small">Q</span> 左右手互换</li>
+          <li><span class="key small">F</span> 手电筒开关</li>
+          <li><span class="key small">鼠标左键</span> 开枪 · <span class="key small">R</span> 换弹</li>
+          <li><span class="key small">V</span> 视线遮挡 <b id="los-state">关</b></li>
+        </ul>
+      </div>
+
+      <!-- 背包 -->
+      <div id="bag" class="hidden">
+        <div class="bag-panel">
+          <div class="bag-head">
+            <span class="dot"></span>
+            <span class="bag-title-t">装 备 与 背 包</span>
+            <span class="bag-close"><span class="key small">I</span> 关闭</span>
+          </div>
+          <div class="bag-body">
+            <div class="bag-portrait">
+              <div class="portrait-wrap">
+                <canvas id="portrait"></canvas>
+                <div class="hand-slot left" data-slot="left">
+                  <canvas class="icon" width="56" height="56"></canvas>
+                  <span class="count"></span>
+                  <span class="hs-label">左手 <i>1</i></span>
+                </div>
+                <div class="hand-slot right" data-slot="right">
+                  <canvas class="icon" width="56" height="56"></canvas>
+                  <span class="count"></span>
+                  <span class="hs-label">右手 <i>2</i></span>
+                </div>
+              </div>
+              <div class="portrait-name">研究员 · 未知身份<span>SUBJECT-07</span></div>
+            </div>
+            <div class="bag-side">
+              <div class="bag-sec">背包 <em>把物品拖到左手 / 右手格子装备</em></div>
+              <div class="bag-grid" id="bag-grid"></div>
+              <div class="bag-info" id="bag-info">
+                <div class="bi-head"><span class="bi-name">—</span><span class="bi-tag"></span></div>
+                <div class="bi-desc">拖动物品到立绘两侧的「左手 / 右手」格子即可装备。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 人脸识别终端 -->
+      <div id="scan" class="hidden">
+        <div class="scan-panel">
+          <div class="scan-head">
+            <span class="dot"></span>
+            <span class="scan-title">BIO-ID 门禁终端 &nbsp;/&nbsp; FACIAL RECOGNITION</span>
+            <span class="scan-node">NODE&nbsp;L7-D01</span>
+          </div>
+          <div class="scan-body">
+            <canvas id="scan-canvas" width="440" height="330"></canvas>
+            <div class="scan-side">
+              <div class="row"><b>SUBJECT</b><span id="scan-subject">采集中…</span></div>
+              <div class="row"><b>LANDMARK</b><span id="scan-marks">0 / 68</span></div>
+              <div class="row"><b>MATCH</b><span id="scan-match">--.-%</span></div>
+              <div class="row"><b>DB LINK</b><span id="scan-db">连接中…</span></div>
+              <div class="scan-log" id="scan-log"></div>
+            </div>
+          </div>
+          <div class="scan-foot">
+            <div class="scan-bar"><i id="scan-bar-fill"></i></div>
+            <div class="scan-status" id="scan-status">正在初始化传感器…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 标题 -->
+      <div id="title">
+        <div class="t-wrap">
+          <div class="t-sub">SECTOR 7 · CONTAINMENT WING</div>
+          <h1>LAB&nbsp;7</h1>
+          <div class="t-line"></div>
+          <p class="t-desc">通讯中断 · 主电源不稳定 · 门禁离线</p>
+          <p class="t-key">按 <span class="key">任意键</span> 醒来</p>
+        </div>
+      </div>
+
+      <div id="cursor"><svg viewBox="0 0 40 40" width="40" height="40"><g id="cursor-g"></g></svg></div>
+    </div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "lab7-isometric",
+  "version": "1.0.0",
+  "description": "LAB 7 — 等距 2D 生存解谜原型：真实视线/光线遮挡、手电筒、手枪",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "puppeteer-core": "^25.8.0"
+  }
+}
