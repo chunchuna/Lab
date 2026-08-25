@@ -1276,6 +1276,181 @@ function drawPortraitItem(g, x, y, id, o) {
   g.restore();
 }
 
+/* ------------------------------------------------------------------ *
+ * 半身立绘（头 + 肩，下缘裁切）——人脸识别摄像头里看到的主角
+ * ------------------------------------------------------------------ */
+
+/** 设计空间 76x96；五官坐标同时供扫描界面对齐特征点，改这里两边一起动 */
+export const PORTRAIT_BUST = {
+  w: 76,
+  h: 96,
+  head: { x: 23, y: 10, w: 30, h: 40 },
+  faceCx: 38,
+  chinY: 50,
+  browY: 25,
+  eyeY: 31,
+  eyeDx: 6.5,
+  eyeRx: 4.5,
+  eyeRy: 3,
+  noseTop: 28,
+  noseBaseY: 41,
+  mouthY: 44,
+  mouthRx: 6,
+  mouthRy: 2.5,
+};
+
+export function drawPortraitBust(g, x, y, s) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+
+  const R = (rx, ry, w, h, c) => {
+    g.fillStyle = c;
+    g.fillRect(rx, ry, w, h);
+  };
+
+  // 脖子（先画，肩和头会盖住两端）
+  R(32, 44, 12, 18, PAL.skin);
+  R(40, 44, 4, 18, PAL.skinD);
+  R(32, 44, 12, 5, 'rgba(0,0,0,0.3)');
+
+  // 肩：逐段外扩的横条，最后一段画到设计空间以下由画面裁掉
+  const torso = new Path2D();
+  for (const [by, bh, bx, bw] of [
+    [58, 3, 15, 46],
+    [61, 3, 9, 58],
+    [64, 4, 1, 74],
+    [68, 34, -9, 94],
+  ])
+    torso.rect(bx, by, bw, bh);
+  g.fillStyle = PAL.coat;
+  g.fill(torso);
+
+  g.save();
+  g.clip(torso);
+  R(46, 56, 50, 48, PAL.coatShade);
+  R(-10, 56, 22, 48, 'rgba(0,0,0,0.14)');
+  R(15, 58, 46, 1.5, '#eef2f3');
+  // 衬衫领口
+  g.fillStyle = '#39464d';
+  g.beginPath();
+  g.moveTo(31, 56);
+  g.lineTo(45, 56);
+  g.lineTo(38, 78);
+  g.closePath();
+  g.fill();
+  // 大褂翻领
+  g.fillStyle = '#e2e8ea';
+  g.beginPath();
+  g.moveTo(27, 56);
+  g.lineTo(38, 76);
+  g.lineTo(34, 56);
+  g.closePath();
+  g.fill();
+  g.beginPath();
+  g.moveTo(49, 56);
+  g.lineTo(38, 76);
+  g.lineTo(42, 56);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = PAL.coatDark;
+  g.lineWidth = 0.8;
+  g.beginPath();
+  g.moveTo(34, 57);
+  g.lineTo(38, 77);
+  g.lineTo(38, 96);
+  g.stroke();
+  // 血渍
+  R(18, 70, 7, 3, 'rgba(74,26,22,0.45)');
+  R(20, 73, 4, 2, 'rgba(74,26,22,0.35)');
+  R(56, 78, 5, 2, 'rgba(60,58,44,0.3)');
+  g.restore();
+
+  // 耳
+  R(21, 26, 2, 9, PAL.skin);
+  R(53, 26, 2, 9, PAL.skinD);
+
+  // 头：横条堆出圆角轮廓
+  const head = new Path2D();
+  for (const [by, bh, bx, bw] of [
+    [10, 3, 26, 24],
+    [13, 3, 24, 28],
+    [16, 28, 23, 30],
+    [44, 3, 24, 28],
+    [47, 3, 27, 22],
+  ])
+    head.rect(bx, by, bw, bh);
+  g.fillStyle = PAL.skin;
+  g.fill(head);
+
+  g.save();
+  g.clip(head);
+  // 受光：右侧一整条暗面
+  R(44, 10, 9, 40, PAL.skinD);
+  R(51, 10, 2, 40, 'rgba(0,0,0,0.16)');
+  R(23, 41, 30, 9, 'rgba(120,80,58,0.12)');
+  // 眉
+  R(27, 24, 9, 2, '#3a2a1e');
+  R(41, 24, 9, 2, '#3a2a1e');
+  R(28, 23, 5, 1, '#3a2a1e');
+  R(44, 23, 5, 1, '#3a2a1e');
+  // 眼
+  R(27, 27, 9, 1, 'rgba(70,44,34,0.25)');
+  R(27, 28, 9, 6, '#e6ecec');
+  R(41, 28, 9, 6, '#cdd4d4');
+  R(30, 29, 4, 4, '#2a3b42');
+  R(44, 29, 4, 4, '#22323a');
+  R(31, 30, 2, 2, '#101a1e');
+  R(45, 30, 2, 2, '#0d161a');
+  R(30, 29, 1, 1, '#dff0f2');
+  R(44, 29, 1, 1, '#c9dcdf');
+  R(27, 34, 9, 1, 'rgba(0,0,0,0.22)');
+  R(41, 34, 9, 1, 'rgba(0,0,0,0.22)');
+  // 黑眼圈
+  R(27, 35, 9, 2, 'rgba(60,40,40,0.22)');
+  R(41, 35, 9, 2, 'rgba(60,40,40,0.22)');
+  // 鼻
+  R(39, 28, 2, 11, PAL.skinD);
+  R(35, 38, 7, 3, PAL.skin);
+  R(39, 38, 3, 3, PAL.skinD);
+  R(35, 40, 2, 1, 'rgba(0,0,0,0.3)');
+  R(40, 40, 2, 1, 'rgba(0,0,0,0.34)');
+  // 嘴
+  R(33, 42, 10, 1, 'rgba(0,0,0,0.12)');
+  R(32, 43, 12, 2, '#8a5a4c');
+  R(33, 45, 10, 1, 'rgba(0,0,0,0.16)');
+  // 胡茬
+  R(28, 40, 20, 9, 'rgba(50,40,32,0.18)');
+  // 额头伤口
+  R(27, 20, 7, 2, 'rgba(120,36,30,0.75)');
+  R(28, 22, 4, 1, 'rgba(90,26,22,0.6)');
+  g.restore();
+
+  // 头发：贴着头顶的横条 + 鬓角 + 乱翘的碎发
+  g.fillStyle = PAL.hair;
+  for (const [by, bh, bx, bw] of [
+    [6, 2, 30, 16],
+    [8, 2, 26, 24],
+    [10, 3, 24, 28],
+    [13, 4, 23, 30],
+    [17, 10, 23, 3],
+    [17, 10, 50, 3],
+  ])
+    g.fillRect(bx, by, bw, bh);
+  R(30, 6, 12, 2, '#5c452f');
+  R(26, 9, 10, 2, '#5c452f');
+  // 碎发翘起
+  R(28, 4, 3, 2, PAL.hair);
+  R(41, 3, 2, 3, PAL.hair);
+  R(47, 6, 3, 2, PAL.hair);
+  // 刘海：留出额头，只压住发际线一带
+  R(24, 17, 5, 3, PAL.hair);
+  R(34, 17, 4, 2, PAL.hair);
+  R(45, 17, 6, 3, PAL.hair);
+
+  g.restore();
+}
+
 export function drawMagIcon(g, w, h) {
   g.clearRect(0, 0, w, h);
   g.save();

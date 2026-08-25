@@ -1,4 +1,4 @@
-import { drawPistolIcon, drawFlashIcon } from './art.js';
+import { drawPistolIcon, drawFlashIcon, drawPortraitBust, PORTRAIT_BUST } from './art.js';
 import { MAG_SIZE } from './config.js';
 import * as SFX from './audio.js';
 
@@ -278,33 +278,53 @@ export function updateScan(dt) {
 }
 
 /* --- 人脸网格绘制 --- */
+
+// 半身立绘在 440x330 摄像画面里的位置：整数缩放，像素边界不会糊
+const BUST = { x: 68, y: 30, s: 4 };
+const BX = (u) => BUST.x + u * BUST.s;
+const BY = (u) => BUST.y + u * BUST.s;
+
 let landmarks = null;
 function buildLandmarks() {
+  const B = PORTRAIT_BUST;
   const pts = [];
-  const cx = 220,
-    cy = 158;
-  // 下颌轮廓
+  const cx = BX(B.faceCx);
+  // 下颌轮廓：从眉线绕到下巴
+  const jawCy = BY(B.browY);
+  const jawRy = BY(B.chinY) - jawCy;
+  const jawRx = (B.head.w / 2) * BUST.s;
   for (let i = 0; i <= 16; i++) {
     const a = Math.PI * (0.08 + (i / 16) * 0.84);
-    pts.push({ x: cx - Math.cos(a) * 62, y: cy + Math.sin(a) * 86, g: 'jaw' });
+    pts.push({ x: cx - Math.cos(a) * jawRx, y: jawCy + Math.sin(a) * jawRy, g: 'jaw' });
   }
   // 眉毛
-  for (let i = 0; i < 5; i++) pts.push({ x: cx - 44 + i * 11, y: cy - 34 - Math.sin((i / 4) * 3.14) * 6, g: 'brow' });
-  for (let i = 0; i < 5; i++) pts.push({ x: cx + 2 + i * 11, y: cy - 34 - Math.sin((i / 4) * 3.14) * 6, g: 'brow' });
-  // 鼻梁
-  for (let i = 0; i < 4; i++) pts.push({ x: cx, y: cy - 22 + i * 13, g: 'nose' });
-  for (let i = 0; i < 5; i++) pts.push({ x: cx - 16 + i * 8, y: cy + 34, g: 'nose' });
+  for (const ox of [-11, 3]) {
+    for (let i = 0; i < 5; i++) {
+      pts.push({ x: BX(B.faceCx + ox + i * 2.25), y: BY(B.browY) - Math.sin((i / 4) * 3.14) * 3, g: 'brow' });
+    }
+  }
+  // 鼻梁 + 鼻翼
+  for (let i = 0; i < 4; i++) pts.push({ x: cx, y: BY(B.noseTop + i * 4), g: 'nose' });
+  for (let i = 0; i < 5; i++) pts.push({ x: BX(B.faceCx - 4 + i * 2), y: BY(B.noseBaseY), g: 'nose' });
   // 眼睛
-  for (const ex of [-26, 26]) {
+  for (const ex of [-B.eyeDx, B.eyeDx]) {
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
-      pts.push({ x: cx + ex + Math.cos(a) * 14, y: cy - 12 + Math.sin(a) * 6.5, g: 'eye' });
+      pts.push({
+        x: BX(B.faceCx + ex) + Math.cos(a) * B.eyeRx * BUST.s,
+        y: BY(B.eyeY) + Math.sin(a) * B.eyeRy * BUST.s,
+        g: 'eye',
+      });
     }
   }
   // 嘴
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2;
-    pts.push({ x: cx + Math.cos(a) * 24, y: cy + 62 + Math.sin(a) * 9, g: 'mouth' });
+    pts.push({
+      x: cx + Math.cos(a) * B.mouthRx * BUST.s,
+      y: BY(B.mouthY) + Math.sin(a) * B.mouthRy * BUST.s,
+      g: 'mouth',
+    });
   }
   return pts;
 }
@@ -327,19 +347,19 @@ function drawScanFace(t, failed) {
   g.save();
   g.translate(jit, jit * 0.6);
 
-  // 摄像头噪点头像轮廓（"看到的人"）
+  // 摄像头拍到的人：主角半身立绘，肩部由画面下缘裁掉
   if (t > 0.7) {
-    const a = Math.min(1, (t - 0.7) / 0.6);
-    g.globalAlpha = a * 0.55;
-    g.fillStyle = 'rgba(222,216,200,0.14)';
+    g.save();
     g.beginPath();
-    g.ellipse(220, 150, 66, 90, 0, 0, 6.3);
-    g.fill();
-    // 肩
-    g.beginPath();
-    g.ellipse(220, 320, 120, 62, 0, 0, 6.3);
-    g.fill();
+    g.rect(0, 0, W, H);
+    g.clip();
+    g.globalAlpha = Math.min(1, (t - 0.7) / 0.6);
+    drawPortraitBust(g, BUST.x, BUST.y, BUST.s);
     g.globalAlpha = 1;
+    // 压暗成监控画面的曝光
+    g.fillStyle = 'rgba(20,20,26,0.4)';
+    g.fillRect(0, 0, W, H);
+    g.restore();
   }
 
   // 对焦框
