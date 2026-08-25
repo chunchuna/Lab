@@ -112,6 +112,8 @@ html, body {
   will-change: transform;
 }
 
+#prompt.nokey .kbd { display: none; }
+
 /* 键帽：亮底暗字的小方块，只用两个颜色表现"这是一个键" */
 .kbd {
   display: inline-block;

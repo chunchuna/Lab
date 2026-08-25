@@ -111,10 +111,14 @@ await wait(1400);
 console.log('进楼梯间        ', JSON.stringify(await st()));
 await shot('05-stair');
 
-/* 8. 上三层 */
-await at(6.6, 1.3);
+/* 8. 上三层：走上楼梯，到顶自动换层（不再按 E） */
+await at(6.9, 3.4);
 await wait(300);
-await press('e');
+await page.keyboard.down('w');
+await page.keyboard.down('d');
+await wait(1400);
+await page.keyboard.up('w');
+await page.keyboard.up('d');
 await wait(1400);
 console.log('上三层          ', JSON.stringify(await st()));
 await shot('06-corr3');

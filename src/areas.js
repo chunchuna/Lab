@@ -440,8 +440,21 @@ function buildStair() {
      出生点和梯段落脚点都必须留在碰撞体外面，否则一传送进来就卡死。 */
   const up = A.makeStairsUp(6, 2.3, 11);
   const down = A.makeStairsDown(2.3, 2.6, 12);
-  a.props.push({ id: 'stairUp', s: up, x: 6.9, y: 2.3, col: [2.5, 3.3], occ: null });
-  a.props.push({ id: 'stairDown', s: down, x: 6.9, y: 5.9, col: [2.5, 2.8], occ: null });
+  // 楼梯不设碰撞体，改成高度场：玩家可以真正踩上去
+  a.props.push({ id: 'stairUp', s: up, x: 6.9, y: 2.3, col: null, occ: null });
+  a.props.push({ id: 'stairDown', s: down, x: 6.9, y: 5.9, col: null, occ: null });
+  a.ramps = [
+    // 上行：越靠 -y 越高
+    { x0: 5.75, y0: 0.9, x1: 8.05, y1: 3.85, hi: { y: 0.9, z: 1.8 }, lo: { y: 3.85, z: 0 } },
+    // 下行井：越靠 +y 越低
+    { x0: 5.75, y0: 4.6, x1: 8.05, y1: 7.2, hi: { y: 4.6, z: 0 }, lo: { y: 7.2, z: -1.2 } },
+  ];
+  /* 走到梯段两端自动换层。按"到达高度"判定而不是画一个方框：WASD 在等距
+     下是斜向移动，玩家沿梯段往上走时 x 也在变，用方框很容易走偏而触发不了。 */
+  a.triggers = [
+    { zAbove: 1.55, to: 'corr3', spawn: 'fromStair' },
+    { zBelow: -0.95, to: 'corr1', spawn: 'fromStair' },
+  ];
   a.props.push({ id: 'rub1', s: A.makeRubble(501), x: 2.4, y: 6.2, col: null, occ: null });
   a.props.push({ id: 'rub2', s: A.makeRubble(502), x: 3.4, y: 2.6, col: null, occ: null });
   a.props.push({ id: 'crate', s: A.makeCrate(0.85, 503), x: 1.1, y: 7.0, col: [0.85, 0.85], occ: [0.85, 0.85, 0.8] });
@@ -462,14 +475,11 @@ function buildStair() {
     x: 2.1, y: 0.6, r: 1.6, to: 'corr2', spawn: 'fromStair',
     text: '回到二层走廊', short: '二层', anchor: { x: 2.1, y: 0.1, z: 2.4 },
   });
-  a.links.push({
-    x: 5.5, y: 2.3, r: 1.7, to: 'corr3', spawn: 'fromStair',
-    text: '上楼 · 三层', short: '上楼', anchor: { x: 6.6, y: 1.2, z: 2.9 },
-  });
-  a.links.push({
-    x: 5.5, y: 5.9, r: 1.7, to: 'corr1', spawn: 'fromStair',
-    text: '下楼 · 一层', short: '下楼', anchor: { x: 6.6, y: 5.9, z: 1.1 },
-  });
+  // 楼梯改成走上去就换层，所以这里只留一个纯提示（不可交互）
+  a.hints = [
+    { x: 6.9, y: 3.2, r: 2.0, text: '往上走 · 三层', anchor: { x: 6.9, y: 2.6, z: 1.9 } },
+    { x: 6.9, y: 5.2, r: 1.8, text: '往下走 · 一层', anchor: { x: 6.9, y: 5.2, z: 0.9 } },
+  ];
   return closeArea(a);
 }
 

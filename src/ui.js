@@ -63,12 +63,14 @@ export function msg(text, type = '') {
   setTimeout(() => d.remove(), 4200);
 }
 
-export function setPrompt(text) {
+export function setPrompt(text, isHint) {
   if (!text) {
     el.prompt.classList.add('hidden');
   } else {
     el.promptText.textContent = text;
     el.prompt.classList.remove('hidden');
+    // 纯提示（比如"往上走"）不需要显示按键，它靠走过去触发
+    el.prompt.classList.toggle('nokey', !!isHint);
   }
 }
 

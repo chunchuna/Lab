@@ -26,19 +26,20 @@ export class Horde {
   }
 
   /** 排队生成 n 只，从 at 位置陆续涌入 */
-  release(n, at, gap = 0.42) {
+  release(n, at, gap = 0.42, opt = {}) {
     this.pending += n;
     this.spawnAt = at;
     this.gap = gap;
     this.spawnT = 0;
+    this.opt = opt;
   }
 
-  spawnOne(x, y) {
+  spawnOne(x, y, opt = {}) {
     this.list.push({
       x,
       y,
       hp: 2 + (Math.random() < 0.35 ? 1 : 0),
-      spd: 1.15 + Math.random() * 0.5,
+      spd: (opt.fast ? 2.95 : 2.0) + Math.random() * 0.7,
       walk: Math.random() * 6,
       hurt: 0,
       dead: 0,
@@ -46,6 +47,12 @@ export class Horde {
       variant: (Math.random() * 3) | 0,
       sway: Math.random() * 6.3,
       biteCd: 0,
+      climb: !!opt.climb,
+      stumble: 0,
+      nextStumble: 2 + Math.random() * 5,
+      // 面朝方向（屏幕空间单位向量），决定画正面还是背面
+      face: { x: 1, y: 0.5 },
+      z: 0,
     });
   }
 
@@ -63,6 +70,7 @@ export class Horde {
         this.spawnOne(
           this.spawnAt.x + (Math.random() - 0.5) * 0.8,
           Math.max(0.6, Math.min(area.h - 0.6, this.spawnAt.y + (Math.random() - 0.5) * 2.6)),
+          this.opt || {},
         );
       }
     }
@@ -83,25 +91,53 @@ export class Horde {
       dx /= d;
       dy /= d;
 
+      // 面朝：把世界方向转成屏幕方向，决定画正面/背面/左右
+      const fsx = (dx - dy) * HW;
+      const fsy = (dx + dy) * HH;
+      const fl = Math.hypot(fsx, fsy) || 1;
+      z.face.x = fsx / fl;
+      z.face.y = fsy / fl;
+
+      // 偶尔踉跄一下，群体的步伐才不会像列队行进
+      z.nextStumble -= dt;
+      if (z.nextStumble <= 0) {
+        z.nextStumble = 2.5 + Math.random() * 5;
+        z.stumble = 0.45;
+      }
+      z.stumble = Math.max(0, z.stumble - dt);
+      const speedMul = z.stumble > 0 ? 0.35 : 1;
+
       if (d < HIT_RANGE) {
         if (z.biteCd <= 0) {
           z.biteCd = 1.1;
-          z.lunge = 0.22;
+          z.lunge = 0.26;
           if (this.onBite) this.onBite(z);
         }
       } else {
         // 左右摇晃，让群体不会挤成一条直线
         z.sway += dt * 2.2;
         const sw = Math.sin(z.sway) * 0.32;
-        const mx = (dx - dy * sw) * z.spd * dt;
-        const my = (dy + dx * sw) * z.spd * dt;
-        if (!blocked(z.x + mx, z.y, R)) z.x += mx;
-        else if (!blocked(z.x, z.y + my * 1.4, R)) z.y += my * 1.4;
-        if (!blocked(z.x, z.y + my, R)) z.y += my;
-        else if (!blocked(z.x + mx * 1.4, z.y, R)) z.x += mx * 1.4;
-        z.walk += dt * z.spd * 4.2;
+        const mx = (dx - dy * sw) * z.spd * speedMul * dt;
+        const my = (dy + dx * sw) * z.spd * speedMul * dt;
+        if (z.climb) {
+          // 一层的尸潮直接翻越障碍，只受房间边界限制
+          z.x = Math.max(0.4, Math.min(area.w - 0.4, z.x + mx));
+          z.y = Math.max(0.4, Math.min(area.h - 0.4, z.y + my));
+        } else {
+          if (!blocked(z.x + mx, z.y, R)) z.x += mx;
+          else if (!blocked(z.x, z.y + my * 1.4, R)) z.y += my * 1.4;
+          if (!blocked(z.x, z.y + my, R)) z.y += my;
+          else if (!blocked(z.x + mx * 1.4, z.y, R)) z.x += mx * 1.4;
+        }
+        z.walk += dt * z.spd * speedMul * 3.4;
       }
       z.lunge = Math.max(0, z.lunge - dt * 4);
+
+      // 翻越障碍时抬高，看起来是踩在堆积物上
+      if (z.climb) {
+        const on = blocked(z.x, z.y, R * 0.5);
+        z.z += ((on ? 0.55 : 0) - z.z) * Math.min(1, dt * 6);
+      }
 
       // 彼此推开，避免完全重叠
       for (const o of this.list) {
@@ -116,6 +152,16 @@ export class Horde {
         }
       }
     }
+  }
+
+  /** 在玩家附近的活体数量，用来判断"被尸潮淹没" */
+  crowdedAt(x, y, r = 0.95) {
+    let n = 0;
+    for (const z of this.list) {
+      if (z.dead) continue;
+      if (Math.hypot(z.x - x, z.y - y) < r) n++;
+    }
+    return n;
   }
 
   /** 子弹命中检测：返回被打中的丧尸 */
@@ -154,17 +200,25 @@ export class Horde {
 const SKIN = ['#7d8a6e', '#8b8a72', '#6f7d68'];
 const CLOTH = ['#5a5148', '#4a5058', '#584a4a'];
 
-export function drawZombie(g, sx, sy, z, aimAway) {
+export function drawZombie(g, sx, sy, z) {
   const x = Math.round(sx);
-  const y = Math.round(sy);
+  const y = Math.round(sy - (z.z || 0) * TILE_Z);
 
   if (z.dead > 0) {
     drawCorpse(g, x, y, z);
     return;
   }
 
-  const sw = Math.sin(z.walk) * 2.4;
-  const bob = Math.abs(Math.sin(z.walk * 0.5)) * 1.1;
+  // 面朝：屏幕方向决定朝左还是朝右、正面还是背面
+  const f = z.face || { x: 1, y: 0.5 };
+  const dir = f.x >= 0 ? 1 : -1;
+  const back = f.y < -0.12; // 朝画面上方走 = 背对镜头
+
+  // 蹒跚步态：两腿摆动幅度不同，身体跟着一歪一歪
+  const sw = Math.sin(z.walk) * 2.6;
+  const sw2 = Math.sin(z.walk + 0.9) * 1.7;
+  const bob = Math.abs(Math.sin(z.walk * 0.5)) * 1.3;
+  const tilt = Math.sin(z.walk * 0.5) * 0.9 + (z.stumble > 0 ? 2.2 : 0);
   const by = y - bob;
   const skin = SKIN[z.variant];
   const cloth = CLOTH[z.variant];
@@ -174,55 +228,70 @@ export function drawZombie(g, sx, sy, z, aimAway) {
   g.globalAlpha = 0.45;
   g.fillStyle = '#000';
   g.beginPath();
-  g.ellipse(x, y, 6, 3, 0, 0, 6.3);
+  g.ellipse(x, y + (z.z ? 1 : 0), 6, 3, 0, 0, 6.3);
   g.fill();
   g.restore();
 
   // 腿
   g.fillStyle = '#33383a';
   g.fillRect(x - 4 + sw, by - 9, 3, 9);
-  g.fillRect(x + 1 - sw, by - 9, 3, 9);
+  g.fillRect(x + 1 - sw2, by - 9, 3, 9);
   g.fillStyle = '#1d2123';
-  g.fillRect(x - 4 + sw, by - 2, 4, 2);
-  g.fillRect(x + 1 - sw, by - 2, 4, 2);
+  g.fillRect(x - 4 + sw - (dir > 0 ? 0 : 1), by - 2, 4, 2);
+  g.fillRect(x + 1 - sw2 - (dir > 0 ? 0 : 1), by - 2, 4, 2);
 
-  // 躯干（前倾）
+  // 躯干（前倾，随步伐左右歪）
+  g.save();
+  g.translate(x + tilt * 0.4, by - 14);
+  g.rotate(tilt * 0.03);
   g.fillStyle = cloth;
-  g.fillRect(x - 5, by - 20, 10, 11);
-  g.fillStyle = 'rgba(0,0,0,0.22)';
-  g.fillRect(x + 2, by - 20, 3, 11);
+  g.fillRect(-5, -6, 10, 11);
+  g.fillStyle = 'rgba(0,0,0,0.24)';
+  g.fillRect(dir > 0 ? 2 : -5, -6, 3, 11);
   // 撕裂与血
   g.fillStyle = '#4a1512';
-  g.fillRect(x - 3, by - 16, 4, 5);
-  g.fillRect(x + 1, by - 13, 2, 4);
+  g.fillRect(-3, -2, 4, 5);
+  g.fillRect(1, 1, 2, 4);
+  g.restore();
 
-  // 手臂前伸
-  const reach = 6 + lung;
+  // 手臂前伸：朝着移动方向探出去
+  const reach = 7 + lung;
+  const ax = f.x * reach;
+  const ay = f.y * reach * 0.7;
   g.strokeStyle = skin;
   g.lineWidth = 2.4;
   g.lineCap = 'round';
   g.beginPath();
   g.moveTo(x - 4, by - 18);
-  g.lineTo(x - 4 - reach * 0.5, by - 14 + Math.sin(z.walk * 0.8) * 1.5);
+  g.lineTo(x - 4 + ax * 0.8, by - 15 + ay + Math.sin(z.walk * 0.8) * 1.6);
   g.moveTo(x + 4, by - 18);
-  g.lineTo(x + 4 + reach * 0.5, by - 15 - Math.sin(z.walk * 0.8) * 1.5);
+  g.lineTo(x + 4 + ax * 0.8, by - 16 + ay - Math.sin(z.walk * 0.8) * 1.6);
   g.stroke();
 
   // 头（歪着）
-  const hx = x - 3;
+  const hx = x - 3 + dir + tilt * 0.5;
   const hy = by - 27;
   g.fillStyle = skin;
   g.fillRect(hx, hy + 1, 6, 6);
   g.fillStyle = 'rgba(0,0,0,0.25)';
-  g.fillRect(hx + 4, hy + 1, 2, 6);
+  g.fillRect(hx + (dir > 0 ? 4 : 0), hy + 1, 2, 6);
   g.fillStyle = '#2b241c';
   g.fillRect(hx - 1, hy, 8, 3);
-  if (!aimAway) {
+  if (back) {
+    // 背对镜头：后脑勺，没有五官
+    g.fillRect(hx - 1, hy, 8, 7);
+  } else {
     g.fillStyle = '#d8d0b8';
-    g.fillRect(hx + 1, hy + 3, 1, 1);
-    g.fillRect(hx + 4, hy + 3, 1, 1);
+    if (dir > 0) {
+      g.fillRect(hx + 2, hy + 3, 1, 1);
+      g.fillRect(hx + 4, hy + 3, 1, 1);
+    } else {
+      g.fillRect(hx + 1, hy + 3, 1, 1);
+      g.fillRect(hx + 3, hy + 3, 1, 1);
+    }
+    // 张着的嘴
     g.fillStyle = '#4a1512';
-    g.fillRect(hx + 1, hy + 5, 4, 2);
+    g.fillRect(hx + (dir > 0 ? 2 : 1), hy + 5, 3, 2);
   }
 
   // 受击闪白

@@ -21,7 +21,7 @@ import { initInput, keys, mouse, justPressed, endFrame, view } from './input.js'
 import {
   pad, initControls, setButton, setPadVisible, endFrameControls, screenDirToWorld,
 } from './controls.js';
-import { clamp, flicker, lerp } from './util.js';
+import { clamp, flicker, lerp, smoothstep } from './util.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
@@ -172,6 +172,7 @@ function enterArea(id, spawnName) {
   const sp = area.spawns[spawnName] || area.spawns.start || { x: area.w / 2, y: area.h / 2 };
   game.player.x = sp.x;
   game.player.y = sp.y;
+  game.player.z = groundZ(sp.x, sp.y); // 别把上一个区域的高度带过来
   game.areaT = 0;
   game.hordeReleased = false;
   game.doomed = 0;
@@ -224,9 +225,7 @@ function equipToggle(item) {
   }
   const r = INV.quickEquip(item);
   SFX.sfxClick();
-  if (r === 'unequipped') UI.msg('收起了' + INV.ITEMS[item].name + '。');
-  else if (r === 'left' || r === 'right') UI.msg((r === 'left' ? '左手' : '右手') + '装备：' + INV.ITEMS[item].name, 'good');
-  else if (r === 'full') UI.msg('背包已满。', 'warn');
+  if (r === 'full') UI.msg('背包已满。', 'warn');
 }
 function doToggleFlash() {
   if (!INV.has('flashlight')) return;
@@ -281,6 +280,14 @@ function currentInteract() {
     if (dist(p.x, p.y, lk.x, lk.y) > lk.r) continue;
     return { id: 'link', link: lk, text: lk.text, short: lk.short, anchor: lk.anchor, target: lk.target };
   }
+  // 纯提示（楼梯这类走过去就触发的，不需要按键）
+  if (area.hints) {
+    for (const h of area.hints) {
+      if (dist(p.x, p.y, h.x, h.y) < h.r) {
+        return { id: 'hint', hint: true, text: h.text, anchor: h.anchor };
+      }
+    }
+  }
   if (area.id !== 'lab') {
     if (area.radio && dist(p.x, p.y, area.radio.x, area.radio.y + 0.9) < 1.5 && game.radioStep < 0) {
       return {
@@ -332,7 +339,7 @@ function currentInteract() {
 
 function tryInteract() {
   const it = currentInteract();
-  if (!it) return;
+  if (!it || it.hint) return;
   if (it.id === 'link') {
     startTransition(it.link.to, it.link.spawn);
     return;
@@ -354,7 +361,6 @@ function tryInteract() {
     UI.startScan(() => {
       game.state = 'play';
       setPadVisible(true);
-      UI.msg('人脸识别系统错误 —— 门禁保持锁定。', 'warn');
       UI.setObjective('门打不开，在房间里找找别的办法');
       SFX.sfxThud();
       game.shake = 2.5;
@@ -366,7 +372,6 @@ function tryInteract() {
     SFX.sfxServo(false);
     SFX.sfxThud();
     fx.dust(LOCKER_SPOT.x - 0.6, LOCKER_SPOT.y, 0.4, 6);
-    UI.msg('柜门吱呀一声弹开了。里面有东西。', 'good');
   } else if (it.id === 'loot') {
     game.locker.looted = true;
     const p = area.props.find((q) => q.id === 'locker');
@@ -375,7 +380,6 @@ function tryInteract() {
     INV.addItem('pistol');
     INV.addItem('mag', START_SPARE_MAGS);
     SFX.sfxPickup();
-    UI.msg('放进背包：手电筒 · 手枪 M1911 · 备用弹匣 x' + START_SPARE_MAGS, 'good');
     UI.setObjective('打开背包（I），把手电筒和手枪拖到左右手');
     setTimeout(() => {
       if (game.state === 'play' && !game.bagOpen) toggleBag();
@@ -385,9 +389,7 @@ function tryInteract() {
       game.gotBadge = true;
       INV.addItem('badge');
       SFX.sfxPickup();
-      UI.msg('约束带被从内侧割断了。枕头下压着一张员工卡 —— 已经消磁。', 'good');
     } else {
-      UI.msg('约束带被从内侧割断了。是谁放你出来的？');
     }
   }
 }
@@ -401,7 +403,6 @@ function startReload() {
   if (!handOf('pistol')) return;
   if (g.reload > 0) return;
   if (g.mag >= MAG_SIZE) {
-    UI.msg('弹匣已满。');
     return;
   }
   if (INV.countItem('mag') <= 0) {
@@ -420,7 +421,6 @@ function fire() {
   if (!handOf('pistol') || g.reload > 0 || g.cool > 0) return;
   if (g.mag <= 0) {
     SFX.sfxDryFire();
-    UI.msg('咔哒 —— 弹匣空了。按 R 换弹。', 'warn');
     g.cool = 0.3;
     return;
   }
@@ -474,11 +474,6 @@ function fire() {
   }
 }
 
-const DOOR_MSG = [
-  '门板凹进去一块，锁体那边发出金属摩擦的声响 —— 有用。',
-  '识别终端炸开火花，门被撬出一道缝。再来一发。',
-];
-
 function shootDoor() {
   const d = game.door;
   if (d.broken) return;
@@ -486,8 +481,7 @@ function shootDoor() {
     // 还没试过门禁，玩家不该知道要打门
     if (!d.hinted) {
       d.hinted = true;
-      UI.msg('子弹在合金门上打出一个白点。也许该先弄清楚门是怎么锁的。');
-    }
+      }
     return;
   }
   d.hits++;
@@ -495,7 +489,6 @@ function shootDoor() {
   SFX.sfxImpact(true);
   fx.spark(DOOR.cx / TILE_W, 0.05, 1.4, 16, 1.2);
   if (d.hits < 3) {
-    UI.msg(DOOR_MSG[d.hits - 1], 'good');
     SFX.sfxError();
   } else {
     d.broken = true;
@@ -505,7 +498,6 @@ function shootDoor() {
     SFX.sfxServo(false);
     fx.spark(DOOR.cx / TILE_W, 0.05, 1.2, 34, 1.6);
     fx.dust(DOOR.cx / TILE_W, 0.6, 0.4, 12);
-    UI.msg('锁体崩开了。门被硬生生顶出一道能过人的口子。', 'good');
     UI.setObjective('出去看看走廊');
   }
 }
@@ -551,10 +543,41 @@ function moveIntent() {
   return { x: ix / len, y: iy / len, mag: 1 };
 }
 
+/** 玩家脚下的高度（楼梯用高度场，不用碰撞体，这样才能真的走上去） */
+function groundZ(x, y) {
+  if (!area.ramps) return 0;
+  for (const r of area.ramps) {
+    if (x < r.x0 || x > r.x1 || y < r.y0 || y > r.y1) continue;
+    const k = clamp((y - r.hi.y) / (r.lo.y - r.hi.y), 0, 1);
+    return lerp(r.hi.z, r.lo.z, k);
+  }
+  return 0;
+}
+
+/** 走进梯段两端就换层 */
+function checkTriggers() {
+  if (!area.triggers || game.trans) return;
+  const p = game.player;
+  const z = p.z || 0;
+  for (const t of area.triggers) {
+    const byZ = (t.zAbove !== undefined && z >= t.zAbove) || (t.zBelow !== undefined && z <= t.zBelow);
+    const byBox =
+      t.x0 !== undefined && p.x >= t.x0 && p.x <= t.x1 && p.y >= t.y0 && p.y <= t.y1;
+    if (byZ || byBox) {
+      startTransition(t.to, t.spawn);
+      return;
+    }
+  }
+}
+
 function movePlayer(dt) {
   const p = game.player;
   const mv = moveIntent();
   p.moving = mv.mag > 0.02;
+  // 高度与触发区每帧都要更新：只在移动时更新的话，站在楼梯上不动
+  // 或者被传送到别处时高度会残留成上一次的值。
+  p.z = groundZ(p.x, p.y);
+  checkTriggers();
   if (!p.moving) {
     p.walk = lerp(p.walk, 0, Math.min(1, dt * 10));
     return;
@@ -657,7 +680,9 @@ function update(dt) {
 
   if (game.state === 'dead') {
     game.phase += dt;
-    if (game.phase > 3.2) respawn();
+    // 死亡后丧尸继续扑上来，让"被淹没"这件事在画面上真的发生
+    horde.update(dt, game.player, blocked, area);
+    if (game.phase > 3.6) respawn();
     return;
   }
 
@@ -673,8 +698,9 @@ function update(dt) {
   if (game.state === 'wake') {
     game.phase += dt;
     game.fade = clamp(1 - (game.phase - 0.2) / 1.1, 0, 1);
-    if (game.phase > 1.65 && game.phase < 1.72) SFX.sfxStep();
-    if (game.phase > 3.5) {
+    if (game.phase > 2.52 && game.phase < 2.58) SFX.sfxStep();
+    if (game.phase > 3.05 && game.phase < 3.11) SFX.sfxStep();
+    if (game.phase > WAKE.done) {
       game.state = 'play';
       game.player.x = PLAYER_START.x;
       game.player.y = PLAYER_START.y;
@@ -714,7 +740,6 @@ function update(dt) {
       g.mag = MAG_SIZE;
       INV.consumeItem('mag', 1);
       SFX.sfxReload(2);
-      UI.msg('换弹完成。剩余备用弹匣：' + INV.countItem('mag'));
     }
     syncHUD();
   }
@@ -727,8 +752,8 @@ function update(dt) {
   const text = it ? it.text : '';
   if (text !== game.lastPrompt) {
     game.lastPrompt = text;
-    if (pad.enabled) setButton('interact', !!text, it ? it.short || '互动' : '互动');
-    else UI.setPrompt(text || null);
+    if (pad.enabled) setButton('interact', !!text && !it.hint, it ? it.short || '互动' : '互动');
+    else UI.setPrompt(text || null, it && it.hint);
   }
   if (pad.enabled) syncPadButtons();
 
@@ -748,8 +773,7 @@ horde.onBite = () => {
   game.shake = 4.5;
   SFX.sfxImpact(false);
   fx.debris(p.x, p.y, 1.0, 6, '#5a1f1c');
-  if (p.hp <= 0) die('你被撕开了。');
-  else UI.msg('被咬到了！', 'warn');
+  if (p.hp <= 0) die();
 };
 
 function updateAreaEvents(dt) {
@@ -759,23 +783,25 @@ function updateAreaEvents(dt) {
   if (area.horde && !game.hordeReleased && game.areaT > area.horde.delay) {
     game.hordeReleased = true;
     horde.release(area.horde.count, { x: area.horde.x, y: area.horde.y }, 0.38);
-    UI.msg('走廊尽头传来拖行的脚步声 —— 很多。', 'warn');
     UI.setObjective('往楼梯间退，边退边打');
     SFX.sfxError();
     game.shake = 3;
   }
 
-  // 一层：进来 5 秒后被扑倒，强制剧情杀
+  // 一层：尸潮翻越堵路的杂物涌过来，被围住才死，不是到点直接判死
   if (area.doom && !game.doomed && game.areaT > area.doom.delay) {
     game.doomed = 1;
-    horde.release(14, area.doom.from, 0.12);
-    UI.msg('身后的黑暗里同时亮起几十双眼睛。', 'warn');
+    horde.release(22, area.doom.from, 0.1, { climb: true, fast: true });
     SFX.sfxError();
     game.shake = 6;
   }
-  if (area.doom && game.doomed === 1 && game.areaT > area.doom.delay + 2.6) {
-    game.doomed = 2;
-    die('一层全是它们。你没能跑出三步。');
+  if (area.doom && game.doomed === 1) {
+    const p = game.player;
+    game.swarm = horde.crowdedAt(p.x, p.y, 1.15);
+    if (game.swarm >= 3) {
+      game.doomed = 2;
+      die();
+    }
   }
 
   // 对讲机播报
@@ -806,19 +832,16 @@ function startRadio() {
   game.radioStep = 0;
   game.radioT = 0.4;
   SFX.sfxClick();
-  UI.msg('对讲机还有电。你按下了通话键。', 'good');
 }
 
-function die(reason) {
+function die() {
   if (game.state === 'dead') return;
   game.state = 'dead';
   game.phase = 0;
-  game.deathReason = reason;
   game.shake = 8;
   SFX.sfxThud();
   UI.setPrompt(null);
   setPadVisible(false);
-  UI.msg(reason, 'warn');
 }
 
 function respawn() {
@@ -848,6 +871,53 @@ function playerScreen(cam, p) {
 
 const ISO_ANG = Math.atan2(HH, HW);
 const ISO_UNIT = Math.hypot(HW, HH);
+
+/**
+ * 起床动画。整段只用同一个角色精灵，靠"绕髋部旋转 + 位置/高度插值"完成，
+ * 不做任何纵向缩放 —— 之前躺着用的是另一套等距盒子画的身体，比例和站姿
+ * 不一致，再叠一个 scale(1, k) 的拉伸，看起来就很别扭。
+ *
+ * 躺平时身体沿床的长轴（世界 +x）方向，头朝 -x（枕头那头）。角色精灵默认
+ * 头朝屏幕上方，所以需要转到 -x 在屏幕上的方向。
+ */
+const LIE_ROT = Math.atan2(-HH, -HW) + Math.PI / 2;
+const WAKE = { lie: 1.5, sit: 2.5, stand: 3.15, done: 3.5 };
+
+function wakePose(t) {
+  const bedTop = BED_TOP;
+  // 躺在床上（略偏枕头一侧）
+  const lieX = BED_POS.x - 0.15;
+  const lieY = BED_POS.y;
+  // 坐在床沿
+  const sitX = BED_POS.x + 0.5;
+  const sitY = BED_POS.y + 0.62;
+
+  if (t < WAKE.lie) {
+    const br = Math.sin(t * 1.9) * 0.012; // 呼吸
+    return { x: lieX, y: lieY, z: bedTop + br, rot: LIE_ROT };
+  }
+  if (t < WAKE.sit) {
+    // 坐起：旋转回直立，同时挪到床沿
+    const k = smoothstep((t - WAKE.lie) / (WAKE.sit - WAKE.lie));
+    return {
+      x: lerp(lieX, sitX, k),
+      y: lerp(lieY, sitY, k),
+      z: bedTop,
+      rot: LIE_ROT * (1 - k),
+    };
+  }
+  if (t < WAKE.stand) {
+    // 下床：从床沿高度落到地面，同时往前踏一步
+    const k = smoothstep((t - WAKE.sit) / (WAKE.stand - WAKE.sit));
+    return {
+      x: lerp(sitX, PLAYER_START.x, k),
+      y: lerp(sitY, PLAYER_START.y, k),
+      z: bedTop * (1 - k),
+      rot: 0,
+    };
+  }
+  return { x: PLAYER_START.x, y: PLAYER_START.y, z: 0, rot: 0 };
+}
 
 function fixtureXform(g, cam, f) {
   g.save();
@@ -1233,28 +1303,21 @@ function render() {
   let px = p.x;
   let py = p.y;
   let zOff = 0;
-  let vscale = 1;
-  let lying = false;
+  let bodyRot = 0;
 
   if (game.state === 'wake') {
-    const t = game.phase;
-    if (t < 1.6) {
-      lying = true;
-    } else if (t < 2.6) {
-      const k = (t - 1.6) / 1.0;
-      px = BED_POS.x + 0.55;
-      py = BED_POS.y + 0.5;
-      zOff = BED_TOP * TILE_Z;
-      vscale = 0.45 + 0.55 * k;
-    } else {
-      const k = Math.min(1, (t - 2.6) / 0.9);
-      px = lerp(BED_POS.x + 0.55, PLAYER_START.x, k);
-      py = lerp(BED_POS.y + 0.5, PLAYER_START.y, k);
-      zOff = BED_TOP * TILE_Z * (1 - k);
-    }
+    const w = wakePose(game.phase);
+    px = w.x;
+    py = w.y;
+    zOff = w.z * TILE_Z;
+    bodyRot = w.rot;
+  } else {
+    zOff = (p.z || 0) * TILE_Z;
   }
 
-  if (!lying) items.push({ k: px + py, player: true });
+  // 在床上时深度键要压过床本身，否则人会被床挡住
+  const onBed = game.state === 'wake' && zOff > 2;
+  items.push({ k: px + py + (onBed ? 0.7 : 0), player: true });
 
   items.sort((a, b) => a.k - b.k);
   for (const it of items) {
@@ -1262,9 +1325,6 @@ function render() {
       const sx = cam.x + (it.pr.x - it.pr.y) * HW;
       const sy = cam.y + (it.pr.x + it.pr.y) * HH;
       ctx.drawImage(it.pr.s.img, Math.round(sx - it.pr.s.ox), Math.round(sy - it.pr.s.oy));
-      if (it.pr.id === 'bed' && lying) {
-        A.drawLying(ctx, Math.round(sx), Math.round(sy - BED_TOP * TILE_Z), game.t);
-      }
     } else if (it.z) {
       const zs = { x: cam.x + (it.z.x - it.z.y) * HW, y: cam.y + (it.z.x + it.z.y) * HH };
       drawZombie(ctx, zs.x, zs.y, it.z, false);
@@ -1272,13 +1332,19 @@ function render() {
       const s = playerScreen(cam, { x: px, y: py });
       const kick = game.gun.recoil * 1.6;
       const aimS = p.aimScreen || { x: 1, y: 0.5 };
+      const HIP = 13 * 1.12; // 髋部离脚底的像素高度
+      // 旋转是绕髋部做的，所以躺平时要把绘制原点整体下移一个髋高，
+      // 否则身体会浮在床面上方一个髋高的位置。
+      const hipDrop = bodyRot === 0 ? 0 : HIP * Math.min(1, Math.abs(bodyRot / LIE_ROT));
+      const fx0 = s.x - aimS.x * kick;
+      const fy0 = s.y - zOff - aimS.y * kick + hipDrop;
       ctx.save();
-      if (vscale !== 1) {
-        ctx.translate(s.x, s.y - zOff);
-        ctx.scale(1, vscale);
-        ctx.translate(-s.x, -(s.y - zOff));
+      if (bodyRot !== 0) {
+        ctx.translate(fx0, fy0 - HIP);
+        ctx.rotate(bodyRot);
+        ctx.translate(-fx0, -(fy0 - HIP));
       }
-      A.drawCharacter(ctx, s.x - aimS.x * kick, s.y - zOff - aimS.y * kick, {
+      A.drawCharacter(ctx, fx0, fy0, {
         scale: 1.12,
         aim: aimS,
         walk: p.walk,
@@ -1286,6 +1352,7 @@ function render() {
         leftItem: game.state === 'play' ? INV.handItem('left') : null,
         rightItem: game.state === 'play' ? INV.handItem('right') : null,
         flashOn: inv.flashOn,
+        eyesShut: game.state === 'wake' && game.phase < 1.5,
       });
       ctx.restore();
     }
@@ -1300,8 +1367,8 @@ function render() {
   if (area.fire) drawFire(ctx, cam);
 
   /* --- 光照 --- */
-  const litX = lying ? BED_POS.x + 0.4 : px;
-  const litY = lying ? BED_POS.y : py;
+  const litX = px;
+  const litY = py;
   const pvis = computeVisibility(litX, litY, area.segments);
 
   lighting.begin();
@@ -1393,8 +1460,12 @@ function render() {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
   if (game.state === 'dead') {
-    const k = Math.min(1, game.phase / 1.6);
-    ctx.fillStyle = `rgba(0,0,0,${0.92 * k})`;
+    // 前 1.2 秒先让尸潮压上来，之后才黑屏
+    // 红色只压一层薄的：这一段的重点是让玩家看见尸潮压上来
+    const k = clamp((game.phase - 1.2) / 1.6, 0, 1);
+    ctx.fillStyle = `rgba(90,14,10,0.16)`;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.fillStyle = `rgba(0,0,0,${0.95 * k})`;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
   // 换区域的淡入淡出

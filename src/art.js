@@ -755,7 +755,11 @@ function drawCharacterBody(g, sx, sy, o) {
   } else {
     g.fillStyle = '#1a1a1a';
     const ey = hy + 4;
-    if (dirRight > 0) {
+    if (o.eyesShut) {
+      // 闭眼：一条横线，起床时用
+      if (dirRight > 0) g.fillRect(hx + 3, ey, 3, 1);
+      else g.fillRect(hx, ey, 3, 1);
+    } else if (dirRight > 0) {
       g.fillRect(hx + 3, ey, 1, 1);
       g.fillRect(hx + 5, ey, 1, 1);
     } else {
@@ -836,29 +840,8 @@ function drawHeldItem(g, ax, ay, aim, item, o) {
   g.restore();
 }
 
-/** 躺在床上的姿态 */
-export function drawLying(g, ox, oy, t) {
-  const breathe = Math.sin(t * 1.9) * 0.6;
-  // 腿
-  isoBox(g, ox, oy, -0.1, -0.22, 0, 1.0, 0.44, 0.18, '#b8c0c3', '#949ea2', '#7d878b');
-  // 躯干
-  isoBox(g, ox, oy, -1.0, -0.28, 0, 1.05, 0.56, 0.24 + breathe * 0.02, PAL.coat, PAL.coatShade, PAL.coatDark);
-  // 手臂
-  isoBox(g, ox, oy, -0.85, -0.42, 0.05, 0.8, 0.16, 0.12, '#c2cbce', '#9aa4a8', '#848e92');
-  isoBox(g, ox, oy, -0.85, 0.26, 0.05, 0.8, 0.16, 0.12, '#c2cbce', '#9aa4a8', '#848e92');
-  // 头
-  const p = P(ox, oy, -1.22, 0, 0.12);
-  g.fillStyle = PAL.hair;
-  g.beginPath();
-  g.ellipse(p[0], p[1] - 3, 5.2, 4.2, 0, 0, 6.3);
-  g.fill();
-  g.fillStyle = PAL.skin;
-  g.beginPath();
-  g.ellipse(p[0] + 1, p[1] - 2.6, 3.6, 3.2, 0, 0, 6.3);
-  g.fill();
-  g.fillStyle = 'rgba(0,0,0,0.35)';
-  g.fillRect(p[0], p[1] - 3, 3, 1);
-}
+/* 躺姿不再单独画一套等距盒子身体：那样和站姿比例不一致。起床动画改成
+   对同一个角色精灵做"绕髋部旋转"，见 main.js 的 wakePose()。 */
 
 /* ------------------------------------------------------------------ *
  * 火焰：按水平像素带堆叠，不用平滑渐变
