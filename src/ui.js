@@ -152,24 +152,27 @@ export function updateAmmo(w, show) {
 
 /* ---------------- 准星 ---------------- */
 
-let cursorMode = 'dot';
+// 初始为 null：否则 initUI 里那次 setCursor('dot') 会被"模式没变"挡掉，
+// 结果没拿枪时准星根本没画出来。
+let cursorMode = null;
 export function setCursor(mode) {
   if (cursorMode === mode) return;
   cursorMode = mode;
-  if (mode === 'cross') {
-    el.cursorG.innerHTML = `
-      <g stroke="#ded8c8" stroke-width="2" id="ticks">
-        <line x1="20" y1="7" x2="20" y2="14"/>
-        <line x1="20" y1="26" x2="20" y2="33"/>
-        <line x1="7" y1="20" x2="14" y2="20"/>
-        <line x1="26" y1="20" x2="33" y2="20"/>
-      </g>
-      <rect x="19" y="19" width="2" height="2" fill="#ded8c8"/>`;
-  } else {
-    el.cursorG.innerHTML = `
-      <rect x="16" y="19.5" width="8" height="1.5" fill="rgba(222,216,200,0.7)"/>
-      <rect x="19.5" y="16" width="1.5" height="8" fill="rgba(222,216,200,0.7)"/>`;
-  }
+  // 有枪和没枪用同一套准星，只是没枪时更小更淡 —— 形态一致，玩家不会
+  // 觉得这是两套不同的东西。
+  const armed = mode === 'cross';
+  const a = armed ? 1 : 0.5;
+  const w = armed ? 2 : 1.5;
+  const g0 = armed ? 7 : 11; // 内缺口
+  const g1 = armed ? 14 : 15;
+  el.cursorG.innerHTML = `
+    <g stroke="rgba(222,216,200,${a})" stroke-width="${w}" id="ticks">
+      <line x1="20" y1="${g0}" x2="20" y2="${g1}"/>
+      <line x1="20" y1="${40 - g0}" x2="20" y2="${40 - g1}"/>
+      <line x1="${g0}" y1="20" x2="${g1}" y2="20"/>
+      <line x1="${40 - g0}" y1="20" x2="${40 - g1}" y2="20"/>
+    </g>
+    <rect x="19" y="19" width="2" height="2" fill="rgba(222,216,200,${a})"/>`;
 }
 
 export function showCursor(on) {

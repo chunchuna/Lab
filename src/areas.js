@@ -438,14 +438,38 @@ function buildStair() {
 
   /* 布局：左半边是可走的平台，右半边上半是上行梯段、下半是下行井口。
      出生点和梯段落脚点都必须留在碰撞体外面，否则一传送进来就卡死。 */
-  const up = A.makeStairsUp(6, 2.3, 11);
   const down = A.makeStairsDown(2.3, 2.6, 12);
-  // 楼梯不设碰撞体，改成高度场：玩家可以真正踩上去
-  a.props.push({ id: 'stairUp', s: up, x: 6.9, y: 2.3, col: null, occ: null });
+  /* 上行梯段拆成一级一级独立道具，各自参与深度排序，玩家走到上半段
+     才不会被整段楼梯挡住。 */
+  const STEPS = 6;
+  const RISE = 0.3;
+  const RUN = 0.44;
+  const Y_BOTTOM = 3.62;
+  const stepSprite = A.makeStep(2.3, RUN, RISE, 11);
+  for (let i = 0; i < STEPS; i++) {
+    a.props.push({
+      id: 'step' + i,
+      s: stepSprite,
+      x: 6.9,
+      y: Y_BOTTOM - i * RUN,
+      zOff: i * RISE,
+      col: null,
+      occ: null,
+    });
+  }
+  a.props.push({
+    id: 'landing',
+    s: A.makeLanding(2.3, 0.8, 13),
+    x: 6.9,
+    y: Y_BOTTOM - STEPS * RUN - 0.2,
+    zOff: STEPS * RISE,
+    col: null,
+    occ: null,
+  });
   a.props.push({ id: 'stairDown', s: down, x: 6.9, y: 5.9, col: null, occ: null });
   a.ramps = [
     // 上行：越靠 -y 越高
-    { x0: 5.75, y0: 0.9, x1: 8.05, y1: 3.85, hi: { y: 0.9, z: 1.8 }, lo: { y: 3.85, z: 0 } },
+    { x0: 5.75, y0: 0.7, x1: 8.05, y1: 3.9, hi: { y: 1.0, z: STEPS * RISE }, lo: { y: 3.9, z: 0 } },
     // 下行井：越靠 +y 越低
     { x0: 5.75, y0: 4.6, x1: 8.05, y1: 7.2, hi: { y: 4.6, z: 0 }, lo: { y: 7.2, z: -1.2 } },
   ];

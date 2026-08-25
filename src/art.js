@@ -875,55 +875,66 @@ export function drawFlames(g, cx, cy, w, h, t, seed = 0) {
  * ------------------------------------------------------------------ */
 
 /**
- * 上行楼梯：台阶朝 -y 逐级抬高（屏幕上朝左上方升），顶端接一段平台，
- * 再往上就是墙上的黑色开口，暗示继续通向上一层。带一侧扶手。
+ * 单级台阶（含一段扶手）。整段楼梯拆成一级一级独立的道具，靠深度排序
+ * 各自和玩家比较 —— 做成一整张精灵的话，玩家走到梯段上半段时深度键会
+ * 小于整段楼梯，人就被楼梯整体挡住了。
+ * 扶手放在 -x 侧（远离镜头那侧），不会糊住玩家。
  */
-export function makeStairsUp(steps, wTiles, seed = 1) {
+export function makeStep(wTiles, run, rise, seed = 1) {
   const rand = mulberry32(seed);
-  const rise = 0.3;
-  const run = 0.44;
-  const totalD = steps * run + 0.6;
-  const topZ = steps * rise;
-  return makeProp(wTiles + 0.5, totalD + 0.4, topZ + 1.5, (g, ox, oy) => {
-    const y1 = totalD / 2;
-    for (let i = 0; i < steps; i++) {
-      const z = i * rise;
-      const y0 = y1 - (i + 1) * run;
-      // 踏面亮、踢面暗，这个明暗差是"看出这是台阶"的关键
-      isoBox(g, ox, oy, -wTiles / 2, y0, z, wTiles, run, rise, shade('#575e62', 0.08), '#2e3437', '#20262a');
-      const p = P(ox, oy, -wTiles / 2, y0, z + rise);
-      g.fillStyle = 'rgba(255,255,255,0.14)';
-      g.fillRect(p[0] + 2, p[1], wTiles * TILE_W * 0.5 - 3, 1.2);
-      if (rand() > 0.74) {
-        g.fillStyle = 'rgba(63,18,16,0.5)';
-        g.beginPath();
-        g.ellipse(p[0] + 5 + rand() * 12, p[1] + 3 + rand() * 3, 3 + rand() * 5, 2 + rand() * 3, 0, 0, 6.3);
-        g.fill();
-      }
+  const railH = 0.72;
+  return makeProp(wTiles + 0.5, run + 0.2, rise + railH + 0.4, (g, ox, oy) => {
+    const w2 = wTiles / 2;
+    // 踏面亮、踢面暗，这个明暗差是"看出这是台阶"的关键
+    isoBox(g, ox, oy, -w2, -run / 2, 0, wTiles, run, rise, shade('#575e62', 0.08), '#2e3437', '#20262a');
+    const p = P(ox, oy, -w2, -run / 2, rise);
+    g.fillStyle = 'rgba(255,255,255,0.15)';
+    g.fillRect(p[0] + 2, p[1], wTiles * TILE_W * 0.5 - 3, 1.2);
+    if (rand() > 0.66) {
+      g.fillStyle = 'rgba(63,18,16,0.5)';
+      g.beginPath();
+      g.ellipse(p[0] + 5 + rand() * 12, p[1] + 3 + rand() * 3, 3 + rand() * 5, 2 + rand() * 3, 0, 0, 6.3);
+      g.fill();
     }
-    // 顶部平台
-    isoBox(g, ox, oy, -wTiles / 2, y1 - steps * run - 0.6, topZ, wTiles, 0.6, 0.16, '#5d6468', '#333a3d', '#252b2e');
-    // 扶手：立柱 + 斜扶手条
-    const hx = wTiles / 2 - 0.12;
-    for (let i = 0; i <= steps; i += 2) {
-      const z = i * rise;
-      const y0 = y1 - i * run - 0.1;
-      isoBox(g, ox, oy, hx, y0, z, 0.1, 0.1, 0.72, '#7d8589', '#4a5155', '#383e42');
-    }
+    // 扶手立柱
+    const hx = -w2 - 0.04;
+    isoBox(g, ox, oy, hx, -run / 2, rise, 0.1, 0.1, railH, '#7d8589', '#4a5155', '#383e42');
+    // 斜扶手：本级柱顶连到下一级（+y 更低一级）柱顶
+    const a = P(ox, oy, hx + 0.05, -run / 2 + 0.05, rise + railH);
+    const b = P(ox, oy, hx + 0.05, run / 2 + 0.05, rise - rise + railH);
     g.strokeStyle = '#8b9296';
     g.lineWidth = 2;
-    const a = P(ox, oy, hx + 0.05, y1 - 0.1, 0.72);
-    const b = P(ox, oy, hx + 0.05, y1 - steps * run - 0.1, topZ + 0.72);
     g.beginPath();
     g.moveTo(a[0], a[1]);
     g.lineTo(b[0], b[1]);
     g.stroke();
-    g.strokeStyle = 'rgba(0,0,0,0.35)';
-    g.lineWidth = 1;
+  });
+}
+
+/** 梯段顶部的平台 */
+export function makeLanding(wTiles, dTiles, seed = 3) {
+  const rand = mulberry32(seed);
+  return makeProp(wTiles + 0.5, dTiles + 0.2, 0.9, (g, ox, oy) => {
+    const w2 = wTiles / 2;
+    isoBox(g, ox, oy, -w2, -dTiles / 2, 0, wTiles, dTiles, 0.16, '#5d6468', '#333a3d', '#252b2e');
+    const hx = -w2 - 0.04;
+    isoBox(g, ox, oy, hx, -dTiles / 2, 0.16, 0.1, 0.1, 0.72, '#7d8589', '#4a5155', '#383e42');
+    isoBox(g, ox, oy, hx, dTiles / 2 - 0.1, 0.16, 0.1, 0.1, 0.72, '#7d8589', '#4a5155', '#383e42');
+    const a = P(ox, oy, hx + 0.05, -dTiles / 2, 0.88);
+    const b = P(ox, oy, hx + 0.05, dTiles / 2, 0.88);
+    g.strokeStyle = '#8b9296';
+    g.lineWidth = 2;
     g.beginPath();
-    g.moveTo(a[0], a[1] + 2);
-    g.lineTo(b[0], b[1] + 2);
+    g.moveTo(a[0], a[1]);
+    g.lineTo(b[0], b[1]);
     g.stroke();
+    if (rand() > 0.4) {
+      const p = P(ox, oy, 0, 0, 0.16);
+      g.fillStyle = 'rgba(63,18,16,0.4)';
+      g.beginPath();
+      g.ellipse(p[0], p[1], 9, 5, 0, 0, 6.3);
+      g.fill();
+    }
   });
 }
 

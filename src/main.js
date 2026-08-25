@@ -849,12 +849,15 @@ function respawn() {
   p.hp = PLAYER_HP;
   p.invuln = 1.6;
   game.state = 'play';
-  game.fade = 1;
+  // 注意别用 game.fade：它只在起床状态里递减，play 状态下没人会把它降回去，
+  // 之前这里设成 1 会让复活后整个画面永久黑屏。淡入交给过渡系统。
+  game.fade = 0;
   setPadVisible(true);
   horde.clear();
   game.trans = null;
   // 一律回到楼梯间
   enterArea('stair', 'respawn');
+  game.trans = { to: null, spawn: null, t: 0, phase: 'in' };
   game.gun.mag = MAG_SIZE;
   if (INV.countItem('mag') < 1) INV.addItem('mag', 1);
   UI.setObjective('再想想该往哪走');
@@ -1023,7 +1026,7 @@ function drawHighlight(g, cam) {
   if (!pr) return;
   const ring = A.outlineRing(pr.s.img);
   const sx = cam.x + (pr.x - pr.y) * HW;
-  const sy = cam.y + (pr.x + pr.y) * HH;
+  const sy = cam.y + (pr.x + pr.y) * HH - (pr.zOff || 0) * TILE_Z;
   g.save();
   g.globalAlpha = a;
   g.drawImage(ring.img, Math.round(sx - pr.s.ox - ring.pad), Math.round(sy - pr.s.oy - ring.pad));
@@ -1323,7 +1326,7 @@ function render() {
   for (const it of items) {
     if (it.pr) {
       const sx = cam.x + (it.pr.x - it.pr.y) * HW;
-      const sy = cam.y + (it.pr.x + it.pr.y) * HH;
+      const sy = cam.y + (it.pr.x + it.pr.y) * HH - (it.pr.zOff || 0) * TILE_Z;
       ctx.drawImage(it.pr.s.img, Math.round(sx - it.pr.s.ox), Math.round(sy - it.pr.s.oy));
     } else if (it.z) {
       const zs = { x: cam.x + (it.z.x - it.z.y) * HW, y: cam.y + (it.z.x + it.z.y) * HH };
@@ -1488,9 +1491,10 @@ function render() {
     }
   }
 
-  // 画面内准星：触屏没有鼠标指针；键鼠在没拿到枪之前也需要一个朝向指示
+  // 画面内准星只给触屏用：触屏没有鼠标指针。键鼠一律用跟随光标的准星，
+  // 有枪没枪是同一套形态，只是没枪时更小更淡，避免出现两套不同的准星。
   const armedNow = !!handOf('pistol');
-  if ((pad.enabled || !armedNow) && game.state === 'play' && !game.bagOpen) {
+  if (pad.enabled && game.state === 'play' && !game.bagOpen) {
     const armed = armedNow;
     const d = armed ? 2.9 : 2.0;
     const rx = px + Math.cos(p.aim) * d;
