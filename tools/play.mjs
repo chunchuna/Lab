@@ -79,7 +79,7 @@ await shot('01-door-broken');
 /* 4. 出门到走廊 */
 await at(10.5, 1.3);
 await press('e');
-await wait(700);
+await wait(1400);
 console.log('出门后          ', JSON.stringify(await st()));
 await shot('02-corr2');
 
@@ -107,7 +107,7 @@ await shot('04-shooting');
 await at(1.2, 2.4);
 await wait(300);
 await press('e');
-await wait(700);
+await wait(1400);
 console.log('进楼梯间        ', JSON.stringify(await st()));
 await shot('05-stair');
 
@@ -115,7 +115,7 @@ await shot('05-stair');
 await at(6.6, 1.3);
 await wait(300);
 await press('e');
-await wait(700);
+await wait(1400);
 console.log('上三层          ', JSON.stringify(await st()));
 await shot('06-corr3');
 
@@ -123,7 +123,7 @@ await shot('06-corr3');
 await at(13.4, 1.1);
 await wait(300);
 await press('e');
-await wait(700);
+await wait(1400);
 console.log('进 312          ', JSON.stringify(await st()));
 await shot('07-dorm312');
 await at(3.4, 3.0);

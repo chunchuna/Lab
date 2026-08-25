@@ -891,28 +891,120 @@ export function drawFlames(g, cx, cy, w, h, t, seed = 0) {
  * 楼梯：逐级抬高的等距台阶
  * ------------------------------------------------------------------ */
 
-export function makeStairs(steps, wTiles, dir, seed = 1) {
+/**
+ * 上行楼梯：台阶朝 -y 逐级抬高（屏幕上朝左上方升），顶端接一段平台，
+ * 再往上就是墙上的黑色开口，暗示继续通向上一层。带一侧扶手。
+ */
+export function makeStairsUp(steps, wTiles, seed = 1) {
   const rand = mulberry32(seed);
-  const rise = 0.26;
-  const run = 0.42;
-  const totalD = steps * run;
-  return makeProp(wTiles + 0.3, totalD + 0.4, steps * rise + 0.4, (g, ox, oy) => {
+  const rise = 0.3;
+  const run = 0.44;
+  const totalD = steps * run + 0.6;
+  const topZ = steps * rise;
+  return makeProp(wTiles + 0.5, totalD + 0.4, topZ + 1.5, (g, ox, oy) => {
+    const y1 = totalD / 2;
     for (let i = 0; i < steps; i++) {
       const z = i * rise;
-      const y0 = dir > 0 ? -totalD / 2 + i * run : totalD / 2 - (i + 1) * run;
-      const top = shade('#4a5054', 0.06 - i * 0.004);
-      isoBox(g, ox, oy, -wTiles / 2, y0, z, wTiles, run, rise, top, '#333a3d', '#272d30');
-      // 防滑条
+      const y0 = y1 - (i + 1) * run;
+      // 踏面亮、踢面暗，这个明暗差是"看出这是台阶"的关键
+      isoBox(g, ox, oy, -wTiles / 2, y0, z, wTiles, run, rise, shade('#575e62', 0.08), '#2e3437', '#20262a');
       const p = P(ox, oy, -wTiles / 2, y0, z + rise);
-      g.fillStyle = 'rgba(0,0,0,0.28)';
-      g.fillRect(p[0] + 2, p[1] + 1, wTiles * TILE_W * 0.5 - 4, 1.4);
-      if (rand() > 0.72) {
+      g.fillStyle = 'rgba(255,255,255,0.14)';
+      g.fillRect(p[0] + 2, p[1], wTiles * TILE_W * 0.5 - 3, 1.2);
+      if (rand() > 0.74) {
         g.fillStyle = 'rgba(63,18,16,0.5)';
         g.beginPath();
-        g.ellipse(p[0] + 4 + rand() * 14, p[1] + 3 + rand() * 4, 3 + rand() * 5, 2 + rand() * 3, 0, 0, 6.3);
+        g.ellipse(p[0] + 5 + rand() * 12, p[1] + 3 + rand() * 3, 3 + rand() * 5, 2 + rand() * 3, 0, 0, 6.3);
         g.fill();
       }
     }
+    // 顶部平台
+    isoBox(g, ox, oy, -wTiles / 2, y1 - steps * run - 0.6, topZ, wTiles, 0.6, 0.16, '#5d6468', '#333a3d', '#252b2e');
+    // 扶手：立柱 + 斜扶手条
+    const hx = wTiles / 2 - 0.12;
+    for (let i = 0; i <= steps; i += 2) {
+      const z = i * rise;
+      const y0 = y1 - i * run - 0.1;
+      isoBox(g, ox, oy, hx, y0, z, 0.1, 0.1, 0.72, '#7d8589', '#4a5155', '#383e42');
+    }
+    g.strokeStyle = '#8b9296';
+    g.lineWidth = 2;
+    const a = P(ox, oy, hx + 0.05, y1 - 0.1, 0.72);
+    const b = P(ox, oy, hx + 0.05, y1 - steps * run - 0.1, topZ + 0.72);
+    g.beginPath();
+    g.moveTo(a[0], a[1]);
+    g.lineTo(b[0], b[1]);
+    g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,0.35)';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(a[0], a[1] + 2);
+    g.lineTo(b[0], b[1] + 2);
+    g.stroke();
+  });
+}
+
+/**
+ * 下行楼梯：在地面上开一个洞，只露出最上面几级台阶，往下沉入黑暗。
+ * 等距下画完整的下行梯段会被自己的地面挡住，"洞 + 几级台阶"最容易读懂。
+ */
+export function makeStairsDown(wTiles, dTiles, seed = 2) {
+  const rand = mulberry32(seed);
+  return makeProp(wTiles + 0.5, dTiles + 0.5, 1.4, (g, ox, oy) => {
+    const w2 = wTiles / 2;
+    const d2 = dTiles / 2;
+    // 洞口：纯黑，边缘一圈亮口沿
+    poly(
+      g,
+      [P(ox, oy, -w2, -d2, 0), P(ox, oy, w2, -d2, 0), P(ox, oy, w2, d2, 0), P(ox, oy, -w2, d2, 0)],
+      '#05070700',
+    );
+    poly(
+      g,
+      [P(ox, oy, -w2, -d2, 0), P(ox, oy, w2, -d2, 0), P(ox, oy, w2, d2, 0), P(ox, oy, -w2, d2, 0)],
+      '#060809',
+    );
+    // 往下的几级台阶（从洞口后缘开始下沉）
+    const steps = 4;
+    const rise = 0.3;
+    const run = 0.42;
+    for (let i = 0; i < steps; i++) {
+      const z = -i * rise;
+      const y0 = -d2 + i * run;
+      const k = 1 - i / steps;
+      isoBox(
+        g, ox, oy, -w2 + 0.1, y0, z - rise, wTiles - 0.2, run, rise,
+        shade('#4a5054', -0.15 - 0.16 * i), shade('#262c2f', -0.2 * i), shade('#1a1f22', -0.2 * i),
+      );
+      const p = P(ox, oy, -w2 + 0.1, y0, z);
+      g.fillStyle = `rgba(255,255,255,${0.1 * k})`;
+      g.fillRect(p[0] + 2, p[1], (wTiles - 0.2) * TILE_W * 0.5 - 3, 1);
+    }
+    // 口沿
+    g.strokeStyle = '#6d757a';
+    g.lineWidth = 1.6;
+    poly(g, [P(ox, oy, -w2, -d2, 0), P(ox, oy, w2, -d2, 0), P(ox, oy, w2, d2, 0), P(ox, oy, -w2, d2, 0)], null, '#6d757a', 1.6);
+    // 洞口边的扶手
+    const hx = w2 - 0.06;
+    for (let i = 0; i < 3; i++) {
+      isoBox(g, ox, oy, hx, -d2 + i * (dTiles / 2.6), 0, 0.1, 0.1, 0.74, '#7d8589', '#4a5155', '#383e42');
+    }
+    const a = P(ox, oy, hx + 0.05, -d2, 0.74);
+    const b = P(ox, oy, hx + 0.05, d2, 0.74);
+    g.strokeStyle = '#8b9296';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(a[0], a[1]);
+    g.lineTo(b[0], b[1]);
+    g.stroke();
+    // 血手印拖向洞口
+    g.globalAlpha = 0.45;
+    g.fillStyle = '#3f1210';
+    for (let i = 0; i < 6; i++) {
+      const p = P(ox, oy, -w2 + rand() * wTiles, d2 - rand() * 0.5, 0);
+      g.fillRect(p[0], p[1], 2 + rand() * 5, 2 + rand() * 3);
+    }
+    g.globalAlpha = 1;
   });
 }
 

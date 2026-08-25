@@ -129,7 +129,7 @@ export class Horde {
       const t = ex * dx + ey * dy;
       if (t < 0 || t > bestT) continue;
       const perp = Math.abs(ex * dy - ey * dx);
-      if (perp > 0.36) continue;
+      if (perp > 0.45) continue; // 稍微宽容一点，等距下瞄准本来就不精确
       bestT = t;
       best = z;
     }

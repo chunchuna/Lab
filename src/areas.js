@@ -404,10 +404,30 @@ function buildStair() {
   g.fillRect(sx - 15, 14, 30, 13);
   g.fillStyle = '#1f2a18';
   g.fillRect(sx - 13, 16, 26, 9);
-  // 楼层数字
-  g.fillStyle = 'rgba(210,210,200,0.28)';
-  g.font = 'bold 30px monospace';
-  g.fillText('2', a.w * TILE_W - 60, 40);
+
+  // 上行梯段顶端的黑色开口：暗示楼梯继续往上
+  const upU = 6.9 * TILE_W;
+  g.fillStyle = '#07090a';
+  g.fillRect(upU - 30, 6, 60, 42);
+  g.fillStyle = '#2b3134';
+  g.fillRect(upU - 32, 4, 64, 4);
+  g.fillStyle = 'rgba(255,255,255,0.08)';
+  g.fillRect(upU - 32, 4, 64, 1.4);
+  // 楼层指示：上 3F / 下 1F
+  g.fillStyle = 'rgba(215,215,205,0.62)';
+  g.font = 'bold 15px monospace';
+  g.fillText('3F', upU - 34, 44);
+  g.font = 'bold 11px monospace';
+  g.fillText('UP', upU - 34, 55);
+  g.fillStyle = 'rgba(215,215,205,0.42)';
+  g.font = 'bold 15px monospace';
+  g.fillText('1F', upU + 10, 44);
+  g.font = 'bold 11px monospace';
+  g.fillText('DN', upU + 10, 55);
+  // 当前楼层
+  g.fillStyle = 'rgba(210,210,200,0.22)';
+  g.font = 'bold 26px monospace';
+  g.fillText('2F', 22, 36);
   g.restore();
 
   g.save();
@@ -416,39 +436,39 @@ function buildStair() {
   g.restore();
   resetT(g);
 
-  // 上下两段楼梯
-  const up = A.makeStairs(7, 2.4, 1, 11);
-  const down = A.makeStairs(7, 2.4, -1, 12);
-  a.props.push({ id: 'stairUp', s: up, x: 6.6, y: 2.4, col: [2.6, 3.2], occ: null });
-  a.props.push({ id: 'stairDown', s: down, x: 6.6, y: 6.0, col: [2.6, 3.2], occ: null });
-  a.props.push({ id: 'rub1', s: A.makeRubble(501), x: 2.6, y: 5.4, col: null, occ: null });
-  a.props.push({ id: 'rub2', s: A.makeRubble(502), x: 3.8, y: 3.0, col: null, occ: null });
-  a.props.push({ id: 'crate', s: A.makeCrate(0.85, 503), x: 1.4, y: 6.6, col: [0.85, 0.85], occ: [0.85, 0.85, 0.8] });
+  /* 布局：左半边是可走的平台，右半边上半是上行梯段、下半是下行井口。
+     出生点和梯段落脚点都必须留在碰撞体外面，否则一传送进来就卡死。 */
+  const up = A.makeStairsUp(6, 2.3, 11);
+  const down = A.makeStairsDown(2.3, 2.6, 12);
+  a.props.push({ id: 'stairUp', s: up, x: 6.9, y: 2.3, col: [2.5, 3.3], occ: null });
+  a.props.push({ id: 'stairDown', s: down, x: 6.9, y: 5.9, col: [2.5, 2.8], occ: null });
+  a.props.push({ id: 'rub1', s: A.makeRubble(501), x: 2.4, y: 6.2, col: null, occ: null });
+  a.props.push({ id: 'rub2', s: A.makeRubble(502), x: 3.4, y: 2.6, col: null, occ: null });
+  a.props.push({ id: 'crate', s: A.makeCrate(0.85, 503), x: 1.1, y: 7.0, col: [0.85, 0.85], occ: [0.85, 0.85, 0.8] });
 
-  // 栏杆（视觉 + 遮挡）
-  a.props.push({ id: 'rail', s: A.makePipeStack(504), x: 4.7, y: 4.3, col: [0.5, 1.2], occ: [0.5, 1.2, 2.2] });
-
-  a.fixtures.push({ x: 3.4, y: 3.2, z: WALL_H - 0.28, len: 1.8, light: 'sl0', tilt: 0.22, mode: 2 });
-  a.lights.push({ id: 'sl0', x: 3.4, y: 3.2, z: WALL_H - 0.3, r: 5.4, color: [208, 220, 226], power: 0.5, seed: 1.9, mode: 2 });
+  a.fixtures.push({ x: 3.2, y: 3.6, z: WALL_H - 0.28, len: 1.8, light: 'sl0', tilt: 0.22, mode: 2 });
+  a.lights.push({ id: 'sl0', x: 3.2, y: 3.6, z: WALL_H - 0.3, r: 5.6, color: [208, 220, 226], power: 0.52, seed: 1.9, mode: 2 });
   // 安全出口绿灯
   a.lights.push({ id: 'exit', x: EXIT_SIGN.x, y: 0.5, z: 2.3, r: 4.4, color: [110, 235, 140], power: 0.62, seed: 4.4, mode: 5 });
+  // 上行开口透出的一点光，让"上面还有路"看得出来
+  a.lights.push({ id: 'upglow', x: 6.9, y: 0.5, z: 2.2, r: 3.6, color: [180, 196, 206], power: 0.3, seed: 2.6, mode: 5 });
 
-  a.spawns.fromCorr2 = { x: 2.1, y: 1.5 };
-  a.spawns.fromCorr3 = { x: 6.6, y: 1.4 };
-  a.spawns.fromCorr1 = { x: 6.6, y: 7.0 };
-  a.spawns.respawn = { x: 3.0, y: 4.2 };
+  a.spawns.fromCorr2 = { x: 2.1, y: 1.6 };
+  a.spawns.fromCorr3 = { x: 4.9, y: 2.3 }; // 上行梯段脚下，碰撞体左侧
+  a.spawns.fromCorr1 = { x: 4.9, y: 5.9 }; // 下行井口旁
+  a.spawns.respawn = { x: 2.6, y: 4.2 };
 
   a.links.push({
     x: 2.1, y: 0.6, r: 1.6, to: 'corr2', spawn: 'fromStair',
     text: '回到二层走廊', short: '二层', anchor: { x: 2.1, y: 0.1, z: 2.4 },
   });
   a.links.push({
-    x: 6.6, y: 1.1, r: 1.7, to: 'corr3', spawn: 'fromStair',
-    text: '上楼 · 三层', short: '上楼', anchor: { x: 6.6, y: 1.0, z: 2.6 },
+    x: 5.5, y: 2.3, r: 1.7, to: 'corr3', spawn: 'fromStair',
+    text: '上楼 · 三层', short: '上楼', anchor: { x: 6.6, y: 1.2, z: 2.9 },
   });
   a.links.push({
-    x: 6.6, y: 7.3, r: 1.7, to: 'corr1', spawn: 'fromStair',
-    text: '下楼 · 一层', short: '下楼', anchor: { x: 6.6, y: 7.3, z: 1.4 },
+    x: 5.5, y: 5.9, r: 1.7, to: 'corr1', spawn: 'fromStair',
+    text: '下楼 · 一层', short: '下楼', anchor: { x: 6.6, y: 5.9, z: 1.1 },
   });
   return closeArea(a);
 }

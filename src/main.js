@@ -129,6 +129,43 @@ function doAction(act) {
  * 区域切换
  * ------------------------------------------------------------------ */
 
+/**
+ * 换区域走一次淡入淡出：先黑下去，全黑那一刻才真正切换，再亮起来。
+ * 直接硬切会让玩家分不清自己是否真的换了地方。
+ */
+const TRANS_OUT = 0.3;
+const TRANS_IN = 0.42;
+
+function startTransition(to, spawn) {
+  if (game.trans) return;
+  game.trans = { to, spawn, t: 0, phase: 'out' };
+  UI.setPrompt(null);
+  game.lastPrompt = '';
+  SFX.sfxClick();
+}
+
+function updateTransition(dt) {
+  const tr = game.trans;
+  if (!tr) return;
+  tr.t += dt;
+  if (tr.phase === 'out' && tr.t >= TRANS_OUT) {
+    enterArea(tr.to, tr.spawn);
+    tr.phase = 'in';
+    tr.t = 0;
+  } else if (tr.phase === 'in' && tr.t >= TRANS_IN) {
+    game.trans = null;
+  }
+}
+
+/** 过渡遮罩的不透明度 */
+function transAlpha() {
+  const tr = game.trans;
+  if (!tr) return 0;
+  return tr.phase === 'out'
+    ? Math.min(1, tr.t / TRANS_OUT)
+    : Math.max(0, 1 - tr.t / TRANS_IN);
+}
+
 function enterArea(id, spawnName) {
   area = getArea(id);
   ensureAreaLights(area);
@@ -297,7 +334,7 @@ function tryInteract() {
   const it = currentInteract();
   if (!it) return;
   if (it.id === 'link') {
-    enterArea(it.link.to, it.link.spawn);
+    startTransition(it.link.to, it.link.spawn);
     return;
   }
   if (it.id === 'radio') {
@@ -305,7 +342,7 @@ function tryInteract() {
     return;
   }
   if (it.id === 'doorOpen') {
-    enterArea('corr2', 'fromLab');
+    startTransition('corr2', 'fromLab');
     return;
   }
   if (it.id === 'door') {
@@ -544,6 +581,14 @@ function movePlayer(dt) {
  * 更新
  * ------------------------------------------------------------------ */
 
+/**
+ * 鼠标所指的屏幕点要反投影成世界坐标才能得到瞄准角，而反投影必须假定一个高度。
+ * 假定地面（z=0）的话，玩家把准星压在丧尸身体上时，反投影出来的地面点会落到
+ * 目标后方一大截 —— 实测瞄躯干偏 0.98 格、瞄头部偏 1.88 格，而命中阈值只有
+ * 0.36 格，等于瞄着身体永远打不中。所以按"胸部平面"反投影。
+ */
+const AIM_Z = 0.85; // 高度单位，约等于角色躯干中心
+
 function updateAim() {
   const p = game.player;
   if (pad.enabled) {
@@ -551,10 +596,32 @@ function updateAim() {
     const w = screenDirToWorld(pad.aim.x, pad.aim.y);
     p.aim = Math.atan2(w.y, w.x);
   } else {
-    const w = toWorld(mouse.x - area.cam.x, mouse.y - area.cam.y);
+    const w = toWorld(mouse.x - area.cam.x, mouse.y - area.cam.y + AIM_Z * TILE_Z);
     p.aim = Math.atan2(w.y - p.y, w.x - p.x);
+    // 吸附：光标压在某只丧尸的身体上时直接瞄准它。等距下屏幕纵向 1 像素
+    // 对应世界里很大一段距离，只靠反投影的话瞄头或瞄脚都会打空。
+    const snap = snapTarget();
+    if (snap) p.aim = Math.atan2(snap.y - p.y, snap.x - p.x);
   }
   p.aimScreen = normScreenDir(p.aim);
+}
+
+/** 找光标屏幕位置附近的丧尸，返回它的世界坐标 */
+function snapTarget() {
+  const cam = area.cam;
+  let best = null;
+  let bestD = 18; // 像素：从脚底到头顶整个身体都能吸附
+  for (const z of horde.list) {
+    if (z.dead) continue;
+    const sx = cam.x + (z.x - z.y) * HW;
+    const sy = cam.y + (z.x + z.y) * HH - 15; // 躯干中心
+    const d = Math.hypot(mouse.x - sx, mouse.y - sy);
+    if (d < bestD) {
+      bestD = d;
+      best = z;
+    }
+  }
+  return best;
 }
 
 function normScreenDir(a) {
@@ -591,6 +658,15 @@ function update(dt) {
   if (game.state === 'dead') {
     game.phase += dt;
     if (game.phase > 3.2) respawn();
+    return;
+  }
+
+  // 过渡期间冻结玩家，避免在黑屏里乱走
+  updateTransition(dt);
+  if (game.trans) {
+    game.player.moving = false;
+    game.player.walk = lerp(game.player.walk, 0, Math.min(1, dt * 10));
+    horde.update(dt, game.player, blocked, area);
     return;
   }
 
@@ -753,6 +829,7 @@ function respawn() {
   game.fade = 1;
   setPadVisible(true);
   horde.clear();
+  game.trans = null;
   // 一律回到楼梯间
   enterArea('stair', 'respawn');
   game.gun.mag = MAG_SIZE;
@@ -1318,6 +1395,12 @@ function render() {
   if (game.state === 'dead') {
     const k = Math.min(1, game.phase / 1.6);
     ctx.fillStyle = `rgba(0,0,0,${0.92 * k})`;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+  // 换区域的淡入淡出
+  const ta = transAlpha();
+  if (ta > 0.002) {
+    ctx.fillStyle = `rgba(0,0,0,${ta})`;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
 
