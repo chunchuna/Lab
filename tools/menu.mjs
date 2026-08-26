@@ -33,7 +33,9 @@ const shot = async (name) => {
   console.log('  shot', name);
 };
 
-await page.goto('http://localhost:5173/', { waitUntil: 'networkidle0' });
+/* 'load' 而不是 'networkidle0'：本地静态服务器的 keep-alive 连接会让
+   networkidle0 一直等到超时，headless 下尤其明显。 */
+await page.goto('http://localhost:5173/', { waitUntil: 'load' });
 await wait(1200);
 await shot('idle');
 await wait(2600); // 扑玻璃那一下
@@ -76,7 +78,7 @@ const save = await page.evaluate(() => window.localStorage.getItem('lab7.save.v1
 console.log('  save record:', save);
 
 // 重新载入：菜单应该认出记录，读取记录可用
-await page.reload({ waitUntil: 'networkidle0' });
+await page.reload({ waitUntil: 'load' });
 await wait(900);
 await shot('with-save');
 console.log('  load enabled:', await page.evaluate(() => !document.querySelector('.m-btn[data-act="load"]').classList.contains('off')));
@@ -86,7 +88,7 @@ console.log('  after load:', await page.evaluate(() => ({ state: window.__game.s
 await shot('loaded');
 
 // __skipIntro 还得能用
-await page.reload({ waitUntil: 'networkidle0' });
+await page.reload({ waitUntil: 'load' });
 await wait(700);
 await page.evaluate(() => window.__skipIntro());
 await wait(600);
