@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>LAB 7 — 隔离实验室</title>
 <link rel="icon" href="data:," />
-<link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="style.css?v=1.1.1" />
 </head>
 <body>
   <div id="stage">
@@ -147,9 +147,6 @@
 
       <div id="cursor"><svg viewBox="0 0 40 40" width="40" height="40"><g id="cursor-g"></g></svg></div>
 
-      <!-- 版本号：屏幕下方。号源是 src/version.js，initUI 写入 -->
-      <div id="build"><span id="build-ver"></span></div>
-
       <!-- 触屏操作层 -->
       <div id="pad" class="hidden">
         <div class="stick" id="stick-move"><b>移动</b><i></i></div>
@@ -171,6 +168,10 @@
     <p class="rot-s">ROTATE YOUR DEVICE</p>
   </div>
 
-  <script type="module" src="src/main.js"></script>
+  <!-- 版本号必须在 #stage 外面：舞台有 transform，放里面会被裁掉，
+       窗口上下黑边时也看不见。贴浏览器视口底边。 -->
+  <div id="build"><span id="build-ver">v1.1.1</span></div>
+
+  <script type="module" src="src/main.js?v=1.1.1"></script>
 </body>
 </html>

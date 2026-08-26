@@ -8,16 +8,21 @@ alwaysApply: true
 ## 屏幕下方必须显示当前版本
 
 - 版本写在 `src/version.js` 的 `VERSION`（例如 `'1.1.0'`）。
-- 游戏画面下方 `#build` 显示 `v` + 这个号。由 `ui.js` 在 `initUI` 写入，**不要画到 canvas 上**。
+- `#build` 必须放在 `#stage` **外面**，`position: fixed` 贴浏览器视口底边。
+  舞台有 `transform`，放里面会被裁掉，窗口上下黑边时也看不见。
+- 由 `ui.js` 在 `initUI` 写入 `v` + `VERSION`；`index.html` 里先写一份同号作兜底。
+  **不要画到 canvas 上。**
 - `package.json` 的 `version` 必须和 `VERSION` 对齐。
+- `index.html` 里 `style.css` 和 `src/main.js` 的 `?v=` 查询串也要改成同一个号，
+  避免 GitHub Pages / 浏览器缓存还显示上一版。
 
 ## 每次更新先升版本号
 
 改任何会进游戏或进站点的内容之前，先把 `VERSION` 升一档：
 
-- 小修、文案、样式、规则：patch（`1.1.0` → `1.1.1`）
-- 新功能、新场景、流程改动：minor（`1.1.0` → `1.2.0`）
-- 大改、不兼容重做：major（`1.1.0` → `2.0.0`）
+- 小修、文案、样式、规则：patch（`1.1.1` → `1.1.2`）
+- 新功能、新场景、流程改动：minor（`1.1.1` → `1.2.0`）
+- 大改、不兼容重做：major（`1.1.1` → `2.0.0`）
 
 漏升版本号等于没做完。
 

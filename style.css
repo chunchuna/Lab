@@ -183,17 +183,22 @@ html, body {
 #help span { margin-left: 1.4em; }
 #help span:first-child { margin-left: 0; }
 
-/* ---------- 版本号：屏幕正下方，不挡手和弹药 ---------- */
+/* ---------- 版本号：视口底边正中（在 #stage 外，不用 em） ---------- */
 #build {
-  position: absolute;
+  position: fixed;
   left: 50%;
-  bottom: 0.55em;
+  bottom: 10px;
   transform: translateX(-50%);
-  opacity: 0.42;
-  letter-spacing: 0.14em;
+  background: var(--surface);
+  padding: 4px 12px;
+  z-index: 400;
   pointer-events: none;
 }
-#build span { font-size: 1.05em; }
+#build span {
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--text);
+}
 
 /* ---------- QTE ---------- */
 /* 键盘专用，一次只显示一个键。不给触屏加按钮。
