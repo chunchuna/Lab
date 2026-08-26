@@ -134,14 +134,52 @@
         </div>
       </div>
 
-      <!-- 标题 -->
-      <div id="title">
-        <div class="t-wrap">
-          <div class="t-sub">SECTOR 7 · CONTAINMENT WING</div>
+      <!-- 主菜单：画面（收容舱与观察人员）画在 canvas 上，文字一律 DOM。
+           摆在左下角，右上方留给收容舱那一幕。 -->
+      <div id="menu">
+        <div class="m-brand">
+          <div class="m-sub">SECTOR 7 · CONTAINMENT WING</div>
           <h1>LAB&nbsp;7</h1>
-          <div class="t-line"></div>
-          <p class="t-desc">通讯中断 · 主电源不稳定 · 门禁离线</p>
-          <p class="t-key">按任意键醒来</p>
+          <p class="m-desc">07 号个体 · 观察记录第 1042 日</p>
+        </div>
+        <div class="m-list">
+          <button class="m-btn" data-act="start">
+            <span class="m-label">开始游戏</span><span class="m-note">从序章开始</span>
+          </button>
+          <button class="m-btn" data-act="load">
+            <span class="m-label">读取记录</span><span class="m-note" id="m-load-note">暂无存档</span>
+          </button>
+          <button class="m-btn" data-act="settings">
+            <span class="m-label">设置</span><span class="m-note">音量 · 视线遮挡</span>
+          </button>
+        </div>
+        <div class="m-hint">
+          <i class="kbd">W</i><i class="kbd">S</i>选择<b>·</b><i class="kbd">Enter</i>确认<b>·</b>鼠标点选亦可
+        </div>
+      </div>
+
+      <!-- 设置 -->
+      <div id="settings" class="hidden">
+        <div class="set-panel">
+          <div class="set-head">
+            <span class="set-title">设置</span>
+            <span class="set-close"><i class="kbd">Esc</i>返回</span>
+          </div>
+          <div class="set-row">
+            <span class="set-name">主音量</span>
+            <input type="range" id="set-vol" min="0" max="100" step="1" value="55" />
+            <span class="set-val" id="set-vol-val">55%</span>
+          </div>
+          <div class="set-row">
+            <span class="set-name">真实视线遮挡</span>
+            <button class="set-btn" id="set-los"><span>关</span></button>
+            <span class="set-val">只能看见视野内的区域，游戏中按 <i class="kbd">V</i> 也能切换</span>
+          </div>
+          <div class="set-row">
+            <span class="set-name">进度记录</span>
+            <button class="set-btn" id="set-clear"><span>删除记录</span></button>
+            <span class="set-val" id="set-save-info">暂无存档</span>
+          </div>
         </div>
       </div>
 

@@ -25,7 +25,9 @@ export function initUI() {
   el.reloadFill = $('#reload-bar i');
   el.cursor = $('#cursor');
   el.cursorG = $('#cursor-g');
-  el.title = $('#title');
+  el.menu = $('#menu');
+  el.loadNote = $('#m-load-note');
+  el.settings = $('#settings');
   el.help = $('#help');
   el.los = $('#los-state');
   el.scan = $('#scan');
@@ -109,9 +111,165 @@ export function setLosState(on) {
   }
 }
 
-export function hideTitle() {
-  el.title.classList.add('out');
-  setTimeout(() => el.title.classList.add('hidden'), 1200);
+/* ---------------- 主菜单 ---------------- *
+ *
+ * 画面（收容舱那一幕）由 menu.js 画在 canvas 上，这里只管 DOM：
+ * 三个按钮、键盘选择、设置面板。选中一律用反色表示。
+ */
+
+const menu = {
+  items: [],
+  idx: 0,
+  visible: true,
+  hooks: {},
+};
+
+/**
+ * hooks = { onStart, onLoad, onSetting(patch), onClearSave }
+ * onSetting 收到的是增量，比如 { volume: 0.4 } 或 { los: true }。
+ */
+export function initMenu(hooks, settings) {
+  menu.hooks = hooks || {};
+  el.hud.classList.add('menu-on');
+  document.body.classList.add('menu-on');
+  menu.items = Array.from(el.menu.querySelectorAll('.m-btn'));
+  menu.items.forEach((b, i) => {
+    b.addEventListener('mouseenter', () => selectMenu(i));
+    b.addEventListener('click', () => activateMenu(i));
+  });
+  selectMenu(0);
+
+  el.setVol = $('#set-vol');
+  el.setVolVal = $('#set-vol-val');
+  el.setLos = $('#set-los');
+  el.setClear = $('#set-clear');
+  el.setSaveInfo = $('#set-save-info');
+
+  el.setVol.addEventListener('input', () => {
+    const v = Number(el.setVol.value) / 100;
+    el.setVolVal.textContent = Math.round(v * 100) + '%';
+    if (menu.hooks.onSetting) menu.hooks.onSetting({ volume: v });
+  });
+  el.setVol.addEventListener('change', () => SFX.sfxClick());
+  el.setLos.addEventListener('click', () => {
+    const on = !el.setLos.classList.contains('on');
+    setLosToggle(on);
+    SFX.sfxClick();
+    if (menu.hooks.onSetting) menu.hooks.onSetting({ los: on });
+  });
+  el.setClear.addEventListener('click', () => {
+    if (el.setClear.classList.contains('done')) return;
+    el.setClear.classList.add('done');
+    el.setClear.querySelector('span').textContent = '已删除';
+    SFX.sfxClick();
+    if (menu.hooks.onClearSave) menu.hooks.onClearSave();
+  });
+  el.settings.addEventListener('click', (e) => {
+    if (e.target === el.settings) closeSettings();
+  });
+
+  applySettingsUI(settings);
+}
+
+function setLosToggle(on) {
+  el.setLos.classList.toggle('on', on);
+  el.setLos.querySelector('span').textContent = on ? '开' : '关';
+}
+
+/** 把设置值写回面板（启动时读存下来的值用） */
+export function applySettingsUI(s) {
+  if (!s || !el.setVol) return;
+  el.setVol.value = String(Math.round(s.volume * 100));
+  el.setVolVal.textContent = Math.round(s.volume * 100) + '%';
+  setLosToggle(!!s.los);
+}
+
+/** 有存档时把「读取记录」点亮，并在后面写上位置与时间 */
+export function setMenuSave(label) {
+  const btn = menu.items.find((b) => b.dataset.act === 'load');
+  if (!btn) return;
+  btn.classList.toggle('off', !label);
+  el.loadNote.textContent = label || '暂无存档';
+  if (el.setSaveInfo) el.setSaveInfo.textContent = label || '暂无存档';
+  if (el.setClear) {
+    el.setClear.classList.toggle('done', !label);
+    el.setClear.querySelector('span').textContent = label ? '删除记录' : '无记录';
+  }
+  // 选中的正好是这条又刚变灰，就往下挪一格
+  if (!label && menu.items[menu.idx] === btn) selectMenu(menu.idx + 1);
+}
+
+function selectMenu(i) {
+  const n = menu.items.length;
+  if (!n) return;
+  menu.idx = ((i % n) + n) % n;
+  menu.items.forEach((b, k) => b.classList.toggle('on', k === menu.idx));
+}
+
+function moveMenu(d) {
+  // 跳过灰掉的项，一圈内找得到就停
+  let i = menu.idx;
+  for (let n = 0; n < menu.items.length; n++) {
+    i = (i + d + menu.items.length) % menu.items.length;
+    if (!menu.items[i].classList.contains('off')) break;
+  }
+  selectMenu(i);
+  SFX.sfxBeep(880, 0.04, 0.06);
+}
+
+function activateMenu(i) {
+  selectMenu(i);
+  const btn = menu.items[i];
+  if (!btn || btn.classList.contains('off')) {
+    SFX.sfxError();
+    return;
+  }
+  SFX.sfxClick();
+  const act = btn.dataset.act;
+  if (act === 'start' && menu.hooks.onStart) menu.hooks.onStart();
+  else if (act === 'load' && menu.hooks.onLoad) menu.hooks.onLoad();
+  else if (act === 'settings') openSettings();
+}
+
+/** 主菜单的键盘分支。返回 true 表示这一下被菜单吃掉了 */
+export function menuKey(k) {
+  if (!menu.visible) return false;
+  if (settingsOpen()) {
+    if (k === 'escape' || k === 'enter' || k === ' ') closeSettings();
+    return true;
+  }
+  if (k === 'w' || k === 'arrowup') moveMenu(-1);
+  else if (k === 's' || k === 'arrowdown') moveMenu(1);
+  else if (k === 'enter' || k === ' ') activateMenu(menu.idx);
+  else if (k === 'escape') closeSettings();
+  else return false;
+  return true;
+}
+
+export function openSettings() {
+  el.settings.classList.remove('hidden');
+}
+
+export function closeSettings() {
+  el.settings.classList.add('hidden');
+}
+
+export function settingsOpen() {
+  return !el.settings.classList.contains('hidden');
+}
+
+export function menuVisible() {
+  return menu.visible;
+}
+
+export function hideMenu() {
+  if (!menu.visible) return;
+  menu.visible = false;
+  closeSettings();
+  el.hud.classList.remove('menu-on');
+  document.body.classList.remove('menu-on');
+  el.menu.classList.add('out');
+  setTimeout(() => el.menu.classList.add('hidden'), 900);
 }
 
 export function updateHands(inv) {

@@ -16,6 +16,24 @@ export const PIX_BASE = 6;
 export const PIX_MAX = 8;
 
 /**
+ * 整幕放大的场景（主菜单把 320×180 的取景铺满全屏）在搭景时要临时抬高倍率：
+ * 屏幕上一个逻辑单位占 SCALE×N 个设备像素，离屏缓冲若还按 N 生成，贴回去就要
+ * 再放大一轮 —— 那正是 640×360 吹大的老路。
+ *
+ * 只包住搭景那一段**同步**代码，用完立刻还原。
+ */
+let pixBoost = 1;
+export function withPixelBoost(k, fn) {
+  const prev = pixBoost;
+  pixBoost = Math.max(1, k);
+  try {
+    return fn();
+  } finally {
+    pixBoost = prev;
+  }
+}
+
+/**
  * 当前窗口能放下的最大整数倍率。按**设备像素**算（乘 devicePixelRatio），
  * 不是 CSS 像素 —— Windows 的 125% / 150% 和 Retina 会让两者不等。
  *
@@ -23,12 +41,12 @@ export const PIX_MAX = 8;
  * 常见对照：720p→2、1080p→3、1440p→4、4K→6。
  */
 export function pixelScale() {
-  if (typeof window === 'undefined') return PIX_BASE;
+  if (typeof window === 'undefined') return PIX_BASE * pixBoost;
   const dpr = window.devicePixelRatio || 1;
   const w = (window.innerWidth || VIEW_W) * dpr;
   const h = (window.innerHeight || VIEW_H) * dpr;
   const fit = Math.floor(Math.min(w / VIEW_W, h / VIEW_H));
-  return Math.max(1, Math.min(PIX_MAX, fit));
+  return Math.max(1, Math.min(PIX_MAX, fit)) * pixBoost;
 }
 
 /** 把逻辑坐标对齐到当前像素网格的整数格上（4K 上就是 1 个设备像素）。 */
