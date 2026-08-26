@@ -1,3 +1,5 @@
+import { pixelScale } from './config.js';
+
 export function mulberry32(a) {
   return function () {
     a |= 0;
@@ -36,19 +38,23 @@ export function shade(hex, amt) {
 }
 
 /**
- * 离屏画布。一律画在逻辑像素网格上（1 逻辑像素 = 1 真实像素），放大留到最后
- * 一步整数倍呈现时做，中间任何一层都不许出现半像素的平滑插值 —— 那正是把
- * 像素块边缘抹成油画的来源。
+ * 离屏画布。逻辑尺寸仍是 w×h（640 空间），真实像素是 wN×hN。
+ * 基础变换乘上 N，调用方继续写逻辑坐标；4K 时 N=6，格子就是 3840×2160。
  *
- * 逻辑尺寸记在 `c.lw / c.lh` 上，`blit` 按它们画。
+ * 逻辑尺寸记在 `c.lw / c.lh` 上，`blit` 按它们画，这样叠到同样带 N 变换
+ * 的目标上是 1:1，不会再被乘一次。
  */
 export function makeCanvas(w, h) {
+  const n = pixelScale();
   const c = document.createElement('canvas');
-  c.width = c.lw = Math.max(1, Math.ceil(w));
-  c.height = c.lh = Math.max(1, Math.ceil(h));
+  c.lw = Math.max(1, Math.ceil(w));
+  c.lh = Math.max(1, Math.ceil(h));
+  c.width = Math.max(1, Math.round(c.lw * n));
+  c.height = Math.max(1, Math.round(c.lh * n));
+  c.pix = n;
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
-  setBase(g, 1, 0, 0, 1, 0, 0);
+  setBase(g, n, 0, 0, n, 0, 0);
   return { c, g, lw: c.lw, lh: c.lh };
 }
 

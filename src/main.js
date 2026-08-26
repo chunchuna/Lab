@@ -1,5 +1,5 @@
 import {
-  VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, WALL_H, pixelScale,
+  VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, WALL_H, pixelScale, snap,
   PLAYER_R, PLAYER_SPEED, MAG_SIZE, START_SPARE_MAGS, RELOAD_TIME, FIRE_COOLDOWN,
 } from './config.js';
 import { toWorld, wallNorthPt, wallNorthTransform } from './iso.js';
@@ -7,7 +7,7 @@ import {
   DOOR, DOOR_SPOT, LOCKER_POS, LOCKER_SPOT, BED_POS, PLAYER_START, SCANNER,
   SPARK_SRC, SCREEN_SRC,
 } from './level.js';
-import { getArea, EXIT_SIGN } from './areas.js';
+import { getArea, EXIT_SIGN, dropAreaCache } from './areas.js';
 import { Horde, drawZombie } from './zombies.js';
 import { computeVisibility, computeVisibilityCone, raycast, lineOfSight } from './visibility.js';
 import { Lighting } from './lighting.js';
@@ -24,34 +24,59 @@ import {
 } from './controls.js';
 import { clamp, flicker, lerp, makeCanvas, smoothstep, setBase, blit } from './util.js';
 
-/* 两级画布：世界画在 640×360 的像素网格上，再整数倍放大到屏幕画布。
-   放大用最近邻，一个逻辑像素就变成整齐的 N×N 色块（4K 时 N=6，3840×2160）。
-
-   放大倍率不参与任何绘制坐标，所以精灵、静态层、光照贴图全都是分辨率无关的 ——
-   改窗口大小只要换屏幕画布的尺寸，不用重新烘焙。 */
-const frameBuf = document.createElement('canvas');
-frameBuf.width = VIEW_W;
-frameBuf.height = VIEW_H;
-const ctx = frameBuf.getContext('2d', { alpha: false });
+/* 世界直接画在 640N×360N 的像素网格上（4K 时 N=6 → 3840×2160）。
+   逻辑坐标仍是 640×360，倍率折进基础变换。#game 的 backing store 就是这张
+   网格，和设备像素 1:1，不再先画 640×360 再最近邻吹大。 */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d', { alpha: false });
 ctx.imageSmoothingEnabled = false;
 
-const screen = document.getElementById('game');
-const screenCtx = screen.getContext('2d', { alpha: false });
+let renderN = 0;
+let gridReady = false;
 
-function sizeScreen() {
-  const s = pixelScale();
-  if (screen.width === VIEW_W * s && screen.height === VIEW_H * s) return;
-  screen.width = VIEW_W * s;
-  screen.height = VIEW_H * s;
-  // 改尺寸会把上下文状态清回默认值，平滑插值得重新关掉
-  screenCtx.imageSmoothingEnabled = false;
+function sizeCanvas() {
+  const n = pixelScale();
+  const w = VIEW_W * n;
+  const h = VIEW_H * n;
+  if (canvas.width === w && canvas.height === h) return false;
+  canvas.width = w;
+  canvas.height = h;
+  ctx.imageSmoothingEnabled = false;
+  return true;
 }
-sizeScreen();
-window.addEventListener('resize', sizeScreen);
 
-/** 把这一帧的 640×360 整数倍放大到屏幕画布 */
+function restoreAreaRuntime(a) {
+  if (a.id !== 'lab' || !a.sprites) return;
+  const p = a.props.find((q) => q.id === 'locker');
+  if (!p) return;
+  if (game.locker.looted) p.s = a.sprites.lockerEmpty;
+  else if (game.locker.open) p.s = a.sprites.lockerOpen;
+}
+
+/** 窗口整数倍率变了：重做工作缓冲，按新 N 重画当前区域的精灵/静态层/光照。 */
+function syncPixelGrid() {
+  const n = pixelScale();
+  sizeCanvas();
+  if (n === renderN) return;
+  const prev = renderN;
+  renderN = n;
+  if (!gridReady || prev === 0) return;
+  lighting.rebuild();
+  A.clearRingCache();
+  const id = area.id;
+  dropAreaCache();
+  area = getArea(id);
+  restoreAreaRuntime(area);
+  ensureAreaLights(area);
+}
+sizeCanvas();
+renderN = pixelScale();
+window.addEventListener('resize', () => {
+  syncPixelGrid();
+});
+
 function present() {
-  screenCtx.drawImage(frameBuf, 0, 0, screen.width, screen.height);
+  /* 已经画在 #game 上，和设备像素 1:1，没有第二级放大。 */
 }
 
 const stage = document.getElementById('stage');
@@ -138,13 +163,14 @@ function ensureAreaLights(a) {
     const t = makeCanvas(VIEW_W, VIEW_H);
     a.skyPaint(t.g);
     t.g.globalCompositeOperation = 'destination-out';
-    t.g.drawImage(a.mask, 0, 0); // 抠掉屋面，天空光不该打亮脚下的地
+    blit(t.g, a.mask, 0, 0); // 抠掉屋面，天空光不该打亮脚下的地
     t.g.globalCompositeOperation = 'source-over';
     a.skyLight = t.c;
   }
   a.lit = true;
 }
 ensureAreaLights(area);
+gridReady = true;
 
 /* ------------------------------------------------------------------ *
  * 输入
@@ -2726,7 +2752,7 @@ function drawHighlight(g, cam) {
   const sy = cam.y + (pr.x + pr.y) * HH - (pr.zOff || 0) * TILE_Z;
   g.save();
   g.globalAlpha = a;
-  blit(g, ring.img, Math.round(sx - pr.s.ox - ring.pad), Math.round(sy - pr.s.oy - ring.pad));
+  blit(g, ring.img, snap(sx - pr.s.ox - ring.pad), snap(sy - pr.s.oy - ring.pad));
   g.restore();
 }
 
@@ -2913,21 +2939,23 @@ function drawDoorDamage(g, cam) {
 }
 
 /**
- * 世界层的基础变换。平时是单位阵；QTE 近景时整帧一起放大 —— 烘焙光贴图与
- * 遮罩都在未缩放的 640×360 屏幕空间里合成，只有整帧一起缩放，几何和光照
- * 才不会错开。屏幕空间的东西（雨、字幕遮罩）画之前要自己 setTransform 回单位阵。
+ * 世界层的基础变换。平时是 N 倍网格；QTE 近景时整帧一起再乘变焦 —— 烘焙光
+ * 贴图与遮罩都在未变焦的高清屏幕空间里合成，只有整帧一起缩放，几何和光照
+ * 才不会错开。屏幕空间的东西（雨、字幕遮罩）不吃变焦，但仍要吃 N。
  */
 const viewXform = { s: 1, tx: 0, ty: 0 };
 
-/** 世界层：逻辑坐标 -> 变焦 */
+/** 世界层：逻辑坐标 -> 变焦 -> 像素网格倍率 */
 function applyView(g) {
-  const s = viewXform.s;
-  setBase(g, s, 0, 0, s, viewXform.tx, viewXform.ty);
+  const n = pixelScale();
+  const s = viewXform.s * n;
+  setBase(g, s, 0, 0, s, viewXform.tx * n, viewXform.ty * n);
 }
 
-/** 屏幕空间层（雨、黑幕、闪光）：不吃变焦 */
+/** 屏幕空间层（雨、黑幕、闪光）：不吃变焦，吃网格倍率 */
 function applyScreen(g) {
-  setBase(g, 1, 0, 0, 1, 0, 0);
+  const n = pixelScale();
+  setBase(g, n, 0, 0, n, 0, 0);
 }
 
 /** 世界层里那些临时改过变换的绘制收尾用 */
@@ -3135,8 +3163,8 @@ function render() {
      道具各自 Math.round，烘焙光贴图又按浮点画，几层各进各的整数格，相对错开
      1px —— 那就是"换场景后有些物件在抖"的真正原因。 */
   const amp = game.shake > 0.05 ? game.shake : 0;
-  const shx = amp ? Math.round((Math.random() - 0.5) * amp) : 0;
-  const shy = amp ? Math.round((Math.random() - 0.5) * amp) : 0;
+  const shx = amp ? snap((Math.random() - 0.5) * amp) : 0;
+  const shy = amp ? snap((Math.random() - 0.5) * amp) : 0;
   const cam = { x: area.cam.x + shx, y: area.cam.y + shy };
   const p = game.player;
 
@@ -3186,7 +3214,7 @@ function render() {
   if (area.backdrop) blit(ctx, area.backdrop, shx, shy);
 
   // 静态图层
-  blit(ctx, area.statics.img, Math.round(cam.x - area.statics.ox), Math.round(cam.y - area.statics.oy));
+  blit(ctx, area.statics.img, snap(cam.x - area.statics.ox), snap(cam.y - area.statics.oy));
   if (area.id === 'lab' && game.door.hits > 0) drawDoorDamage(ctx, cam);
   fx.drawDecals(ctx, cam);
 
@@ -3222,7 +3250,7 @@ function render() {
     if (it.pr) {
       const sx = cam.x + (it.pr.x - it.pr.y) * HW;
       const sy = cam.y + (it.pr.x + it.pr.y) * HH - (it.pr.zOff || 0) * TILE_Z;
-      blit(ctx, it.pr.s.img, Math.round(sx - it.pr.s.ox), Math.round(sy - it.pr.s.oy));
+      blit(ctx, it.pr.s.img, snap(sx - it.pr.s.ox), snap(sy - it.pr.s.oy));
     } else if (it.z) {
       const zs = { x: cam.x + (it.z.x - it.z.y) * HW, y: cam.y + (it.z.x + it.z.y) * HH };
       drawZombie(ctx, zs.x, zs.y, it.z, false);
@@ -3233,7 +3261,7 @@ function render() {
 
   // 近侧矮护墙：必须压在道具与角色之上
   if (area.fg) {
-    blit(ctx, area.fg.img, Math.round(cam.x - area.fg.ox), Math.round(cam.y - area.fg.oy));
+    blit(ctx, area.fg.img, snap(cam.x - area.fg.ox), snap(cam.y - area.fg.oy));
   }
 
   fx.draw(ctx, cam);
@@ -3490,6 +3518,7 @@ function frame(now) {
   game.rt += rdt;
   // 慢动作只作用在世界上；镜头与 QTE 计时用 game.rdt
   game.timescale += (game.tsTarget - game.timescale) * Math.min(1, rdt * 7);
+  syncPixelGrid();
   update(rdt * game.timescale);
   render();
   present();

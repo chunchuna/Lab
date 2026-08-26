@@ -40,9 +40,8 @@ html, body {
   background: #000;
 }
 
-/* 画布的真实像素 = 640×360 × 整数倍（config.js 的 pixelScale），放大在 JS 里
-   用最近邻做完，CSS 这层是 1:1。pixelated 是保险：万一舞台被别的因素挪到
-   非整格上，也让边缘保持硬的，不要糊成插值。 */
+/* 画布的真实像素 = 640×360 × N（4K 时 N=6 → 3840×2160），世界直接画在这张
+   网格上，CSS 只做 1:1。pixelated 是保险：舞台万一停在非整格上，边缘仍硬。 */
 #game {
   display: block;
   width: 100%;

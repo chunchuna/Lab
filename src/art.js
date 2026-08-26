@@ -111,6 +111,9 @@ export function speckle(g, x, y, w, h, rand, n, colors, sw = 1, sh = 1) {
  * 所以夜里也能看清。
  */
 const ringCache = new Map();
+export function clearRingCache() {
+  ringCache.clear();
+}
 export function outlineRing(img, color = '#ded8c8', r = 1) {
   const key = img;
   let cached = ringCache.get(key);

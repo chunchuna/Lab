@@ -1,6 +1,6 @@
-import { HW, HH, TILE_Z, VIEW_W, VIEW_H } from './config.js';
+import { HW, HH, TILE_Z, VIEW_W, VIEW_H, pixelScale } from './config.js';
 import { ELLIPSE_SQUASH } from './iso.js';
-import { makeCanvas } from './util.js';
+import { makeCanvas, baseT, blit } from './util.js';
 
 const RSX = HW * Math.SQRT2; // 世界半径 -> 屏幕椭圆水平半轴
 
@@ -8,17 +8,22 @@ export class Lighting {
   constructor(w = VIEW_W, h = VIEW_H) {
     this.w = w;
     this.h = h;
-    this.light = makeCanvas(w, h);
-    this.scratch = makeCanvas(w, h);
-    this.mask = makeCanvas(w, h);
-    this.dark = makeCanvas(w, h);
     this.ambient = 'rgba(58,80,100,0.05)';
     this.softness = 1.6;
+    this.rebuild();
+  }
+
+  /** 倍率变了或第一次创建：按当前 N 重做工作缓冲。 */
+  rebuild() {
+    this.light = makeCanvas(this.w, this.h);
+    this.scratch = makeCanvas(this.w, this.h);
+    this.mask = makeCanvas(this.w, this.h);
+    this.dark = makeCanvas(this.w, this.h);
   }
 
   begin() {
     const g = this.light.g;
-    g.setTransform(1, 0, 0, 1, 0, 0);
+    baseT(g);
     g.globalCompositeOperation = 'source-over';
     g.clearRect(0, 0, this.w, this.h);
     g.fillStyle = this.ambient;
@@ -69,6 +74,12 @@ export class Lighting {
     if (any) g.fill();
   }
 
+  /** 高清网格上渐变已经有足够采样，每帧再 blur 整张 4K 缓冲太贵。低倍率才糊边。 */
+  _blur(g, px) {
+    if (pixelScale() >= 3) return;
+    g.filter = `blur(${px}px)`;
+  }
+
   /** 把一盏灯的径向渐变 ∩ 可见多边形渲染到 g 上 */
   _renderLight(g, o, power) {
     const cam = o.cam;
@@ -94,13 +105,13 @@ export class Lighting {
 
     if (o.vis) {
       const m = this.mask.g;
-      m.setTransform(1, 0, 0, 1, 0, 0);
+      baseT(m);
       m.globalCompositeOperation = 'source-over';
       m.clearRect(0, 0, this.w, this.h);
       this._shape(m, o.vis, cam);
       g.globalCompositeOperation = 'destination-in';
-      g.filter = `blur(${o.blur === undefined ? this.softness : o.blur}px)`;
-      g.drawImage(this.mask.c, 0, 0);
+      this._blur(g, o.blur === undefined ? this.softness : o.blur);
+      blit(g, this.mask.c, 0, 0);
       g.filter = 'none';
       g.globalCompositeOperation = 'source-over';
     }
@@ -118,14 +129,14 @@ export class Lighting {
     if (!o.vis && (cx + rad < 0 || cx - rad > this.w)) return;
 
     const s = this.scratch.g;
-    s.setTransform(1, 0, 0, 1, 0, 0);
+    baseT(s);
     s.globalCompositeOperation = 'source-over';
     s.clearRect(0, 0, this.w, this.h);
     this._renderLight(s, o, o.power);
 
     const l = this.light.g;
     l.globalCompositeOperation = 'lighter';
-    l.drawImage(this.scratch.c, 0, 0);
+    blit(l, this.scratch.c, 0, 0);
     l.globalCompositeOperation = 'source-over';
   }
 
@@ -139,13 +150,13 @@ export class Lighting {
     return c;
   }
 
-  /** 预烘焙的裁剪遮罩（关闭视线遮挡时房间轮廓是固定的），模糊也一次性做掉 */
+  /** 预烘焙的裁剪遮罩（关闭视线遮挡时房间轮廓是固定的） */
   bakeMask(vis, cam) {
     const t = makeCanvas(this.w, this.h);
     this._shape(t.g, vis, cam);
     const { c, g } = makeCanvas(this.w, this.h);
-    g.filter = `blur(${this.softness}px)`;
-    g.drawImage(t.c, 0, 0);
+    this._blur(g, this.softness);
+    blit(g, t.c, 0, 0);
     g.filter = 'none';
     return c;
   }
@@ -156,7 +167,7 @@ export class Lighting {
     const l = this.light.g;
     l.globalCompositeOperation = 'lighter';
     l.globalAlpha = Math.min(1, alpha);
-    l.drawImage(tex, dx, dy);
+    blit(l, tex, dx, dy);
     l.globalAlpha = 1;
     l.globalCompositeOperation = 'source-over';
   }
@@ -179,40 +190,37 @@ export class Lighting {
     const l = this.light.g;
     if (mask && mask.tex) {
       l.globalCompositeOperation = 'destination-in';
-      l.drawImage(mask.tex, mask.dx || 0, mask.dy || 0);
+      blit(l, mask.tex, mask.dx || 0, mask.dy || 0);
       l.globalCompositeOperation = 'source-over';
     } else if (mask) {
       const m = this.mask.g;
-      m.setTransform(1, 0, 0, 1, 0, 0);
+      baseT(m);
       m.globalCompositeOperation = 'source-over';
       m.clearRect(0, 0, this.w, this.h);
       this._shape(m, mask, cam);
       l.globalCompositeOperation = 'destination-in';
-      l.filter = `blur(${this.softness}px)`;
-      l.drawImage(this.mask.c, 0, 0);
+      this._blur(l, this.softness);
+      blit(l, this.mask.c, 0, 0);
       l.filter = 'none';
       l.globalCompositeOperation = 'source-over';
     }
 
     const d = this.dark.g;
-    d.setTransform(1, 0, 0, 1, 0, 0);
+    baseT(d);
     d.globalCompositeOperation = 'source-over';
     d.clearRect(0, 0, this.w, this.h);
     d.fillStyle = darkColor;
     d.fillRect(0, 0, this.w, this.h);
     d.globalCompositeOperation = 'destination-out';
-    d.drawImage(this.light.c, 0, 0);
+    blit(d, this.light.c, 0, 0);
     d.globalCompositeOperation = 'source-over';
 
-    /* 光照缓冲和世界缓冲同在 640×360 这张像素网格上，1:1 贴回去，中间不存在
-       跨倍率的重采样。每盏动态光都要在整张缓冲上走一次 filter: blur()，
-       这也是光照必须留在逻辑分辨率、不能跟着放大倍率走的原因。 */
+    /* 光照缓冲和世界缓冲同在 N 倍像素网格上，按逻辑尺寸贴回去。 */
     ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(this.dark.c, 0, 0, this.w, this.h);
-    // 彩色辉光
+    blit(ctx, this.dark.c, 0, 0);
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = 0.38;
-    ctx.drawImage(this.light.c, 0, 0, this.w, this.h);
+    blit(ctx, this.light.c, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
   }

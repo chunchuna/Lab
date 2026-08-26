@@ -1072,3 +1072,18 @@ export function getArea(id) {
 export function resetArea(id) {
   delete cache[id];
 }
+
+/** 倍率变了：丢掉缓存的区域，下次 getArea 会按新的 N 重画精灵和静态层。 */
+export function dropAreaCache() {
+  for (const id of Object.keys(cache)) delete cache[id];
+}
+
+/** 只作废光照贴图，几何与道具精灵留着。 */
+export function invalidateAreaLights() {
+  for (const a of Object.values(cache)) {
+    a.lit = false;
+    a.mask = null;
+    a.skyLight = null;
+    for (const L of a.lights) L.tex = null;
+  }
+}

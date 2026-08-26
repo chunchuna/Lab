@@ -16,9 +16,9 @@ export function layout() {
   const wh = window.innerHeight;
   const dpr = window.devicePixelRatio || 1;
 
-  /* 舞台只取整数倍尺寸：640×360 的每个逻辑像素在屏幕上正好占 N×N 个设备像素，
-     浏览器那一层不做任何缩放。窗口不是 16:9 的整数倍时，多出来的地方留黑边 ——
-     宁可四周黑一点，也不要把像素块拉成非整数倍。 */
+  /* 舞台只取整数倍尺寸：逻辑 640×360 对应真实 640N×360N 的像素网格，
+     CSS 尺寸 = 真实像素 / dpr，浏览器那一层 1:1。窗口不是 16:9 的整数倍时
+     留黑边，宁可四周黑一点，也不做非整数拉伸。 */
   const pix = pixelScale();
   let w = (VIEW_W * pix) / dpr;
   let h = (VIEW_H * pix) / dpr;
