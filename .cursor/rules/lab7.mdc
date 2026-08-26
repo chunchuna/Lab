@@ -31,6 +31,12 @@ alwaysApply: true
 - UI 可以做得更密、信息量更大，不用留手指空间。
 - 面向 1280×720 以上的窗口设计；`layout()` 会等比缩放，`em` 布局自动跟随。
 
+## 版本号与发布
+
+每次改动先升 `src/version.js` 的 `VERSION`，再改代码；改完直接
+commit + push 当前工作分支，触发 GitHub Pages。细则见
+`.cursor/rules/version-pages.mdc`。不要等 PR 审批。
+
 ## 分工：只做开发，不做玩法测试
 
 - **玩法测试由用户负责。** 不要写测试套件、不要跑成批截图脚本、不要做视觉验收，

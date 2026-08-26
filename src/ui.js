@@ -1,6 +1,7 @@
 import { drawPistolIcon, drawFlashIcon, drawPortraitBust, PORTRAIT_BUST } from './art.js';
 import { MAG_SIZE } from './config.js';
 import * as SFX from './audio.js';
+import { VERSION } from './version.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -44,6 +45,8 @@ export function initUI() {
   el.qteMash = $('#qte-mash-fill');
   el.ending = $('#ending');
   el.endingLine = $('#ending-line');
+  el.buildVer = $('#build-ver');
+  if (el.buildVer) el.buildVer.textContent = 'v' + VERSION;
 
   const sc = $('#scan-canvas');
   sc.width = 880;

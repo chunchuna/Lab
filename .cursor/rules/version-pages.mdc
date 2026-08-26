@@ -1,0 +1,36 @@
+---
+description: 版本号展示，以及改完后直接提交并部署 GitHub Pages
+alwaysApply: true
+---
+
+# 版本号与 GitHub Pages
+
+## 屏幕下方必须显示当前版本
+
+- 版本写在 `src/version.js` 的 `VERSION`（例如 `'1.1.0'`）。
+- 游戏画面下方 `#build` 显示 `v` + 这个号。由 `ui.js` 在 `initUI` 写入，**不要画到 canvas 上**。
+- `package.json` 的 `version` 必须和 `VERSION` 对齐。
+
+## 每次更新先升版本号
+
+改任何会进游戏或进站点的内容之前，先把 `VERSION` 升一档：
+
+- 小修、文案、样式、规则：patch（`1.1.0` → `1.1.1`）
+- 新功能、新场景、流程改动：minor（`1.1.0` → `1.2.0`）
+- 大改、不兼容重做：major（`1.1.0` → `2.0.0`）
+
+漏升版本号等于没做完。
+
+## 改完后直接提交并部署，不等 PR 审批
+
+当前工作分支是 `cursor/rooftop-prologue-7a6f`。用户要求：**改完就推这条分支，不要走 PR 审批。**
+
+1. 升版本号
+2. 改过的 JS 跑 `node --check`
+3. `git add` / `git commit` / `git push origin <当前分支>`
+4. 推送会触发 `.github/workflows/pages.yml`，自动部署到
+   https://chunchuna.github.io/Lab/
+
+不要只改完不推。不要新开 PR 等用户点批准。要合进 `pc` 时等用户说。
+
+派生云端子代理时：`cloud_base_branch` 用当前工作分支，并要求它把改动推回同一条分支。

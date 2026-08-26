@@ -183,6 +183,18 @@ html, body {
 #help span { margin-left: 1.4em; }
 #help span:first-child { margin-left: 0; }
 
+/* ---------- 版本号：屏幕正下方，不挡手和弹药 ---------- */
+#build {
+  position: absolute;
+  left: 50%;
+  bottom: 0.55em;
+  transform: translateX(-50%);
+  opacity: 0.42;
+  letter-spacing: 0.14em;
+  pointer-events: none;
+}
+#build span { font-size: 1.05em; }
+
 /* ---------- QTE ---------- */
 /* 键盘专用，一次只显示一个键。不给触屏加按钮。
    面板不带底板：底板会把近景运镜挡掉一整条，电影感全没了。 */
