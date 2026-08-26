@@ -139,6 +139,15 @@ export function toggleFlash() {
   changed();
 }
 
+/** 回主菜单时清空：下一局「开始游戏」不该带着上一局捡到的东西 */
+export function resetInventory() {
+  inv.bag.fill(null);
+  inv.left = null;
+  inv.right = null;
+  inv.flashOn = true;
+  changed();
+}
+
 /* ------------------------------------------------------------------ *
  * DOM / 拖拽
  * ------------------------------------------------------------------ */

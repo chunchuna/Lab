@@ -49,7 +49,7 @@
 
       <!-- 操作说明：一行，只列不言自明之外的按键 -->
       <div id="help">
-        <span><i class="kbd">I</i>背包</span><span><i class="kbd">F</i>手电</span><span><i class="kbd">R</i>换弹</span><span><i class="kbd">V</i>视线 <b id="los-state">关</b></span><span><i class="kbd">~</i>控制台</span><span><i class="kbd">H</i>隐藏</span>
+        <span><i class="kbd">I</i>背包</span><span><i class="kbd">F</i>手电</span><span><i class="kbd">R</i>换弹</span><span><i class="kbd">V</i>视线 <b id="los-state">关</b></span><span><i class="kbd">Esc</i>暂停</span><span><i class="kbd">~</i>控制台</span><span><i class="kbd">H</i>隐藏</span>
       </div>
 
       <!-- QTE：只走键盘。一次只出一个键，键帽外面套一圈往内收的限时环。
@@ -136,6 +136,15 @@
           <button class="m-btn" data-act="start"><span class="m-label">开始游戏</span></button>
           <button class="m-btn" data-act="load"><span class="m-label">读取记录</span></button>
           <button class="m-btn" data-act="settings"><span class="m-label">设置</span></button>
+        </div>
+      </div>
+
+      <!-- 暂停：跟主菜单同一套三个动作，居中压在冻住的画面上 -->
+      <div id="pause" class="hidden">
+        <div class="p-list">
+          <button class="p-btn" data-act="resume"><span class="p-label">继续游戏</span></button>
+          <button class="p-btn" data-act="save"><span class="p-label">存档</span></button>
+          <button class="p-btn" data-act="menu"><span class="p-label">返回主菜单</span></button>
         </div>
       </div>
 

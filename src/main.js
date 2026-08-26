@@ -53,6 +53,7 @@ function restoreAreaRuntime(a) {
   if (!p) return;
   if (game.locker.looted) p.s = a.sprites.lockerEmpty;
   else if (game.locker.open) p.s = a.sprites.lockerOpen;
+  else p.s = a.sprites.lockerClosed;
 }
 
 /** 窗口整数倍率变了：重做工作缓冲，按新 N 重画当前区域的精灵/静态层/光照。 */
@@ -146,7 +147,13 @@ const game = {
   tsTarget: 1,
   rdt: 0, // 本帧的真实秒
   rt: 0, // 累计真实秒，只给镜头漂移这类"不该被慢动作拖慢"的东西用
+  endT: 0, // 结束卡片上屏之后的秒数，到点回主菜单
+  paused: false, // Esc 暂停：整个 update 停住，只有暂停菜单还活着
+  spawn: 'start', // 上一次落地的出生点，暂停菜单里手动存档时沿用
 };
+
+/** 结束卡片停留多久回主菜单。1.8s 淡入 + 一段静止 */
+const END_HOLD = 4.6;
 
 /**
  * 每个区域的静态光源与裁剪遮罩在首次进入时烘焙，之后缓存在区域上。
@@ -198,6 +205,16 @@ initInput(stage, (k) => {
     UI.menuKey(k);
     return;
   }
+  // 结束卡片：不想等淡出就按一下，直接回主菜单
+  if (game.state === 'end') {
+    if (k === 'escape' || k === 'enter' || k === ' ') returnToMenu();
+    return;
+  }
+  // 暂停菜单开着：键盘整个喂给它，Esc 就是「继续游戏」
+  if (game.paused) {
+    UI.pauseKey(k);
+    return;
+  }
   if (game.state !== 'play') return;
 
   // QTE 期间键盘只喂给 QTE，别顺手开背包 / 换弹把节奏打断
@@ -208,6 +225,7 @@ initInput(stage, (k) => {
 
   if (k === 'i' || k === 'b' || k === 'tab') toggleBag();
   else if (k === 'escape' && game.bagOpen) toggleBag();
+  else if (k === 'escape') openPause();
   else if (k === 'v') toggleLOS();
   else if (k === 'h') UI.toggleHelp();
   else if (game.bagOpen) {
@@ -352,6 +370,115 @@ function leaveMenu() {
   resetMenuScene();
 }
 
+/**
+ * 把一局的运行时状态清回开局的样子。回主菜单要用它 —— 不然下一次
+ * 「开始游戏」会带着上一局的枪、破掉的门和听完的对讲机进场。
+ *
+ * 区域缓存整个丢掉：区域对象上挂着被改过的道具（开过的柜、掀开的帐篷），
+ * 逐个还原不如让它们下次进场时重建，顺便把 4K 下那几张大贴图还给显存。
+ */
+function resetRun() {
+  endQTE();
+  clearQTEPose();
+  stopStorm();
+  SFX.setRotor(0);
+
+  game.state = 'menu';
+  game.paused = false;
+  game.phase = 0;
+  game.endT = 0;
+  game.spawn = 'start';
+  game.fade = 1;
+  game.fadeOff = false;
+  game.shake = 0;
+  game.flash = 0;
+  game.hurtFlash = 0;
+  game.trans = null;
+  game.zoom = 1;
+  game.zoomTarget = 1;
+  game.zoomAt = null;
+  game.zoomAtCur = null;
+  game.zoomSpeed = 3.4;
+  game.timescale = 1;
+  game.tsTarget = 1;
+  game.locker = { open: false, looted: false };
+  game.door = { tried: false, hits: 0, broken: false };
+  game.radio = { phase: 'idle', step: 0, t: 0, done: false };
+  game.checkpoint = 'stair';
+  game.roofPhase = 'arrive';
+  game.roofT = 0;
+  game.roofDoorLocked = false;
+  game.roofSaidHint = false;
+  game.tentZ = null;
+  game.rope = null;
+  game.ropeAnim = null;
+  game.heli = null;
+  game.cine = null;
+  game.fight = null;
+  game.areaT = 0;
+  game.hordeReleased = false;
+  game.doomed = 0;
+  game.interact = null;
+  game.lastPrompt = '';
+  game.nextSpark = 1.2;
+  game.sparkPower = 0;
+  game.gun = { mag: MAG_SIZE, reload: 0, cool: 0, recoil: 0, clicks: 0 };
+
+  const p = game.player;
+  p.x = BED_POS.x;
+  p.y = BED_POS.y;
+  p.z = 0;
+  p.aim = 0.9;
+  p.walk = 0;
+  p.moving = false;
+  p.stepT = 0;
+  p.hp = PLAYER_HP;
+  p.invuln = 0;
+  p.hidden = false;
+  p.shrink = 0;
+  p.nudge = null;
+  p.hands = null;
+
+  horde.clear();
+  fx.parts.length = 0;
+  fx.decals.length = 0;
+  fx.tracers.length = 0;
+  fx.bullets.length = 0;
+  INV.resetInventory();
+
+  dropAreaCache();
+  area = getArea('lab');
+  restoreAreaRuntime(area);
+  ensureAreaLights(area);
+}
+
+/**
+ * 回到主菜单 —— leaveMenu 的逆操作。
+ *
+ * 第一章还不存在，所以序章打完不该把玩家丢在一个空的 play 状态里；
+ * 暂停菜单的「返回主菜单」也走这里。
+ */
+function returnToMenu() {
+  if (game.state === 'menu') return;
+  closePause();
+  if (game.bagOpen) {
+    game.bagOpen = false;
+    INV.setOpen(false);
+  }
+  UI.setPrompt(null);
+  UI.hideQTE();
+  setPadVisible(false);
+  UI.showCursor(false);
+  game.curShown = false;
+
+  resetRun();
+  // 结束卡片留到最后淡出：底下已经是菜单那一幕，黑幕退开就直接接上
+  UI.fadeEnding();
+  UI.showMenu();
+  UI.setMenuSave(SAVE.hasSave() ? SAVE.saveLabel(SAVE.readSave()) : null);
+  syncHUD();
+}
+
 function startWake() {
   leaveMenu();
   game.state = 'wake';
@@ -366,13 +493,18 @@ function startWake() {
  * 只在"换区域落地"这个安全点写：QTE / 剧情杀中途存下来没法安全恢复。
  * ------------------------------------------------------------------ */
 
+/**
+ * spawn 省略时沿用上一次落地的出生点：暂停菜单里手动存档时，玩家可能已经
+ * 在区域里走了一段，但序章只需要"回到这个区域的入口"就能安全恢复。
+ */
 function saveProgress(spawn) {
-  if (game.state === 'end') return;
+  if (game.state === 'end') return false;
+  if (spawn) game.spawn = spawn;
   const items = ['pistol', 'flashlight', 'badge'].filter((id) => INV.has(id));
-  SAVE.writeSave({
+  const ok = SAVE.writeSave({
     area: area.id,
     areaName: area.name,
-    spawn,
+    spawn: game.spawn || 'start',
     items,
     mags: INV.countItem('mag'),
     hands: { left: INV.handItem('left'), right: INV.handItem('right') },
@@ -382,6 +514,7 @@ function saveProgress(spawn) {
     checkpoint: game.checkpoint,
   });
   UI.setMenuSave(SAVE.saveLabel(SAVE.readSave()));
+  return ok;
 }
 
 /** 从记录直接进游戏：跳过标题与起床，把装备与剧情开关补回来 */
@@ -403,6 +536,7 @@ function loadProgress() {
   game.door.hits = s.doorBroken ? 3 : 0;
   game.radio = { phase: s.radioDone ? 'done' : 'idle', step: 0, t: 0, done: !!s.radioDone };
   game.checkpoint = s.checkpoint || 'stair';
+  game.spawn = s.spawn || 'start';
   game.gun.mag = MAG_SIZE;
   game.player.hp = PLAYER_HP;
   game.state = 'play';
@@ -419,6 +553,35 @@ function loadProgress() {
     enterArea(s.area, s.spawn);
   }
   return true;
+}
+
+/* ------------------------------------------------------------------ *
+ * 暂停
+ *
+ * 冻的是整个 update：移动、开火、丧尸、QTE 计时、过场一起停住，
+ * 跟主菜单那一幕跳过 update 是同一个做法。画面照常渲染，只是不再推进。
+ * ------------------------------------------------------------------ */
+
+function openPause() {
+  if (game.paused || game.state !== 'play' || game.qte) return;
+  game.paused = true;
+  UI.openPause();
+  UI.setPrompt(null);
+  game.lastPrompt = '';
+  UI.showCursor(false);
+  game.curShown = false;
+  setPadVisible(false);
+  // 暂停时按住的键别留到恢复之后，否则一回来人就自己往前走
+  keys.clear();
+  SFX.sfxClick();
+}
+
+function closePause() {
+  if (!game.paused) return;
+  game.paused = false;
+  UI.closePause();
+  keys.clear();
+  setPadVisible(!game.bagOpen);
 }
 
 function toggleBag() {
@@ -984,6 +1147,8 @@ function updateCamera() {
 }
 
 function update(dt) {
+  // 暂停：连时间都不推进，画面停在按下 Esc 的那一帧
+  if (game.paused) return;
   game.t += dt;
   // 主菜单是一幕独立的定格画面，只吃时间，不跑世界逻辑
   if (game.state === 'menu') return;
@@ -1009,7 +1174,13 @@ function update(dt) {
     }
   }
 
-  if (game.state === 'end') return;
+  /* 序章结束卡片：淡进来、停一会儿，然后回主菜单。第一章还没有，
+     把玩家留在天台上没有任何事可做。按 Esc / 回车 / 空格可以直接跳过等待。 */
+  if (game.state === 'end') {
+    game.endT += dt;
+    if (game.endT > END_HOLD) returnToMenu();
+    return;
+  }
 
   if (game.state === 'cine') {
     updateCine(dt);
@@ -2590,6 +2761,7 @@ function updateCine(dt) {
 
   if (T > CINE.end && game.state !== 'end') {
     game.state = 'end';
+    game.endT = 0;
     game.roofPhase = 'done';
     stopStorm();
     UI.showEnding();
@@ -3566,7 +3738,8 @@ function render() {
   }
 
   // 准星
-  const showCur = (game.state === 'play' || game.state === 'wake') && !game.bagOpen && !pad.enabled;
+  const showCur =
+    (game.state === 'play' || game.state === 'wake') && !game.bagOpen && !game.paused && !pad.enabled;
   if (showCur !== game.curShown) {
     game.curShown = showCur;
     UI.showCursor(showCur);
@@ -3628,6 +3801,13 @@ UI.initMenu(
   },
   settings,
 );
+UI.initPause({
+  onResume: () => closePause(),
+  // 手动存档：换区域那次自动存档写的是同一份记录，这里只是多给一个入口
+  onSave: () => !!saveProgress(),
+  onMenu: () => returnToMenu(),
+});
+
 UI.setMenuSave(SAVE.hasSave() ? SAVE.saveLabel(SAVE.readSave()) : null);
 // 菜单用系统指针点按钮，画面内的准星等进游戏再出来
 UI.showCursor(false);

@@ -259,6 +259,10 @@ export function menuVisible() {
   return menu.visible;
 }
 
+/* 淡出结束后才真正 display:none。回菜单可能发生在这 900ms 之内，
+   所以句柄要留着，showMenu 得把它取消掉。 */
+let menuHideTimer = 0;
+
 export function hideMenu() {
   if (!menu.visible) return;
   menu.visible = false;
@@ -266,7 +270,125 @@ export function hideMenu() {
   el.hud.classList.remove('menu-on');
   document.body.classList.remove('menu-on');
   el.menu.classList.add('out');
-  setTimeout(() => el.menu.classList.add('hidden'), 900);
+  menuHideTimer = setTimeout(() => el.menu.classList.add('hidden'), 900);
+}
+
+/** hideMenu 的逆操作：序章打完、或从暂停菜单退出，都回到这一幕 */
+export function showMenu() {
+  clearTimeout(menuHideTimer);
+  menu.visible = true;
+  closeSettings();
+  el.menu.classList.remove('hidden', 'out');
+  el.hud.classList.add('menu-on');
+  document.body.classList.add('menu-on');
+  selectMenu(0);
+}
+
+/* ---------------- 暂停 ---------------- *
+ *
+ * 跟主菜单同一套：三个动作、上下选、选中反色，不加标题与小字。
+ * 「返回主菜单」多问一句 —— 手滑点一下就把一局丢掉太糟，
+ * 但也只是把按钮本身换成「确认返回」，不另开一个对话框。
+ */
+
+const PAUSE_LABEL = { resume: '继续游戏', save: '存档', menu: '返回主菜单' };
+
+const pause = { items: [], idx: 0, hooks: {}, confirm: false };
+
+/** hooks = { onResume, onSave() -> bool, onMenu } */
+export function initPause(hooks) {
+  pause.hooks = hooks || {};
+  el.pause = $('#pause');
+  pause.items = Array.from(el.pause.querySelectorAll('.p-btn'));
+  pause.items.forEach((b, i) => {
+    b.addEventListener('mouseenter', () => selectPause(i));
+    b.addEventListener('click', () => activatePause(i));
+  });
+  selectPause(0);
+}
+
+const pauseLabel = (btn) => btn.querySelector('.p-label');
+
+function selectPause(i) {
+  const n = pause.items.length;
+  if (!n) return;
+  pause.idx = ((i % n) + n) % n;
+  pause.items.forEach((b, k) => b.classList.toggle('on', k === pause.idx));
+}
+
+function movePause(d) {
+  selectPause(pause.idx + d);
+  SFX.sfxBeep(880, 0.04, 0.06);
+}
+
+/** 把按钮文字恢复成常态：确认态与「已存档」都收回去 */
+function resetPauseLabels() {
+  pause.confirm = false;
+  for (const b of pause.items) {
+    pauseLabel(b).textContent = PAUSE_LABEL[b.dataset.act];
+    b.classList.remove('warn');
+  }
+}
+
+function activatePause(i) {
+  selectPause(i);
+  const btn = pause.items[i];
+  if (!btn) return;
+  const act = btn.dataset.act;
+
+  if (act === 'menu') {
+    if (!pause.confirm) {
+      pause.confirm = true;
+      pauseLabel(btn).textContent = '确认返回';
+      btn.classList.add('warn');
+      SFX.sfxClick();
+      return;
+    }
+    SFX.sfxClick();
+    if (pause.hooks.onMenu) pause.hooks.onMenu();
+    return;
+  }
+
+  resetPauseLabels();
+  SFX.sfxClick();
+  if (act === 'resume') {
+    if (pause.hooks.onResume) pause.hooks.onResume();
+  } else if (act === 'save') {
+    const ok = pause.hooks.onSave ? pause.hooks.onSave() : false;
+    pauseLabel(btn).textContent = ok ? '已存档' : '存不了';
+    setTimeout(() => {
+      if (pauseOpen() && !pause.confirm) pauseLabel(btn).textContent = PAUSE_LABEL.save;
+    }, 1500);
+  }
+}
+
+export function openPause() {
+  resetPauseLabels();
+  selectPause(0);
+  el.pause.classList.remove('hidden');
+  document.body.classList.add('pause-on');
+}
+
+export function closePause() {
+  if (!el.pause) return;
+  el.pause.classList.add('hidden');
+  document.body.classList.remove('pause-on');
+  resetPauseLabels();
+}
+
+export function pauseOpen() {
+  return !!el.pause && !el.pause.classList.contains('hidden');
+}
+
+/** 暂停期间的键盘。Esc 先撤销确认态，再当「继续游戏」用 */
+export function pauseKey(k) {
+  if (k === 'w' || k === 'arrowup') movePause(-1);
+  else if (k === 's' || k === 'arrowdown') movePause(1);
+  else if (k === 'enter' || k === ' ') activatePause(pause.idx);
+  else if (k === 'escape') {
+    if (pause.confirm) resetPauseLabels();
+    else if (pause.hooks.onResume) pause.hooks.onResume();
+  }
 }
 
 export function updateHands(inv) {
@@ -399,6 +521,16 @@ export function showEnding() {
 export function hideEnding() {
   el.ending.classList.remove('on');
   el.ending.classList.add('hidden');
+}
+
+/**
+ * 结束卡片淡出：去掉 .on 让它按同一条 transition 退回透明，
+ * 底下正好是已经切回来的主菜单，画面从黑幕里重新亮出收容观察间。
+ */
+export function fadeEnding() {
+  if (el.ending.classList.contains('hidden')) return;
+  el.ending.classList.remove('on');
+  setTimeout(() => el.ending.classList.add('hidden'), 1900);
 }
 
 /* ---------------- 准星 ---------------- */

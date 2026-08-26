@@ -583,6 +583,43 @@ body.menu-on { cursor: default; }
 .m-btn.off { opacity: 0.34; cursor: default; }
 .m-btn.off.on { background: rgba(222, 216, 200, 0.22); color: var(--text); }
 
+/* ---------- 暂停 ---------- */
+/* 跟主菜单一套写法：三个动作、反色表示选中、不加标题与小字。
+   放在 #hud 里用 absolute 盖住舞台 —— #stage 有 transform，
+   position:fixed 会被它的 overflow:hidden 裁掉。 */
+#pause {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 8, 11, 0.74);
+  pointer-events: auto;
+  cursor: default;
+}
+.p-list { display: flex; flex-direction: column; align-items: center; gap: 0.32em; }
+/* button 默认不继承字号，不写会按 UA 的 13.3px 算 */
+.p-btn {
+  display: block;
+  min-width: 11em;
+  padding: 0.18em 0.85em 0.26em;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+/* text-indent 抵掉 letter-spacing 在末字后面多出来的一格，居中才是真居中 */
+.p-btn .p-label { font-size: 1.85em; letter-spacing: 0.26em; text-indent: 0.26em; }
+.p-btn.on { background: var(--text); color: var(--surface); }
+/* 「返回主菜单」按下第一次只是问一句，反色照旧，不另配颜色 */
+.p-btn.warn .p-label { letter-spacing: 0.2em; }
+
+/* 暂停时看得见系统指针：游戏里是 cursor:none + 自绘准星 */
+body.pause-on { cursor: default; }
+
 /* ---------- 设置 ---------- */
 #settings {
   position: absolute;
