@@ -1003,6 +1003,331 @@ export function makeStairsDown(wTiles, dTiles, seed = 2) {
 }
 
 /* ------------------------------------------------------------------ *
+ * 天台：帐篷、通风口、直升机、绳索
+ * ------------------------------------------------------------------ */
+
+/**
+ * 露营帐篷。脊线沿 +x，两片坡面朝 ±y —— 这个投影里可见面是 +x / +y / +z，
+ * 所以真正看得见的是近侧（+y）坡面和 +x 端的入口三角。远侧坡面只留一条
+ * 暗色轮廓压在后面，不然帐篷会缺一块。
+ */
+export function makeTent(seed = 701) {
+  const rand = mulberry32(seed);
+  const RX = 1.05; // 半长（沿 x）
+  const RY = 0.78; // 半宽（沿 y）
+  const H = 1.24; // 脊高
+  return makeProp(RX * 2 + 0.9, RY * 2 + 0.9, H + 0.2, (g, ox, oy) => {
+    aoShadow(g, ox, oy, RX * 2, RY * 2, 0.55);
+
+    const ridgeA = P(ox, oy, -RX, 0, H);
+    const ridgeB = P(ox, oy, RX, 0, H);
+
+    // 远侧坡面（几乎侧视，只当轮廓用）
+    poly(
+      g,
+      [P(ox, oy, -RX, -RY, 0), P(ox, oy, RX, -RY, 0), ridgeB, ridgeA],
+      '#2b3129',
+    );
+    // 近侧坡面：主要的受光面
+    const nf = [ridgeA, ridgeB, P(ox, oy, RX, RY, 0), P(ox, oy, -RX, RY, 0)];
+    const grd = g.createLinearGradient(ridgeA[0], ridgeA[1], nf[3][0], nf[3][1]);
+    grd.addColorStop(0, '#5c6a4c');
+    grd.addColorStop(0.55, '#47533c');
+    grd.addColorStop(1, '#333d2d');
+    poly(g, nf, grd);
+    // 布面褶皱：沿脊线往下摆拉几条暗纹
+    g.strokeStyle = 'rgba(0,0,0,0.28)';
+    g.lineWidth = 1;
+    for (let i = 1; i < 7; i++) {
+      const t = i / 7;
+      const a = P(ox, oy, -RX + t * RX * 2, 0.02, H - 0.03);
+      const b = P(ox, oy, -RX + t * RX * 2 + 0.06, RY, 0);
+      g.beginPath();
+      g.moveTo(a[0], a[1]);
+      g.lineTo(b[0], b[1]);
+      g.stroke();
+    }
+    // 脊线与压条
+    g.strokeStyle = '#7d8a68';
+    g.lineWidth = 1.6;
+    g.beginPath();
+    g.moveTo(ridgeA[0], ridgeA[1]);
+    g.lineTo(ridgeB[0], ridgeB[1]);
+    g.stroke();
+
+    // +x 端：敞开的入口，里面是黑的
+    const e0 = P(ox, oy, RX, -RY, 0);
+    const e1 = P(ox, oy, RX, RY, 0);
+    poly(g, [e0, e1, ridgeB], '#3d4736');
+    poly(
+      g,
+      [
+        [(e0[0] + e1[0]) / 2 - 5, (e0[1] + e1[1]) / 2 - 1],
+        [(e0[0] + e1[0]) / 2 + 6, (e0[1] + e1[1]) / 2 + 4],
+        [ridgeB[0] + 1, ridgeB[1] + 6],
+      ],
+      '#07090a',
+    );
+    // 掀开、撕烂的门帘
+    g.fillStyle = '#4e5a40';
+    g.beginPath();
+    g.moveTo(ridgeB[0], ridgeB[1] + 2);
+    g.lineTo(ridgeB[0] + 9, ridgeB[1] + 12);
+    g.lineTo(ridgeB[0] + 3, ridgeB[1] + 22);
+    g.lineTo(ridgeB[0] - 2, ridgeB[1] + 10);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = '#1b2018';
+    g.lineWidth = 0.8;
+    g.stroke();
+
+    // 撕裂口：从入口往近侧坡面撕开一道
+    g.fillStyle = '#0a0d0b';
+    g.beginPath();
+    const tr = P(ox, oy, 0.42, 0.3, 0.6);
+    g.moveTo(tr[0], tr[1]);
+    g.lineTo(tr[0] + 7, tr[1] - 5);
+    g.lineTo(tr[0] + 13, tr[1] + 3);
+    g.lineTo(tr[0] + 6, tr[1] + 9);
+    g.closePath();
+    g.fill();
+
+    // 地钉与拉绳
+    g.strokeStyle = 'rgba(190,196,178,0.5)';
+    g.lineWidth = 0.9;
+    for (const [gx, gy] of [
+      [-RX - 0.35, RY + 0.3],
+      [RX + 0.3, RY + 0.32],
+      [-RX - 0.3, -RY - 0.28],
+    ]) {
+      const a = P(ox, oy, gx > 0 ? RX : -RX, 0, H - 0.06);
+      const b = P(ox, oy, gx, gy, 0);
+      g.beginPath();
+      g.moveTo(a[0], a[1]);
+      g.lineTo(b[0], b[1]);
+      g.stroke();
+      g.fillStyle = '#6b736e';
+      g.fillRect(b[0] - 1, b[1] - 2, 2, 3);
+    }
+
+    // 血：帐篷上的喷溅 + 从入口拖出来的一道
+    g.globalAlpha = 0.62;
+    g.fillStyle = '#3f1210';
+    for (let i = 0; i < 16; i++) {
+      const ty = rand() * RY; // 0 在脊线，RY 在下摆
+      const zz = (1 - ty / RY) * H * (0.15 + rand() * 0.75);
+      const p = P(ox, oy, -RX + rand() * RX * 2, ty, zz);
+      g.beginPath();
+      g.ellipse(p[0], p[1], 1 + rand() * 4.5, 1 + rand() * 3, rand() * 3, 0, 6.3);
+      g.fill();
+    }
+    for (let i = 0; i < 9; i++) {
+      const p = P(ox, oy, RX + rand() * 0.8, -RY * 0.4 + rand() * RY * 1.4, 0);
+      g.beginPath();
+      g.ellipse(p[0], p[1], 2 + rand() * 6, 1.4 + rand() * 3, 0, 0, 6.3);
+      g.fill();
+    }
+    g.globalAlpha = 1;
+  });
+}
+
+/** 天台通风口：带百叶的方形风帽 */
+export function makeRoofVent(seed = 711) {
+  const rand = mulberry32(seed);
+  const W = 0.95;
+  const D = 0.95;
+  const H = 0.92;
+  return makeProp(W + 0.3, D + 0.3, H + 0.25, (g, ox, oy) => {
+    aoShadow(g, ox, oy, W, D, 0.5);
+    // 底座
+    isoBox(g, ox, oy, -W / 2, -D / 2, 0, W, D, 0.16, '#3c4544', '#2a3231', '#212827');
+    // 风管
+    isoBox(g, ox, oy, -W / 2 + 0.1, -D / 2 + 0.1, 0.16, W - 0.2, D - 0.2, H - 0.34, '#4d5654', '#343d3c', '#272e2d');
+    // 百叶（+x 面）
+    faceRight(g, ox, oy, W / 2 - 0.1);
+    for (let i = 0; i < 5; i++) {
+      const v = -(H - 0.24) * TILE_Z + 4 + i * 5;
+      g.fillStyle = 'rgba(0,0,0,0.45)';
+      g.fillRect((-(D - 0.2) / 2 + 0.04) * TILE_W, v, (D - 0.28) * TILE_W, 2.4);
+      g.fillStyle = 'rgba(200,212,208,0.12)';
+      g.fillRect((-(D - 0.2) / 2 + 0.04) * TILE_W, v + 2.4, (D - 0.28) * TILE_W, 0.9);
+    }
+    resetT(g);
+    // 风帽
+    isoBox(g, ox, oy, -W / 2 - 0.08, -D / 2 - 0.08, H - 0.18, W + 0.16, D + 0.16, 0.12, '#5b6462', '#3b4442', '#2d3433');
+    g.globalAlpha = 0.32;
+    speckle(g, ox - W * HW, oy - H * TILE_Z, W * HW * 2, H * TILE_Z, rand, 26, [PAL.rust, '#20261f'], 1.4, 1.2);
+    g.globalAlpha = 1;
+  });
+}
+
+/**
+ * 直升机。屏幕空间绘制（它在天上，不参与等距深度排序）。
+ * t 用来转桨与闪航行灯，dir=1 机头朝右。
+ */
+export function drawHeli(g, x, y, t, o = {}) {
+  const s = o.scale === undefined ? 1 : o.scale;
+  const dir = o.dir === undefined ? -1 : o.dir;
+  g.save();
+  g.translate(x, y);
+  g.scale(s * dir, s);
+
+  // 尾梁
+  g.fillStyle = '#2b3236';
+  g.beginPath();
+  g.moveTo(6, -3);
+  g.lineTo(40, -2.5);
+  g.lineTo(40, 1.5);
+  g.lineTo(6, 4);
+  g.closePath();
+  g.fill();
+  // 垂尾
+  g.fillStyle = '#232a2d';
+  g.beginPath();
+  g.moveTo(36, -2);
+  g.lineTo(44, -13);
+  g.lineTo(47, -12);
+  g.lineTo(42, 0);
+  g.closePath();
+  g.fill();
+  // 尾桨（转起来是个模糊的圆）
+  g.strokeStyle = 'rgba(180,190,195,0.35)';
+  g.lineWidth = 1;
+  g.beginPath();
+  g.arc(43, -8, 6.5, 0, 6.3);
+  g.stroke();
+  g.strokeStyle = 'rgba(210,220,225,0.65)';
+  g.beginPath();
+  g.moveTo(43 - Math.cos(t * 40) * 6.5, -8 - Math.sin(t * 40) * 6.5);
+  g.lineTo(43 + Math.cos(t * 40) * 6.5, -8 + Math.sin(t * 40) * 6.5);
+  g.stroke();
+
+  // 机身
+  g.fillStyle = '#39433f';
+  g.beginPath();
+  g.ellipse(0, 0, 16, 8.5, 0, 0, 6.3);
+  g.fill();
+  g.fillStyle = '#2a322f';
+  g.beginPath();
+  g.ellipse(0, 3, 16, 5.5, 0, 0, 6.3);
+  g.fill();
+  // 座舱玻璃
+  g.fillStyle = '#16242a';
+  g.beginPath();
+  g.ellipse(-9, -1, 7.5, 5.5, 0, 0, 6.3);
+  g.fill();
+  g.fillStyle = 'rgba(150,200,215,0.28)';
+  g.beginPath();
+  g.ellipse(-10.5, -2.5, 4.4, 2.6, -0.3, 0, 6.3);
+  g.fill();
+  // 侧舱门（开着，里面是黑的）
+  g.fillStyle = '#111615';
+  g.fillRect(1, -4, 9, 9);
+  g.fillStyle = '#4c5652';
+  g.fillRect(10, -4.5, 2, 10);
+
+  // 起落滑橇
+  g.strokeStyle = '#20272a';
+  g.lineWidth = 1.6;
+  g.beginPath();
+  g.moveTo(-11, 12);
+  g.lineTo(12, 12);
+  g.moveTo(-7, 7);
+  g.lineTo(-8, 12);
+  g.moveTo(7, 7);
+  g.lineTo(8, 12);
+  g.stroke();
+
+  // 主旋翼：一圈盘面 + 两片扫过的桨
+  g.strokeStyle = 'rgba(190,205,210,0.18)';
+  g.lineWidth = 3.2;
+  g.beginPath();
+  g.ellipse(-2, -13, 34, 5, 0, 0, 6.3);
+  g.stroke();
+  g.strokeStyle = 'rgba(215,228,232,0.7)';
+  g.lineWidth = 1.6;
+  for (let i = 0; i < 2; i++) {
+    const a = t * 26 + i * Math.PI;
+    g.beginPath();
+    g.moveTo(-2, -13);
+    g.lineTo(-2 + Math.cos(a) * 34, -13 + Math.sin(a) * 5);
+    g.stroke();
+  }
+  g.fillStyle = '#535d59';
+  g.fillRect(-4, -16, 5, 4);
+
+  g.restore();
+
+  // 航行灯：红绿交替闪，机身上的自发光点
+  const blink = Math.sin(t * 7) > 0;
+  const lamps = [
+    [x - 15 * s * dir, y + 2 * s, '255,70,60', blink ? 0.8 : 0.14],
+    [x + 40 * s * dir, y - 11 * s, '120,255,140', blink ? 0.14 : 0.8],
+  ];
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  for (const [lx, ly, rgb, k] of lamps) {
+    const grd = g.createRadialGradient(lx, ly, 0, lx, ly, 9 * s);
+    grd.addColorStop(0, `rgba(${rgb},${k})`);
+    grd.addColorStop(1, `rgba(${rgb},0)`);
+    g.fillStyle = grd;
+    g.fillRect(lx - 9 * s, ly - 9 * s, 18 * s, 18 * s);
+  }
+  g.restore();
+}
+
+/** 直升机的探照灯锥：直接画渐变多边形，不用 filter: blur() */
+export function drawHeliBeam(g, x, y, tx, ty, w, k) {
+  if (k <= 0.01) return;
+  const dx = tx - x;
+  const dy = ty - y;
+  const l = Math.hypot(dx, dy) || 1;
+  const nx = -dy / l;
+  const ny = dx / l;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  const grd = g.createLinearGradient(x, y, tx, ty);
+  grd.addColorStop(0, `rgba(214,228,236,${0.3 * k})`);
+  grd.addColorStop(0.6, `rgba(200,218,228,${0.13 * k})`);
+  grd.addColorStop(1, 'rgba(190,210,222,0)');
+  g.fillStyle = grd;
+  g.beginPath();
+  g.moveTo(x - nx * 3, y - ny * 3);
+  g.lineTo(x + nx * 3, y + ny * 3);
+  g.lineTo(tx + nx * w, ty + ny * w);
+  g.lineTo(tx - nx * w, ty - ny * w);
+  g.closePath();
+  g.fill();
+  g.restore();
+}
+
+/** 垂下的绳索：一条带摆动的线 + 末端的救援套环 */
+export function drawRope(g, x0, y0, x1, y1, t, sway = 1) {
+  g.save();
+  g.strokeStyle = '#8a7f63';
+  g.lineWidth = 1.6;
+  g.beginPath();
+  g.moveTo(x0, y0);
+  const N = 10;
+  for (let i = 1; i <= N; i++) {
+    const k = i / N;
+    const wob = Math.sin(t * 2.3 + k * 3.2) * 4.5 * sway * Math.sin(k * Math.PI);
+    g.lineTo(x0 + (x1 - x0) * k + wob, y0 + (y1 - y0) * k);
+  }
+  g.stroke();
+  g.strokeStyle = 'rgba(40,34,24,0.55)';
+  g.lineWidth = 0.7;
+  g.stroke();
+  // 末端套环
+  g.strokeStyle = '#9c9070';
+  g.lineWidth = 1.6;
+  g.beginPath();
+  g.ellipse(x1, y1 + 4, 4.4, 5.2, 0, 0, 6.3);
+  g.stroke();
+  g.restore();
+}
+
+/* ------------------------------------------------------------------ *
  * HUD 图标
  * ------------------------------------------------------------------ */
 

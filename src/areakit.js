@@ -23,6 +23,20 @@ export function northPt(u, v, ox, oy, wallH = WALL_H) {
 export function westT(g, ox, oy, wallH = WALL_H) {
   g.setTransform(-HW / TILE_W, HH / TILE_W, 0, 1, ox, oy - wallH * TILE_Z);
 }
+/**
+ * 右端墙（x=w），u 沿 +y，v 自墙顶向下。
+ * 注意这是**近侧**墙：画满高会把走廊内部盖住，只适合当矮护墙 / 端头封口用，
+ * 而且要画进前景层（a.fg）或明确接受被角色压住。
+ */
+export function eastT(g, ox, oy, roomW, wallH = WALL_H) {
+  g.setTransform(-HW / TILE_W, HH / TILE_W, 0, 1, ox + roomW * HW, oy + roomW * HH - wallH * TILE_Z);
+}
+export function eastPt(u, v, ox, oy, roomW, wallH = WALL_H) {
+  return {
+    x: ox + roomW * HW - (u * HW) / TILE_W,
+    y: oy + roomW * HH - wallH * TILE_Z + (u * HH) / TILE_W + v,
+  };
+}
 /** 近侧矮墙（y=H）的内表面，v=0 在地面，向上为负 */
 export function southT(g, ox, oy, roomH) {
   g.setTransform(HW / TILE_W, HH / TILE_W, 0, 1, ox - roomH * HW, oy + roomH * HH);
@@ -78,6 +92,17 @@ export const THEMES = {
     trim: '#4d5257',
     scorch: 0.4,
     blood: 1.1,
+  },
+  // 天台：雨夜的沥青防水层，偏青黑；墙面冷灰
+  roof: {
+    floor: ['#22292b', '#1d2426', '#272f31', '#191f21'],
+    grout: '#12181a',
+    wallTop: '#39423f',
+    wallMid: '#2c3432',
+    wallLow: '#1c2221',
+    trim: '#414b4d',
+    scorch: 0.3,
+    blood: 1.4,
   },
 };
 
@@ -170,6 +195,37 @@ export function paintFloor(g, sox, soy, w, h, rand, th, opts = {}) {
       g.lineTo(b.x, b.y);
     }
     g.stroke();
+  }
+
+  // 积水：雨夜的天台用。画在地面空间里，才会跟着透视压扁成菱形方向
+  if (opts.puddles) {
+    g.save();
+    floorT(g, sox, soy);
+    for (let i = 0; i < opts.puddles; i++) {
+      const cx = rand() * w * TILE_W;
+      const cy = rand() * h * TILE_W;
+      const rx = 14 + rand() * 44;
+      const ry = rx * (0.5 + rand() * 0.4);
+      const grd = g.createRadialGradient(cx, cy, 0, cx, cy, rx);
+      grd.addColorStop(0, 'rgba(120,150,160,0.16)');
+      grd.addColorStop(0.68, 'rgba(70,92,100,0.1)');
+      grd.addColorStop(1, 'rgba(40,54,60,0)');
+      g.fillStyle = grd;
+      g.save();
+      g.translate(cx, cy);
+      g.scale(1, ry / rx);
+      g.beginPath();
+      g.arc(0, 0, rx, 0, 6.3);
+      g.fill();
+      g.restore();
+      // 水面反光的一点亮边
+      g.strokeStyle = 'rgba(160,190,200,0.1)';
+      g.lineWidth = 1.2;
+      g.beginPath();
+      g.ellipse(cx, cy, rx * 0.82, ry * 0.82, 0, 0, 6.3);
+      g.stroke();
+    }
+    g.restore();
   }
 
   // 房间前缘暗边
