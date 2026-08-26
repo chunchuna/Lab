@@ -136,7 +136,8 @@ roomVis/spawns/links`，光照贴图与裁剪遮罩在 `ensureAreaLights()` 里�
 先锁死楼道门」→ 走廊东端的 ROOF 防火门解锁 → 天台楼梯间（只上不下）→ 天台
 （暴雨、闪电、雷声）→ 锁死楼道门 → 掀开帐篷，丧尸爬出，搏斗 QTE → 顶着额头
 一枪 → 5 秒后直升机进画 → 走到天台边，绳索放下，抓绳 QTE → 冲刺起跳抓绳
-（`state = 'cine'`，不吃 WASD）→ 淡出，DOM 显示「序章完」。
+（`state = 'cine'`，不吃 WASD）→ 淡出，DOM 显示「序章完」→ 停几秒后自动回
+收容观察间主菜单（第一章还没有，别把玩家丢在空的 play 里）。
 
 - 下楼到一层仍是剧情杀，5 秒后必死，重生回楼梯间。
 - **天台上的两段 QTE 失败都回 312**（`game.checkpoint = 'radio312'`），对讲机
@@ -148,6 +149,7 @@ roomVis/spawns/links`，光照贴图与裁剪遮罩在 `ensureAreaLights()` 里�
 
 ### 快进钩子
 
-游戏内按 `~` 打开控制台，输入 `help`。常用：`roof`、`radio`、`skip`、`arm`、
-`goto roof`。浏览器控制台里 `__toRoof()` / `__toRadio()` / `__skipIntro()` /
-`__goto(id, spawn)` 仍可用。
+游戏内按 `~` 打开控制台，输入 `help`。常用：`roof`、`cine`、`radio`、`skip`、
+`arm`、`goto roof`。浏览器控制台里 `__toRoof()` / `__toCine()` / `__toRadio()` /
+`__skipIntro()` / `__goto(id, spawn)` 仍可用。`__toCine()` 直接从"人已经吊在
+绳子上"开演，用来看收尾过场与回主菜单，不用手打两段 QTE。

@@ -3930,6 +3930,19 @@ window.__toRoof = () => {
   enterArea('roof', 'fromStair');
 };
 
+/** 一步到收尾过场：人已经吊在绳子上，直接演「被拽进舱 → 序章完 → 主菜单」 */
+window.__toCine = () => {
+  window.__toRoof();
+  const r = area.roof;
+  game.roofDoorLocked = true;
+  game.heli = { t: 0, ...heliHover(), k: 1 };
+  game.rope = { t: 2, down: true, hold: true };
+  game.player.x = r.rope.x;
+  game.player.y = r.rope.y - 0.1;
+  game.player.z = 6.2;
+  startEscapeCine();
+};
+
 /** 一步到 312 听对讲机 */
 window.__toRadio = () => {
   window.__skipIntro();
@@ -3940,6 +3953,7 @@ window.__toRadio = () => {
 
 const DEV_HELP = [
   'roof              上天台（补装备、跳过对讲机）',
+  'cine              直接演收尾过场（序章完 → 主菜单）',
   'radio / 312       进 312 听对讲机',
   'arm               补装备并解锁天台门',
   'skip              跳过标题与起床',
@@ -3982,6 +3996,11 @@ function runDevCommand(line) {
     window.__toRoof();
     closeDevcon();
     return '→ 天台';
+  }
+  if (cmd === 'cine') {
+    window.__toCine();
+    closeDevcon();
+    return '→ 收尾过场';
   }
   if (cmd === 'radio' || cmd === '312') {
     window.__toRadio();

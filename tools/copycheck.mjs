@@ -6,8 +6,7 @@
  *   node tools/copycheck.mjs
  */
 import puppeteer from 'puppeteer-core';
-
-const CHROME = process.env.CHROME || '/usr/bin/google-chrome-stable';
+import { CHROME } from './chrome.mjs';
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,

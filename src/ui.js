@@ -514,6 +514,8 @@ export function hideQTE() {
 
 export function showEnding() {
   el.ending.classList.remove('hidden');
+  // 卡片这一幕不该还挂着双手面板和弹药，跟菜单一样让 HUD 整个让位
+  el.hud.classList.add('menu-on');
   // 先上屏再加 .on，transition 才会真的跑一遍
   requestAnimationFrame(() => el.ending.classList.add('on'));
 }

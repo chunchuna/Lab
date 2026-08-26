@@ -6,10 +6,10 @@
  *   node tools/endmenu.mjs
  */
 import puppeteer from 'puppeteer-core';
+import { CHROME } from './chrome.mjs';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const CHROME = process.env.CHROME || '/usr/local/bin/google-chrome';
 const OUT = fileURLToPath(new URL('../shots/', import.meta.url));
 fs.mkdirSync(OUT, { recursive: true });
 
