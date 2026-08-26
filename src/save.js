@@ -57,12 +57,12 @@ export function clearSave() {
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
-/** 菜单上那行小字：「312 宿舍 · 08-26 14:03」 */
+/** 设置面板里那行进度：「312 宿舍 08-26 14:03」 */
 export function saveLabel(s) {
   if (!s) return '';
   const d = new Date(s.time || Date.now());
   const when = `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  return `${s.areaName || '未知位置'} · ${when}`;
+  return `${s.areaName || '未知位置'} ${when}`;
 }
 
 /* ---------------- 设置 ---------------- */

@@ -26,7 +26,6 @@ export function initUI() {
   el.cursor = $('#cursor');
   el.cursorG = $('#cursor-g');
   el.menu = $('#menu');
-  el.loadNote = $('#m-load-note');
   el.settings = $('#settings');
   el.help = $('#help');
   el.los = $('#los-state');
@@ -46,7 +45,6 @@ export function initUI() {
   el.qteCaption = $('#qte-caption');
   el.qteMash = $('#qte-mash-fill');
   el.ending = $('#ending');
-  el.endingLine = $('#ending-line');
   el.buildVer = $('#build-ver');
   if (el.buildVer) el.buildVer.textContent = 'v' + VERSION;
 
@@ -184,12 +182,11 @@ export function applySettingsUI(s) {
   setLosToggle(!!s.los);
 }
 
-/** 有存档时把「读取记录」点亮，并在后面写上位置与时间 */
+/** 有存档时把「读取记录」点亮。菜单上不写小字，位置与时间只出现在设置里 */
 export function setMenuSave(label) {
   const btn = menu.items.find((b) => b.dataset.act === 'load');
   if (!btn) return;
   btn.classList.toggle('off', !label);
-  el.loadNote.textContent = label || '暂无存档';
   if (el.setSaveInfo) el.setSaveInfo.textContent = label || '暂无存档';
   if (el.setClear) {
     el.setClear.classList.toggle('done', !label);
@@ -393,8 +390,7 @@ export function hideQTE() {
 
 /* ---------------- 序章结束 ---------------- */
 
-export function showEnding(line) {
-  if (line) el.endingLine.textContent = line;
+export function showEnding() {
   el.ending.classList.remove('hidden');
   // 先上屏再加 .on，transition 才会真的跑一遍
   requestAnimationFrame(() => el.ending.classList.add('on'));

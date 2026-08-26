@@ -392,10 +392,7 @@ body.devcon-on { cursor: default; }
   transition: opacity 1.8s ease-in;
 }
 #ending.on { opacity: 1; }
-#ending .e-sub { font-size: 1.2em; letter-spacing: 0.5em; opacity: 0.45; margin-left: 0.5em; }
-#ending h2 { font-size: 4.6em; margin: 0.18em 0 0; letter-spacing: 0.3em; font-weight: 400; }
-#ending .e-line { font-size: 1.35em; letter-spacing: 0.16em; opacity: 0.72; margin: 2.4em 0 0; }
-#ending .e-next { font-size: 1.15em; letter-spacing: 0.42em; opacity: 0.4; margin: 3.2em 0 0; }
+#ending h2 { font-size: 4.6em; margin: 0; letter-spacing: 0.3em; font-weight: 400; }
 
 /* ---------- 人脸识别终端 ---------- */
 #scan {
@@ -565,16 +562,10 @@ body.menu-on { cursor: default; }
 }
 #menu.out { opacity: 0; }
 
-#menu .m-sub { font-size: 1.15em; letter-spacing: 0.46em; opacity: 0.5; margin-left: 0.4em; }
-#menu h1 { font-size: 5.4em; margin: 0.04em 0 0; letter-spacing: 0.18em; font-weight: 400; line-height: 1; }
-#menu .m-desc { font-size: 1.15em; letter-spacing: 0.2em; opacity: 0.55; margin: 0.9em 0 0; }
-
-.m-list { margin-top: 2.6em; display: flex; flex-direction: column; align-items: flex-start; gap: 0.32em; }
+.m-list { display: flex; flex-direction: column; align-items: flex-start; gap: 0.32em; }
 /* button 默认不继承字号，不写会按 UA 的 13.3px 算，窗口放大也不跟着缩放 */
 .m-btn {
-  display: flex;
-  align-items: baseline;
-  gap: 1em;
+  display: block;
   padding: 0.18em 0.85em 0.26em;
   border: 0;
   background: transparent;
@@ -586,16 +577,10 @@ body.menu-on { cursor: default; }
   pointer-events: auto;
 }
 .m-btn .m-label { font-size: 1.85em; letter-spacing: 0.26em; }
-.m-btn .m-note { font-size: 1.02em; letter-spacing: 0.14em; opacity: 0.42; }
 /* 选中靠反色，不加边框与发光 */
 .m-btn.on { background: var(--text); color: var(--surface); }
-.m-btn.on .m-note { opacity: 0.66; }
 .m-btn.off { opacity: 0.34; cursor: default; }
 .m-btn.off.on { background: rgba(222, 216, 200, 0.22); color: var(--text); }
-
-.m-hint { margin-top: 2.2em; font-size: 1.05em; letter-spacing: 0.1em; opacity: 0.42; }
-.m-hint b { font-weight: 400; margin: 0 0.7em; opacity: 0.6; }
-.m-hint .kbd { margin-right: 0.25em; }
 
 /* ---------- 设置 ---------- */
 #settings {

@@ -67,12 +67,7 @@
 
       <!-- 序章结束 -->
       <div id="ending" class="hidden">
-        <div class="e-wrap">
-          <div class="e-sub">PROLOGUE · END</div>
-          <h2>序章 · 完</h2>
-          <p class="e-line" id="ending-line">舱门关上的一瞬间，楼下的灯全灭了。</p>
-          <p class="e-next">未完待续</p>
-        </div>
+        <h2>序章完</h2>
       </div>
 
       <!-- 背包 -->
@@ -135,26 +130,12 @@
       </div>
 
       <!-- 主菜单：画面（收容舱与观察人员）画在 canvas 上，文字一律 DOM。
-           摆在左下角，右上方留给收容舱那一幕。 -->
+           摆在左下角，右上方留给收容舱那一幕。只有三个动作，不加标题与小字。 -->
       <div id="menu">
-        <div class="m-brand">
-          <div class="m-sub">SECTOR 7 · CONTAINMENT WING</div>
-          <h1>LAB&nbsp;7</h1>
-          <p class="m-desc">07 号个体 · 观察记录第 1042 日</p>
-        </div>
         <div class="m-list">
-          <button class="m-btn" data-act="start">
-            <span class="m-label">开始游戏</span><span class="m-note">从序章开始</span>
-          </button>
-          <button class="m-btn" data-act="load">
-            <span class="m-label">读取记录</span><span class="m-note" id="m-load-note">暂无存档</span>
-          </button>
-          <button class="m-btn" data-act="settings">
-            <span class="m-label">设置</span><span class="m-note">音量 · 视线遮挡</span>
-          </button>
-        </div>
-        <div class="m-hint">
-          <i class="kbd">W</i><i class="kbd">S</i>选择<b>·</b><i class="kbd">Enter</i>确认<b>·</b>鼠标点选亦可
+          <button class="m-btn" data-act="start"><span class="m-label">开始游戏</span></button>
+          <button class="m-btn" data-act="load"><span class="m-label">读取记录</span></button>
+          <button class="m-btn" data-act="settings"><span class="m-label">设置</span></button>
         </div>
       </div>
 
