@@ -200,6 +200,51 @@ html, body {
   color: var(--text);
 }
 
+/* ---------- 调试控制台（#stage 外，视口顶边） ---------- */
+#devcon {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 450;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+}
+#devcon.hidden { display: none !important; }
+#devcon-log {
+  overflow-y: auto;
+  padding: 8px 12px 4px;
+  line-height: 1.45;
+  min-height: 4.5em;
+}
+#devcon-log .in { opacity: 0.55; }
+#devcon-log .err { opacity: 0.85; }
+#devcon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 8px;
+  border-top: 1px solid rgba(222, 216, 200, 0.18);
+}
+#devcon-pre { opacity: 0.55; }
+#devcon-in {
+  flex: 1;
+  min-width: 0;
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: none;
+  cursor: text;
+}
+body.devcon-on { cursor: default; }
+
 /* ---------- QTE ---------- */
 /* 键盘专用，一次只显示一个键。不给触屏加按钮。
    面板不带底板：底板会把近景运镜挡掉一整条，电影感全没了。 */

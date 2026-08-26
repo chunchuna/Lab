@@ -66,6 +66,9 @@ commit + push 当前工作分支，触发 GitHub Pages。细则见
 - 玩法代码不要散读键盘事件。移动读 `moveIntent()`，朝向读 `player.aim`，
   动作走 `doAction(act)`，新按键在 `initInput` 的 `onKey` 分支里注册。
 - 加了新按键要同步更新 `index.html` 里 `#help` 的操作说明面板。
+- **波浪号 `~` / `` ` `` 打开游戏内调试控制台**（`#devcon`，在 `#stage` 外）。
+  跳转用短指令：`roof`、`radio`、`skip`、`goto <区域>`，输入 `help` 看完整列表。
+  不要再让用户去浏览器控制台敲 `__toRoof()`。
 
 ## 已经踩过的坑，别再踩
 
@@ -145,7 +148,6 @@ roomVis/spawns/links`，光照贴图与裁剪遮罩在 `ensureAreaLights()` 里�
 
 ### 快进钩子
 
-`__skipIntro()` 跳过标题与起床；`__arm()` 补齐手电/手枪/弹匣并把对讲机标记成
-已完成；`__toRadio()` 一步到 312 听对讲机；`__toRoof()` 一步上天台。
-按区域跳用 `__goto(id, spawn)`：`dorm312/enter`、`corr3/fromDorm`、
-`stairRoof/fromCorr3`、`roof/fromStair`。
+游戏内按 `~` 打开控制台，输入 `help`。常用：`roof`、`radio`、`skip`、`arm`、
+`goto roof`。浏览器控制台里 `__toRoof()` / `__toRadio()` / `__skipIntro()` /
+`__goto(id, spawn)` 仍可用。

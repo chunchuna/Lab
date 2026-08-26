@@ -18,6 +18,7 @@ import * as SFX from './audio.js';
 import * as INV from './inventory.js';
 import { inv } from './inventory.js';
 import { initInput, keys, mouse, justPressed, endFrame, view } from './input.js';
+import { initDevcon, toggleDevcon, closeDevcon, isDevconOpen } from './devcon.js';
 import {
   pad, initControls, setButton, setPadVisible, endFrameControls, screenDirToWorld,
 } from './controls.js';
@@ -126,6 +127,16 @@ ensureAreaLights(area);
 initInput(stage, (k) => {
   SFX.initAudio();
   SFX.resume();
+
+  if (k === '`') {
+    toggleDevcon();
+    keys.clear();
+    return;
+  }
+  if (isDevconOpen()) {
+    if (k === 'escape') closeDevcon();
+    return;
+  }
 
   if (game.state === 'title') {
     startWake();
@@ -874,7 +885,7 @@ function update(dt) {
     return;
   }
 
-  if (game.bagOpen) {
+  if (game.bagOpen || isDevconOpen()) {
     game.player.moving = false;
     game.player.walk = lerp(game.player.walk, 0, Math.min(1, dt * 10));
     return;
@@ -2695,6 +2706,7 @@ function render() {
 
 UI.initUI();
 INV.initInventory();
+initDevcon(runDevCommand);
 initControls(doAction);
 if (pad.enabled) {
   setButton('interact', false);
@@ -2780,3 +2792,79 @@ window.__toRadio = () => {
   game.radio = { phase: 'idle', step: 0, t: 0, done: false };
   enterArea('dorm312', 'enter');
 };
+
+const DEV_HELP = [
+  'roof              上天台（补装备、跳过对讲机）',
+  'radio / 312       进 312 听对讲机',
+  'arm               补装备并解锁天台门',
+  'skip              跳过标题与起床',
+  'lab corr2 stair corr3 corr1 stairroof',
+  'goto <区域> [出生点]   例如 goto roof fromStair',
+  'where             当前区域',
+  'clear             清屏',
+  'help              本说明',
+].join('\n');
+
+const AREA_ALIAS = {
+  lab: ['lab', 'start'],
+  corr2: ['corr2', 'fromLab'],
+  stair: ['stair', 'respawn'],
+  corr3: ['corr3', 'fromStair'],
+  corr1: ['corr1', 'fromStair'],
+  stairroof: ['stairRoof', 'fromCorr3'],
+  roof: ['roof', 'fromStair'],
+  '312': ['dorm312', 'enter'],
+  dorm312: ['dorm312', 'enter'],
+};
+
+function runDevCommand(line) {
+  const parts = line.trim().split(/\s+/);
+  const cmd = (parts[0] || '').toLowerCase();
+  const a = parts[1];
+  const b = parts[2];
+
+  if (cmd === 'help' || cmd === '?') return DEV_HELP;
+
+  if (cmd === 'skip' || cmd === 'intro') {
+    window.__skipIntro();
+    return '跳过标题';
+  }
+  if (cmd === 'arm') {
+    window.__arm();
+    return '已装备，天台门解锁';
+  }
+  if (cmd === 'roof') {
+    window.__toRoof();
+    closeDevcon();
+    return '→ 天台';
+  }
+  if (cmd === 'radio' || cmd === '312') {
+    window.__toRadio();
+    closeDevcon();
+    return '→ 312';
+  }
+  if (cmd === 'where') {
+    const p = game.player;
+    return (area.id || '?') + '  ' + p.x.toFixed(1) + ',' + p.y.toFixed(1);
+  }
+  if (cmd === 'goto') {
+    if (!a) return '? goto <区域> [出生点]';
+    const id = a === 'stairroof' ? 'stairRoof' : a === '312' ? 'dorm312' : a;
+    if (!AREA_ALIAS[id.toLowerCase()] && !AREA_ALIAS[id]) {
+      // 允许正式 id
+      const ok = ['lab', 'corr2', 'corr3', 'corr1', 'stair', 'stairRoof', 'roof', 'dorm312'];
+      if (ok.indexOf(id) < 0) return '? 没有区域 ' + a;
+    }
+    enterArea(id, b || undefined);
+    game.state = 'play';
+    UI.hideTitle();
+    return '→ ' + id + (b ? ' / ' + b : '');
+  }
+  if (AREA_ALIAS[cmd]) {
+    const [id, spawn] = AREA_ALIAS[cmd];
+    window.__skipIntro();
+    enterArea(id, spawn);
+    return '→ ' + id;
+  }
+  return '? 未知指令，输入 help';
+}

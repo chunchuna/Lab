@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>LAB 7 — 隔离实验室</title>
 <link rel="icon" href="data:," />
-<link rel="stylesheet" href="style.css?v=1.1.1" />
+<link rel="stylesheet" href="style.css?v=1.2.0" />
 </head>
 <body>
   <div id="stage">
@@ -49,7 +49,7 @@
 
       <!-- 操作说明：一行，只列不言自明之外的按键 -->
       <div id="help">
-        <span><i class="kbd">I</i>背包</span><span><i class="kbd">F</i>手电</span><span><i class="kbd">R</i>换弹</span><span><i class="kbd">V</i>视线 <b id="los-state">关</b></span><span><i class="kbd">H</i>隐藏</span>
+        <span><i class="kbd">I</i>背包</span><span><i class="kbd">F</i>手电</span><span><i class="kbd">R</i>换弹</span><span><i class="kbd">V</i>视线 <b id="los-state">关</b></span><span><i class="kbd">~</i>控制台</span><span><i class="kbd">H</i>隐藏</span>
       </div>
 
       <!-- QTE：只走键盘。一次只出一个键，键帽外面套一圈往内收的限时环。
@@ -170,8 +170,17 @@
 
   <!-- 版本号必须在 #stage 外面：舞台有 transform，放里面会被裁掉，
        窗口上下黑边时也看不见。贴浏览器视口底边。 -->
-  <div id="build"><span id="build-ver">v1.1.1</span></div>
+  <!-- 调试控制台：#stage 外面，~ 开关。输入 roof / radio / help -->
+  <div id="devcon" class="hidden">
+    <div id="devcon-log"></div>
+    <div id="devcon-row">
+      <span id="devcon-pre">></span>
+      <input id="devcon-in" type="text" autocomplete="off" spellcheck="false" />
+    </div>
+  </div>
 
-  <script type="module" src="src/main.js?v=1.1.1"></script>
+  <div id="build"><span id="build-ver">v1.2.0</span></div>
+
+  <script type="module" src="src/main.js?v=1.2.0"></script>
 </body>
 </html>

@@ -45,6 +45,17 @@ export function initInput(stage, onKey) {
   document.addEventListener('gesturestart', (e) => e.preventDefault());
 
   window.addEventListener('keydown', (e) => {
+    const isTilde = e.code === 'Backquote' || e.key === '`' || e.key === '~';
+    if (isTilde) {
+      e.preventDefault();
+      if (onKey) onKey('`', e);
+      return;
+    }
+    const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+    if (typing) {
+      if (e.key === 'Escape' && onKey) onKey('escape', e);
+      return;
+    }
     const k = e.key.toLowerCase();
     if (['w', 'a', 's', 'd', ' ', 'tab'].includes(k)) e.preventDefault();
     if (!keys.has(k)) {
@@ -53,7 +64,10 @@ export function initInput(stage, onKey) {
     }
     keys.add(k);
   });
-  window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Backquote' || e.key === '`' || e.key === '~') return;
+    keys.delete(e.key.toLowerCase());
+  });
   window.addEventListener('blur', () => keys.clear());
 
   window.addEventListener('mousemove', (e) => {
