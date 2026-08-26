@@ -64,18 +64,6 @@ html, body {
   );
 }
 
-/* ---------- 目标 ---------- */
-#objective {
-  position: absolute;
-  top: 1.4em;
-  left: 1.4em;
-  background: var(--surface);
-  padding: 0.35em 0.9em;
-  font-size: 1.35em;
-  letter-spacing: 0.08em;
-}
-#objective .tag { margin-right: 1.2em; }
-
 /* ---------- 字幕 ---------- */
 #messages {
   position: absolute;
@@ -194,6 +182,142 @@ html, body {
 }
 #help span { margin-left: 1.4em; }
 #help span:first-child { margin-left: 0; }
+
+/* ---------- QTE ---------- */
+/* 键盘专用，一次只显示一个键。不给触屏加按钮。
+   面板不带底板：底板会把近景运镜挡掉一整条，电影感全没了。 */
+#qte {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 0.08em 0.3em rgba(0, 0, 0, 0.85);
+}
+.q-title {
+  font-size: 1.2em;
+  letter-spacing: 0.42em;
+  opacity: 0.72;
+  margin-left: 0.42em;
+}
+/* 节拍点：这一段一共几拍、现在第几拍 */
+.q-beats {
+  display: flex;
+  justify-content: center;
+  gap: 0.5em;
+  margin: 0.55em 0 0.2em;
+}
+.q-beats i {
+  display: block;
+  width: 1.9em;
+  height: 0.3em;
+  background: rgba(222, 216, 200, 0.3);
+}
+.q-beats i.done { background: rgba(222, 216, 200, 0.62); }
+.q-beats i.now { background: var(--text); }
+
+/* 键帽舞台：键帽居中，限时环绕着它往里收 */
+.q-stage {
+  position: relative;
+  width: 7em;
+  height: 7em;
+  margin: 0.1em auto 0;
+}
+.q-key {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(1.7);
+}
+.q-key span {
+  display: block;
+  /* 字号只设在内层 span 上：外层同时写 em 尺寸的话会被放大两轮 */
+  font-size: 2.6em;
+  line-height: 1;
+  min-width: 1.5em;
+  padding: 0.24em 0.3em 0.3em;
+  letter-spacing: 0.06em;
+  background: var(--text);
+  color: var(--surface);
+  box-shadow: 0 0.1em 0 rgba(0, 0, 0, 0.55);
+}
+/* 键弹出来的那一下：从大缩到正好，眼睛会自动跟过去 */
+#qte.on .q-key {
+  opacity: 1;
+  transform: scale(1);
+  transition: transform 0.16s cubic-bezier(0.2, 1.5, 0.4, 1), opacity 0.1s linear;
+}
+/* 按对了：键帽炸开一下再消失 */
+#qte.hit .q-key {
+  opacity: 0;
+  transform: scale(1.55);
+  transition: transform 0.22s ease-out, opacity 0.22s ease-out;
+}
+#qte.hit .q-key span { background: var(--surface); color: var(--text); box-shadow: none; }
+
+/* 限时环：一个方框，时间走完就贴到键帽上 */
+.q-ring {
+  position: absolute;
+  inset: 0;
+  border: 0.22em solid var(--text);
+  opacity: 0;
+  transform: scale(2.6);
+}
+#qte.on .q-ring { opacity: 0.9; }
+#qte.hit .q-ring { opacity: 0; transition: opacity 0.18s linear; }
+#qte.mash .q-ring { display: none; }
+
+.q-caption {
+  font-size: 1.35em;
+  letter-spacing: 0.16em;
+  margin-top: 0.5em;
+  opacity: 0.9;
+}
+/* 连按段落的进度条：只有 mash 那一拍出现 */
+.q-mash {
+  display: none;
+  width: 16em;
+  height: 0.42em;
+  margin: 0.7em auto 0;
+  background: rgba(222, 216, 200, 0.2);
+}
+#qte.mash .q-mash { display: block; }
+.q-mash i { display: block; height: 100%; width: 0%; background: var(--text); }
+/* 连按时键帽随每一下轻微弹一下，手上有反馈 */
+#qte.mash .q-key { opacity: 1; transform: scale(1); transition: transform 0.09s ease-out; }
+#qte.mash.punch .q-key { transform: scale(1.14); }
+
+#qte.fail .q-title { background: var(--text); color: var(--surface); padding: 0 0.5em; opacity: 1; }
+#qte.fail .q-key { opacity: 0; transform: scale(0.7); transition: all 0.25s ease-out; }
+#qte.fail .q-ring { opacity: 0; }
+
+/* QTE 期间字幕让位：默认字幕就压在动作名那一行上，两段文字叠在一起没法读。
+   由 ui.js 在 #hud 上开关 .qte-on（#messages 是 #qte 的前一个兄弟，
+   CSS 选不到，只能从父节点下手）。 */
+#hud.qte-on #messages { bottom: 23em; }
+
+/* ---------- 序章结束 ---------- */
+/* 放在 #hud 里用 absolute：#stage 有 transform，position:fixed 会被裁掉 */
+#ending {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 1.8s ease-in;
+}
+#ending.on { opacity: 1; }
+#ending .e-sub { font-size: 1.2em; letter-spacing: 0.5em; opacity: 0.45; margin-left: 0.5em; }
+#ending h2 { font-size: 4.6em; margin: 0.18em 0 0; letter-spacing: 0.3em; font-weight: 400; }
+#ending .e-line { font-size: 1.35em; letter-spacing: 0.16em; opacity: 0.72; margin: 2.4em 0 0; }
+#ending .e-next { font-size: 1.15em; letter-spacing: 0.42em; opacity: 0.4; margin: 3.2em 0 0; }
 
 /* ---------- 人脸识别终端 ---------- */
 #scan {

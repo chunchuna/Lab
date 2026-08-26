@@ -244,6 +244,113 @@ export function sfxClick() {
   src(noiseBuf, t, 0.03, 1800, 3, 0.2, 'bandpass');
 }
 
+/* ---------------- 暴雨 / 雷 / 旋翼 ---------------- */
+
+/**
+ * 循环环境层：一个常驻的噪声源 + 滤波器，只靠 gain 淡入淡出。
+ * 每次进出天台都新建节点会在 WebAudio 里堆出一串跑不掉的 source，
+ * 所以做成懒创建一次、之后只调音量。
+ */
+function makeLoop(type, freq, q) {
+  const s = ac.createBufferSource();
+  s.buffer = noiseBuf;
+  s.loop = true;
+  const f = ac.createBiquadFilter();
+  f.type = type;
+  f.frequency.value = freq;
+  f.Q.value = q;
+  const g = ac.createGain();
+  g.gain.value = 0.0001;
+  s.connect(f).connect(g).connect(master);
+  s.start();
+  return { g, f };
+}
+
+let rainLoop = null;
+let rainHi = null;
+export function setRain(on, level = 1) {
+  if (!ac) return;
+  if (!rainLoop) {
+    rainLoop = makeLoop('lowpass', 1400, 0.6);
+    rainHi = makeLoop('highpass', 3600, 0.7);
+  }
+  const t = ac.currentTime;
+  for (const [node, peak] of [
+    [rainLoop, 0.16],
+    [rainHi, 0.075],
+  ]) {
+    node.g.gain.cancelScheduledValues(t);
+    node.g.gain.setValueAtTime(Math.max(0.0001, node.g.gain.value), t);
+    node.g.gain.linearRampToValueAtTime(on ? peak * level : 0.0001, t + (on ? 1.4 : 0.8));
+  }
+}
+
+/** 雷：一记低频冲击 + 一段长的隆隆噪声尾巴 */
+export function sfxThunder(near = 0.6) {
+  if (!ac) return;
+  const t = ac.currentTime;
+  const o = ac.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(58 + near * 30, t);
+  o.frequency.exponentialRampToValueAtTime(24, t + 1.1);
+  const og = ac.createGain();
+  o.connect(og).connect(master);
+  env(og, t, 0.02, 0.5, 0.34 + near * 0.3, 0.7, 0.6);
+  o.start(t);
+  o.stop(t + 2.6);
+
+  const s = ac.createBufferSource();
+  s.buffer = noiseBuf;
+  s.loop = true;
+  s.playbackRate.value = 0.35 + Math.random() * 0.2;
+  const f = ac.createBiquadFilter();
+  f.type = 'lowpass';
+  f.frequency.setValueAtTime(260 + near * 500, t);
+  f.frequency.exponentialRampToValueAtTime(90, t + 2.2);
+  const g = ac.createGain();
+  s.connect(f).connect(g).connect(master);
+  env(g, t, 0.05, 0.35, 0.3 + near * 0.32, 1.1, 0.9);
+  s.start(t);
+  s.stop(t + 3.2);
+}
+
+let rotorLoop = null;
+let rotorOsc = null;
+let rotorOscGain = null;
+export function setRotor(level) {
+  if (!ac) return;
+  if (!rotorLoop) {
+    rotorLoop = makeLoop('bandpass', 240, 0.9);
+    rotorOsc = ac.createOscillator();
+    rotorOsc.type = 'sawtooth';
+    rotorOsc.frequency.value = 21; // 桨叶拍击的基频
+    const lp = ac.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 320;
+    rotorOscGain = ac.createGain();
+    rotorOscGain.gain.value = 0.0001;
+    rotorOsc.connect(lp).connect(rotorOscGain).connect(master);
+    rotorOsc.start();
+  }
+  const t = ac.currentTime;
+  const k = Math.max(0, Math.min(1, level));
+  for (const [node, peak] of [
+    [rotorLoop.g, 0.16],
+    [rotorOscGain, 0.1],
+  ]) {
+    node.gain.cancelScheduledValues(t);
+    node.gain.setValueAtTime(Math.max(0.0001, node.gain.value), t);
+    node.gain.linearRampToValueAtTime(Math.max(0.0001, peak * k), t + 0.35);
+  }
+}
+
+/** 对讲机的一段沙沙 */
+export function sfxStatic(dur = 0.4, vol = 0.12) {
+  if (!ac) return;
+  const t = ac.currentTime;
+  src(noiseBuf, t, dur, 1800, 1.2, vol, 'bandpass');
+}
+
 export function sfxImpact(metal) {
   if (!ac) return;
   const t = ac.currentTime;

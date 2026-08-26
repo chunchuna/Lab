@@ -1,4 +1,4 @@
-import { HW, HH, TILE_Z } from './config.js';
+import { HW, HH, TILE_Z, VIEW_W, VIEW_H } from './config.js';
 
 export class FX {
   constructor() {
@@ -235,5 +235,94 @@ export class FX {
       if (out.length > 4) break;
     }
     return out;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 暴雨：屏幕空间雨丝
+ *
+ * 雨不参与等距深度排序，也不该被光照压黑，所以画在光照之后、DOM UI 之前，
+ * 且用的是未经镜头缩放的屏幕坐标。整场雨只走两次 stroke（远景一层、近景
+ * 一层），不做 filter: blur()。
+ * ------------------------------------------------------------------ */
+
+export class Rain {
+  constructor(n = 150) {
+    this.on = false;
+    this.gust = 0;
+    this.gustT = 0;
+    this.layers = [
+      { drops: [], n: Math.round(n * 0.55), spd: 520, len: 9, w: 0.8, a: 0.16, slant: -0.2 },
+      { drops: [], n: Math.round(n * 0.45), spd: 820, len: 15, w: 1.1, a: 0.3, slant: -0.28 },
+    ];
+    for (const L of this.layers) {
+      for (let i = 0; i < L.n; i++) {
+        L.drops.push({ x: Math.random() * (VIEW_W + 120) - 60, y: Math.random() * VIEW_H, k: 0.7 + Math.random() * 0.6 });
+      }
+    }
+    this.splashes = [];
+  }
+
+  setOn(v) {
+    this.on = v;
+    if (!v) this.splashes.length = 0;
+  }
+
+  update(dt) {
+    if (!this.on) return;
+    this.gustT -= dt;
+    if (this.gustT <= 0) {
+      this.gustT = 1.6 + Math.random() * 3.4;
+      this.gust = (Math.random() - 0.4) * 0.5;
+    }
+    for (const L of this.layers) {
+      const vx = (L.slant + this.gust) * L.spd;
+      const vy = L.spd;
+      for (const d of L.drops) {
+        d.x += vx * d.k * dt;
+        d.y += vy * d.k * dt;
+        if (d.y > VIEW_H + 20) {
+          d.y = -20 - Math.random() * 40;
+          d.x = Math.random() * (VIEW_W + 200) - 100;
+          // 落地水花：只从近景那层生成，数量有限
+          if (L.spd > 700 && this.splashes.length < 26) {
+            this.splashes.push({ x: Math.random() * VIEW_W, y: VIEW_H * 0.45 + Math.random() * VIEW_H * 0.5, t: 0 });
+          }
+        }
+        if (d.x < -100) d.x += VIEW_W + 200;
+        else if (d.x > VIEW_W + 100) d.x -= VIEW_W + 200;
+      }
+    }
+    for (let i = this.splashes.length - 1; i >= 0; i--) {
+      this.splashes[i].t += dt;
+      if (this.splashes[i].t > 0.34) this.splashes.splice(i, 1);
+    }
+  }
+
+  draw(g, bright = 1) {
+    if (!this.on) return;
+    g.save();
+    for (const L of this.layers) {
+      const vx = (L.slant + this.gust) * L.len;
+      g.strokeStyle = `rgba(186,206,220,${L.a * bright})`;
+      g.lineWidth = L.w;
+      g.beginPath();
+      for (const d of L.drops) {
+        g.moveTo(d.x, d.y);
+        g.lineTo(d.x + vx * d.k, d.y + L.len * d.k);
+      }
+      g.stroke();
+    }
+    // 水花：一圈迅速摊开的扁椭圆
+    g.strokeStyle = `rgba(190,210,220,${0.22 * bright})`;
+    g.lineWidth = 0.8;
+    g.beginPath();
+    for (const s of this.splashes) {
+      const k = s.t / 0.34;
+      g.moveTo(s.x + 4 * k, s.y);
+      g.ellipse(s.x, s.y, 4 * k, 1.6 * k, 0, 0, 6.3);
+    }
+    g.stroke();
+    g.restore();
   }
 }
