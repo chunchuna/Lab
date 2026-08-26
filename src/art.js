@@ -1388,13 +1388,21 @@ export function heliLampAt(x, y, dir = -1) {
 
 /** 舱门口那名士兵伸到最长时手套的位置 —— 玩家的手腕要被抓在这里 */
 export function heliGrabAt(x, y, dir = -1) {
-  return { x: x + 10.2 * HELI_S * dir, y: y + 8.4 * HELI_S };
+  return { x: x + 10.2 * HELI_S * dir, y: y + 6.9 * HELI_S };
 }
 
-/** 舱内地板中心：人被拽进去之后消失在这里 */
+/** 舱门门槛：人被拽进去之后脚踩在这个高度 */
+export function heliSillAt(x, y, dir = -1) {
+  return { x: x + 9.0 * HELI_S * dir, y: y + CABIN.y1 * HELI_S };
+}
+
+/** 舱内地板中心：人被拽进去之后停在这里 */
 export function heliCabinAt(x, y, dir = -1) {
   return { x: x + 7.0 * HELI_S * dir, y: y + 2.4 * HELI_S };
 }
+
+/** 侧舱门开口（机体局部单位）。舱内背景、门板、机组站位都按它排 */
+const CABIN = { x0: 1.5, x1: 13.0, y0: -5.5, y1: 5.5 };
 
 /* ------------------------------------------------------------------ *
  * 机组人员
@@ -1566,27 +1574,38 @@ export function drawCrew(g, x, y, o = {}) {
   g.lineTo(1.7, hy + 0.6);
   g.stroke();
 
-  /* --- 近侧手臂：伸手抓人的就是这一条，画在最上面 --- */
+  /* --- 近侧手臂：伸手抓人的就是这一条，画在最上面 --- *
+   * aim 是**相对 (x, y) 原点**的目标，而整个人已经被 lean/bob 挪过了，
+   * 所以这里要把那两个偏移减掉，reach=1 时手套才正好落在目标上（拉人那段
+   * 靠这个跟玩家的手腕对齐；身体照样跟着机身抖，只有手是钉住的）。 */
   const aim = o.aim || { x: 3.6, y: 1.4 };
-  const rx = 2.4 + (aim.x - 2.4) * reach;
-  const ry = -1.8 + (aim.y + 1.8) * reach;
+  const rx = 2.4 + (aim.x - lean - 2.4) * reach;
+  const ry = -1.8 + (aim.y - bob + 1.8) * reach;
   const ex = 1.0 + (rx - 1.0) * 0.55 + (1 - reach) * 0.9;
   const ey = -6.2 + (ry + 6.2) * 0.45 + (1 - reach) * 1.6;
   g.strokeStyle = CREW.sleeve;
-  g.lineWidth = 1.65;
+  g.lineWidth = 1.75;
   g.beginPath();
   g.moveTo(1.9, -6.2);
   g.lineTo(ex, ey);
   g.stroke();
-  g.strokeStyle = CREW.pant;
-  g.lineWidth = 1.45;
+  /* 小臂用肤色（袖子挽起来）。整条都画成橄榄绿的话，它跟垂在门外的小腿
+     一模一样，"伸手去抓"就读成了"又一条腿"。 */
+  g.strokeStyle = CREW.skinD;
+  g.lineWidth = 1.5;
   g.beginPath();
   g.moveTo(ex, ey);
   g.lineTo(rx, ry);
   g.stroke();
+  g.strokeStyle = CREW.skin;
+  g.lineWidth = 0.9;
+  g.beginPath();
+  g.moveTo(ex, ey - 0.2);
+  g.lineTo(rx, ry - 0.2);
+  g.stroke();
   g.fillStyle = CREW.glove;
   g.beginPath();
-  g.arc(rx, ry, 0.95, 0, 6.3);
+  g.arc(rx, ry, 1.05, 0, 6.3);
   g.fill();
 
   // 肩上的红色识别灯：一闪一闪，暗处能看出舱里确实有人
@@ -1603,6 +1622,15 @@ export function drawCrew(g, x, y, o = {}) {
 /**
  * t 用来转桨与闪航行灯。基础朝向是机头在 -x、尾梁在 +x，所以
  * dir=-1 画出来是**机头朝右**（天台段落用的朝向），dir=1 机头朝左。
+ *
+ * o 里跟"拉人进舱"那段过场有关的几个：
+ *   reach    0..1  舱门口那名士兵探身伸手的程度
+ *   grabTo   {x,y} 手要伸到哪（**画布坐标**，内部换算成机体局部单位）
+ *   doorShut 0..1  舱门滑回来封住舱口
+ *   inCabin  fn(g) 在"舱内背景 + 站姿士兵"之后、"门口士兵 + 舱门"之前回调一次。
+ *                  玩家精灵挂在这里，才会被舱内的黑压住、又被接应的士兵和
+ *                  滑上来的舱门盖住 —— 直接画在世界层的话它永远在机身背后。
+ *                  回调里已经把机体的缩放/镜像还原掉了，用画布坐标画即可。
  */
 export function drawHeli(g, x, y, t, o = {}) {
   const s = (o.scale === undefined ? 1 : o.scale) * HELI_S;
@@ -1721,31 +1749,63 @@ export function drawHeli(g, x, y, t, o = {}) {
 
   /* --- 敞开的侧舱门 + 探身的机组 --- */
   const doorShut = c01(o.doorShut || 0);
-  g.fillStyle = '#0d1211';
-  g.fillRect(1.5, -5.5, 11.5, 11);
-  /* 舱内的顶灯。以前舱里是纯黑，人画得再细也读不出来 ——
-     给一小片自上而下的暖光，机组才是"被舱灯照着的人"而不是剪影。 */
-  const cab = g.createLinearGradient(0, -5.5, 0, 5.5);
-  cab.addColorStop(0, 'rgba(206,196,158,0.30)');
-  cab.addColorStop(0.55, 'rgba(170,168,140,0.14)');
-  cab.addColorStop(1, 'rgba(120,150,150,0.05)');
+  const { x0: cx0, x1: cx1, y0: cy0, y1: cy1 } = CABIN;
+  const cw = cx1 - cx0;
+  const ch = cy1 - cy0;
+  /* 门洞：整块压到比蒙皮更暗，再在四边描一圈门框。不这么做的话它跟机身
+     是同一个明度，机组看起来就像贴在机壳外面，而不是站在一个洞里。 */
+  g.fillStyle = '#070b0b';
+  g.fillRect(cx0, cy0, cw, ch);
+  /* 舱内的顶灯。人物脚下要有一片被照亮的地板，才读得出"里面是个空间"。 */
+  const cab = g.createLinearGradient(0, cy0, 0, cy1);
+  cab.addColorStop(0, 'rgba(214,202,160,0.34)');
+  cab.addColorStop(0.5, 'rgba(150,152,128,0.10)');
+  cab.addColorStop(1, 'rgba(120,150,150,0.04)');
   g.fillStyle = cab;
-  g.fillRect(1.5, -5.5, 11.5, 11);
+  g.fillRect(cx0, cy0, cw, ch);
   // 舱内地板的一点反光
-  g.fillStyle = 'rgba(150,170,160,0.14)';
-  g.fillRect(1.5, 3.6, 11.5, 1.9);
+  g.fillStyle = 'rgba(150,170,160,0.16)';
+  g.fillRect(cx0, cy1 - 1.9, cw, 1.9);
   // 舱壁上的固定件，给背景一点层次，人才不是浮在黑洞前面
-  g.fillStyle = 'rgba(20,26,24,0.55)';
-  g.fillRect(2.0, -4.6, 1.4, 3.2);
-  g.fillRect(11.2, -4.2, 1.4, 4.6);
+  g.fillStyle = 'rgba(18,24,22,0.6)';
+  g.fillRect(cx0 + 0.5, cy0 + 0.9, 1.4, 3.2);
+  g.fillRect(cx1 - 1.8, cy0 + 1.3, 1.4, 4.6);
+  // 门框：上沿受光、下沿（门槛）最亮，人踩上去那条边要看得见
+  g.fillStyle = 'rgba(126,138,132,0.55)';
+  g.fillRect(cx0, cy0, cw, 0.6);
+  g.fillStyle = '#7b857f';
+  g.fillRect(cx0, cy1 - 0.7, cw, 0.7);
+  g.fillStyle = 'rgba(96,106,101,0.5)';
+  g.fillRect(cx0, cy0, 0.6, ch);
+  g.fillRect(cx1 - 0.6, cy0, 0.6, ch);
 
   /* 机组两名：里面那个站着待命，门口那个坐在门槛上接应。
      drawCrew 画在机体局部单位里，所以跟着 scale/dir 一起走。 */
-  drawCrew(g, 4.3, 3.6, { t, pose: 'stand', gun: true, seed: 1.7, aim: { x: 3.1, y: -3.4 }, reach: 0.55 });
-  drawCrew(g, 8.9, 2.6, {
+  drawCrew(g, 3.9, 3.4, { t, pose: 'stand', gun: true, seed: 1.7, aim: { x: 3.1, y: -3.4 }, reach: 0.55 });
+
+  /* 玩家：夹在两名机组之间。见函数头的 inCabin 说明 */
+  if (o.inCabin) {
+    g.save();
+    g.scale(1 / (s * dir), 1 / s);
+    g.translate(-x, -y);
+    o.inCabin(g);
+    g.restore();
+  }
+
+  /* 门口那名：手要伸到 grabTo（画布坐标）。局部单位 = (画布 - 机心) / 缩放，
+     x 还要再除一次 dir，因为机体是镜像画的。 */
+  const gsit = { x: 9.6, y: 2.4 };
+  let gaim = { x: 4.4, y: 5.2 };
+  if (o.grabTo) {
+    gaim = {
+      x: (o.grabTo.x - x) / (s * dir) - gsit.x,
+      y: (o.grabTo.y - y) / s - gsit.y,
+    };
+  }
+  drawCrew(g, gsit.x, gsit.y, {
     t, pose: 'sit', gun: false, seed: 4.1,
     reach: o.reach === undefined ? 0.26 : c01(o.reach),
-    aim: { x: 5.6, y: 6.4 },
+    aim: gaim,
   });
 
   // 滑开的门板收在后面；拽人进舱之后会滑回来把舱口封上
@@ -1904,7 +1964,7 @@ export function drawHeliBeam(g, x, y, tx, ty, w, k) {
  * 垂下的绳索：一条带摆动的线 + 末端的救援套环。
  * 粗细与套环大小跟着 HELI_S 走，机体放大后绳子不能还是一根发丝。
  */
-export function drawRope(g, x0, y0, x1, y1, t, sway = 1) {
+export function drawRope(g, x0, y0, x1, y1, t, sway = 1, loop = true) {
   const s = HELI_S;
   g.save();
   g.lineCap = 'round';
@@ -1935,20 +1995,22 @@ export function drawRope(g, x0, y0, x1, y1, t, sway = 1) {
     g.lineTo(px + 1.6 * s * 0.6, py + 0.8);
   }
   g.stroke();
-  // 末端救援套环
-  const rx = 5.6 * s * 0.62;
-  const ry = 6.6 * s * 0.62;
-  g.strokeStyle = 'rgba(24,20,14,0.7)';
-  g.lineWidth = 3.0 * s * 0.6;
-  g.beginPath();
-  g.ellipse(x1, y1 + ry * 0.8, rx, ry, 0, 0, 6.3);
-  g.stroke();
-  g.strokeStyle = '#a99b78';
-  g.lineWidth = 1.8 * s * 0.6;
-  g.stroke();
-  // 套环上的锁扣
-  g.fillStyle = '#b9c2bc';
-  g.fillRect(x1 - 1.4, y1 - 1.6, 2.8, 3.4);
+  // 末端救援套环。人抓住绳子之后不画：那时末端就在他手里，再挂一个圈很怪
+  if (loop) {
+    const rx = 5.6 * s * 0.62;
+    const ry = 6.6 * s * 0.62;
+    g.strokeStyle = 'rgba(24,20,14,0.7)';
+    g.lineWidth = 3.0 * s * 0.6;
+    g.beginPath();
+    g.ellipse(x1, y1 + ry * 0.8, rx, ry, 0, 0, 6.3);
+    g.stroke();
+    g.strokeStyle = '#a99b78';
+    g.lineWidth = 1.8 * s * 0.6;
+    g.stroke();
+    // 套环上的锁扣
+    g.fillStyle = '#b9c2bc';
+    g.fillRect(x1 - 1.4, y1 - 1.6, 2.8, 3.4);
+  }
   g.restore();
 }
 

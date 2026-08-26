@@ -264,6 +264,9 @@ function enterArea(id, spawnName) {
   game.heli = null;
   game.cine = null;
   game.roofSaidHint = false;
+  game.player.shrink = 0;
+  game.player.nudge = null;
+  game.player.hidden = false;
 
   // 对讲机：进 312 且剧情没走完就自动呼叫；走开就别再喊了。
   // 注意别每次进 312 都把进度打回起点，只有天台失败重生才重置（见 respawn）。
@@ -1123,6 +1126,8 @@ function die() {
   game.shake = 8;
   game.zoomTarget = 1;
   endQTE();
+  clearQTEPose();
+  game.player.hidden = false;
   SFX.sfxThud();
   UI.setPrompt(null);
   setPadVisible(false);
@@ -1285,6 +1290,22 @@ function endQTE() {
   game.qte = null;
   UI.hideQTE();
   game.tsTarget = 1;
+  clearQTEPose();
+}
+
+/**
+ * 姿势是逐帧喂的，QTE 一停就没人再喂了。不清掉的话人会保持最后一拍的造型
+ * 继续走路 —— 搏斗结束定格在举枪蹲姿，抓绳失手定格在半空攀爬姿。
+ * 抓绳打赢的那一路例外：过场要接着用爬绳的缩放与姿势，不能在这里清。
+ */
+function clearQTEPose() {
+  if (game.fight) game.fight.pose = null;
+  if (game.ropeAnim && !game.cine) {
+    game.ropeAnim.pose = null;
+    game.ropeAnim.stroke = 0;
+    game.player.shrink = 0;
+    game.player.nudge = null;
+  }
 }
 
 /**
@@ -1306,7 +1327,9 @@ function updateQTE() {
       game.qte = null;
       UI.hideQTE();
       game.tsTarget = 1;
+      // 先跑回调：抓绳打赢会在这里开过场，clearQTEPose 要看得到 game.cine
       if (cb) cb();
+      clearQTEPose();
     }
     return;
   }
@@ -1433,12 +1456,16 @@ function qteFail() {
  * 直升机的悬停点（画布坐标）。天台边缘在画面右上，机身停在它斜上方。
  * 机体放大之后旋翼半展约 78px，所以悬停点要比原来更高更靠里，
  * 免得桨尖被画面右缘切掉。
+ *
+ * 悬停点是**相对绳索落点**定义的，所以舱口上任何一个点离落点多高都是常量 ——
+ * 爬绳段落靠这一点把"手该举到哪"直接换算成玩家的 z（见 zForHandUp）。
  */
+const HELI_OFF = { x: 26, y: -144 };
 function heliHover() {
   const r = area.roof;
   return {
-    x: area.cam.x + (r.rope.x - r.rope.y) * HW + 26,
-    y: area.cam.y + (r.rope.x + r.rope.y) * HH - 144,
+    x: area.cam.x + (r.rope.x - r.rope.y) * HW + HELI_OFF.x,
+    y: area.cam.y + (r.rope.x + r.rope.y) * HH + HELI_OFF.y,
   };
 }
 
@@ -1553,11 +1580,15 @@ function fireKillShot() {
   if (!f || !z) return;
   const mx = p.x + Math.cos(p.aim) * 0.42;
   const my = p.y + Math.sin(p.aim) * 0.42;
-  f.shotFrom = { x: mx, y: my, z: 1.32 };
-  f.shotTo = { x: z.x, y: z.y, z: 1.52 };
+  /* 弹头的飞行时间走**世界时间**，慢动作会把它拉长成看得清的一段。爆头
+     的判定也挂在同一个计时上（见 applyFightPose 的 'fire'）—— 以前两边各
+     算各的，结果头先炸开、弹头还在枪口边上飘。 */
+  f.shotDur = 0.1;
+  f.shotT = 0;
   f.shotHit = false;
+  f.hitS = 1;
   f.recoil = 1;
-  fx.bullet(mx, my, 1.32, z.x, z.y, 1.52, 0.13);
+  fx.bullet(mx, my, 1.32, z.x, z.y, 1.52, f.shotDur);
   fx.spark(mx, my, 1.32, 5, 0.35);
   fx.smoke(mx, my, 1.36, 3);
   fx.casing(p.x, p.y, 1.15, p.aim);
@@ -1583,6 +1614,14 @@ const FIGHT_AXES = [
   const l = Math.hypot(v.x, v.y);
   return { x: v.x / l, y: v.y / l };
 });
+
+/** a -> b 的最短转角，落在 (-π, π] */
+function shortAngle(a, b) {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d <= -Math.PI) d += Math.PI * 2;
+  return d;
+}
 
 function startFightQTE() {
   const p = game.player;
@@ -1620,8 +1659,11 @@ function startFightQTE() {
   const dodge = rp >= rm ? rp : -rm;
   game.fight = {
     px: p.x, py: p.y,
-    ux, uy, // 当前轴，逐帧转向 u1
-    u0: { x: ux, y: uy }, u1: best, axisK: 0,
+    ux, uy, // 当前轴，逐帧转向上镜轴
+    // 按角度插值而不是按向量插值：两者接近反向时向量插值会从中间的零向量穿过去
+    a0: Math.atan2(uy, ux),
+    da: shortAngle(Math.atan2(uy, ux), Math.atan2(best.y, best.x)),
+    axisK: 0,
     d: Math.min(2.2, l),
     side: 0, side0: 0, zside: 0, kick: 0, armed: false, dodge, recoil: 0,
   };
@@ -1649,6 +1691,13 @@ function setFightAnim(name, k) {
   if (!f || !z) return;
   const rt = game.rt;
   const s = smoothstep(clamp(k, 0, 1));
+
+  /* 扭打轴慢慢从"它现在实际在哪一侧"转到上镜轴。直接切过去的话，刚从帐篷里
+     爬出来的丧尸会在第一帧凭空瞬移到画面另一边；第一拍的引子里转完正好。 */
+  f.axisK = Math.min(1, f.axisK + game.rdt * 0.85);
+  const ang = f.a0 + f.da * smoothstep(f.axisK);
+  f.ux = Math.cos(ang);
+  f.uy = Math.sin(ang);
 
   let d = 0.6; // 贴身距离
   let side = f.side0; // 玩家的侧移
@@ -1911,10 +1960,12 @@ function applyFightPose(name, s, f, z, p) {
     pp.arms.far = { x: sf.x * (A * 0.6 - rc), y: sf.y * (A * 0.45) - 4.4 - rc * 1.8 };
     pp.armAng = Math.atan2(sf.y * 0.7 - 0.12, sf.x) - rc * 0.42 * sg;
 
-    // 弹头到没到？到了就爆头
-    const hit = s > 0.28;
+    // 弹头到没到？跟 fx.bullet 用同一个世界时间计时，两边永远对得上
+    f.shotT = (f.shotT || 0) + game.rdt * game.timescale;
+    const hit = f.shotT >= (f.shotDur || 0.1);
     if (hit && !f.shotHit) {
       f.shotHit = true;
+      f.hitS = s;
       const hz = 1.52;
       fx.spark(z.x, z.y, hz, 9, 0.7);
       fx.blood(z.x, z.y, hz, 20, 1.5);
@@ -1925,7 +1976,7 @@ function applyFightPose(name, s, f, z, p) {
       SFX.sfxThud();
       UI.msg('（一声闷响。它不动了。）');
     }
-    const kb = hit ? smoothstep(clamp((s - 0.28) / 0.5, 0, 1)) : 0;
+    const kb = hit ? smoothstep(clamp((s - f.hitS) / Math.max(0.12, 1 - f.hitS), 0, 1)) : 0;
     zp.headGone = hit;
     zp.tilt = (0.4 - kb * 1.25) * zdir;
     zp.sink = -kb * 2;
@@ -2042,6 +2093,61 @@ function startRopeQTE() {
   });
 }
 
+/**
+ * 爬绳段落的高度标定。机身钉死在绳索落点上方 -HELI_OFF.y 像素，所以：
+ *
+ *   落点屏幕 y = gy          （玩家 z=0 时脚底所在）
+ *   舱口抓手  = gy - GRAB_UP （门口士兵手套伸到最低的位置）
+ *   舱内门槛  = gy - SILL_UP （人被拽进去之后踩在这里）
+ *
+ * 玩家脚底 y = gy - z*TILE_Z，举过头顶的手大约在脚底上方 30*scale 像素，
+ * 反过来就能算出"手要够到某个高度时人该在什么 z"。两处的数只在 art.js 里
+ * 定义一次（heliGrabAt / heliSillAt），这边只做减法。
+ */
+const GRAB_UP = -HELI_OFF.y - A.heliGrabAt(0, 0, -1).y;
+const SILL_UP = -HELI_OFF.y - A.heliSillAt(0, 0, -1).y;
+const HAND_UP = 30; // 双手举过头顶时高出脚底多少（1 倍缩放下）
+/* 三个缩放档：爬到顶 / 被抓住 / 进了舱。直升机是按"在天上、离得远"的比例
+   画的，人不缩小就塞不进舱门；但缩过头又什么动作都看不清，所以进舱前尽量
+   留大一点，只有真的要挤进那个 21px 高的门洞时才收到最小。 */
+const CLIMB_SHRINK = 0.42;
+const GRAB_SHRINK = 0.6;
+const IN_SHRINK = 0.94;
+
+/** 让"举起的手"停在落点上方 up 像素时，玩家该有的 z */
+function zForHandUp(up, shrink) {
+  return (up - HAND_UP * lerp(PLAYER_SCALE, 0.46, clamp(shrink, 0, 1))) / TILE_Z;
+}
+
+/**
+ * 攀爬循环。a 在 -1..1 之间摆，一只手往上够、另一只手拉住，腿同时交替蹬绳。
+ * 手全部往身体中线（绳子）上收，两只手不能各挂一边，否则不像抓着一根绳。
+ */
+function climbPose(a, extra) {
+  const po = {
+    face: 1,
+    noBack: true,
+    grit: true,
+    hideItems: true,
+    holster: true,
+    crouch: 1.5,
+    lean: a * 0.07,
+    // 远手肩在 x-4.2，近手肩在 x+4.2；两只手都收到中线偏右一点
+    arms: {
+      far: { x: 4.9, y: -10.5 + a * 4.5 },
+      near: { x: -3.5, y: -10.5 - a * 4.5 },
+    },
+    legs: {
+      a: -1.6 + a * 0.8,
+      b: 1.4 + a * 0.8,
+      la: 2.6 - a * 2.4,
+      lb: 2.6 + a * 2.4,
+    },
+  };
+  if (extra) Object.assign(po, extra);
+  return po;
+}
+
 /** 抓绳段落的玩家动作。位置全部由拍子的进度 k 驱动，一拍走完刚好到位 */
 function setRopeAnim(name, k) {
   const ra = game.ropeAnim;
@@ -2058,6 +2164,13 @@ function setRopeAnim(name, k) {
     p.z = 0;
     p.moving = false;
     p.walk = lerp(p.walk, 0, Math.min(1, game.rdt * 8));
+    // 助跑前的下蹲蓄力
+    ra.pose = {
+      crouch: 2 + s * 2.5,
+      grit: true,
+      legs: { a: -2.6, b: 2.4 },
+      arms: { far: { x: -3.2, y: 4.4 }, near: { x: 1.6, y: 3.2 } },
+    };
   } else if (name === 'run') {
     p.x = lerp(ra.x0, takeoff.x, s);
     p.y = lerp(ra.y0, takeoff.y, s);
@@ -2070,6 +2183,7 @@ function setRopeAnim(name, k) {
       SFX.sfxStep();
       fx.dust(p.x, p.y, 0.02, 1);
     }
+    ra.pose = { grit: true, lean: -0.14, hideItems: true, holster: true };
   } else if (name === 'air') {
     p.x = lerp(takeoff.x, grab.x, s);
     p.y = lerp(takeoff.y, grab.y, s);
@@ -2077,14 +2191,37 @@ function setRopeAnim(name, k) {
     p.z = Math.sin(s * Math.PI * 0.8) * 1.9 + s * 0.75;
     p.moving = false;
     p.walk = lerp(p.walk, 0, Math.min(1, game.rdt * 5));
+    // 腾空：两手全力往前上方够绳，后腿蹬直、前腿收起
+    ra.pose = {
+      face: 1,
+      noBack: true,
+      grit: true,
+      hideItems: true,
+      holster: true,
+      crouch: -1,
+      lean: -0.2 + s * 0.24,
+      arms: {
+        far: { x: 4.2 + s * 1.2, y: -8 - s * 3 },
+        near: { x: -2.4 + s * 1.4, y: -7 - s * 4 },
+      },
+      legs: { a: -5.5 + s * 3, la: 1 + s * 3, b: 3.5 - s * 1.5, lb: s * 2 },
+    };
   } else if (name === 'hang' || name === 'climb') {
     if (game.rope) game.rope.hold = true;
     const climb = name === 'climb' ? clamp(k, 0, 1) : 0;
-    p.x = grab.x + Math.sin(game.rt * (1.7 + climb * 1.4)) * 0.07;
+    /* 一把一把往上：每按满 1/6 就是一"把"，手脚交替的相位跟着爬升进度走
+       而不是跟着时间走 —— 停手时人也就停在半途，不会自己在那划水。 */
+    ra.stroke = lerp(ra.stroke || 0, climb * 6, Math.min(1, game.rdt * 9));
+    const a = Math.sin(ra.stroke * Math.PI * 2);
+    // 越往上离镜头越远，同时人要小到塞得进舱门（见 playerScale 的说明）
+    p.shrink = climb * CLIMB_SHRINK;
+    p.x = grab.x + Math.sin(game.rt * 1.7) * 0.05;
     p.y = grab.y;
-    p.z = 2.4 + climb * 4.6 + Math.sin(game.rt * 1.5) * 0.07;
+    // 起点：吊在绳子下端；终点：手够到离舱口抓手还差一截的地方
+    p.z = lerp(2.4, zForHandUp(GRAB_UP - 15, CLIMB_SHRINK), climb) + Math.sin(game.rt * 1.5) * 0.06;
     p.moving = false;
     p.walk = lerp(p.walk, 0, Math.min(1, game.rdt * 5));
+    ra.pose = climbPose(name === 'climb' ? a : Math.sin(game.rt * 1.6) * 0.35);
   }
 
   p.aim = Math.atan2(r.rope.y - 2.6 - p.y, r.rope.x - p.x);
@@ -2152,23 +2289,50 @@ function updateRoof(dt) {
 }
 
 /* ------------------------------------------------------------------ *
- * 逃脱过场：最后一段收绳 → 被拽进舱门 → 序章结束
+ * 逃脱过场：够到舱口 → 士兵抓住手腕 → 被拽进舱 → 收绳关门 → 序章结束
  *
- * 冲刺 / 起跳 / 抓绳 / 往上爬现在都在抓绳 QTE 里由玩家自己按出来了，
- * 这里只剩绞盘把人拽完最后一截、直升机拉升离开。不接受 WASD，state = 'cine'。
+ * 冲刺 / 起跳 / 抓绳 / 往上爬都在抓绳 QTE 里由玩家自己按出来了，这里接的是
+ * 最后一小截。以前这一段只是把 p.z 一路插到 9.6 再继续往上飘 —— 9.6 换算过来
+ * 是舱顶再往上 30 多像素，人整个飞过了直升机，看着就是"被丢在机外悬空"。
+ *
+ * 现在的时间轴（秒，全部相对过场开始）：
+ *
+ *   0.00 REACH  最后一把：绞盘带着人再上一点，玩家的手举到舱口抓手位置；
+ *               门口的士兵同时探身把手伸下来（crewReach 0 → 1）
+ *   0.95 GRAB   手套抓住手腕。一下顿挫（shake + 音效），玩家一只手离开绳子
+ *               改抓士兵的小臂，另一只手扒住门槛；绳子开始松
+ *   1.60 HAUL   往里拽：脚底从舱口外抬到门槛高度、身体侧过来蹭进舱门，
+ *               同时缩到舱内比例。绳索这时开始回收（1.2 秒收完就没了）
+ *   2.85 IN     人已经在舱内地板上，士兵收手；舱门滑上来把舱口封住
+ *   3.55 AWAY   机头一压，右上方拉升离场；镜头拉回全景
+ *   6.30 END    「序章 · 完」
  * ------------------------------------------------------------------ */
 
-const CINE = { pull: 2.3, end: 5.2 };
+const CINE = { grab: 0.95, haul: 1.6, in: 2.85, away: 3.55, end: 6.3 };
 
 function startEscapeCine() {
   const p = game.player;
   game.roofPhase = 'cine';
   game.state = 'cine';
   game.tsTarget = 1;
-  game.zoomTarget = 1.3;
-  game.zoomSpeed = 1.1;
-  game.panSpeed = 1.8;
-  game.cine = { t: 0, x0: p.x, y0: p.y, z0: p.z || 2.4 };
+  /* 抓手那几拍要看得清"抓住 → 拽入"，镜头先保持近景，进舱之后再拉开。
+     整段的位移只有二三十像素，不推近就什么都读不出来。 */
+  game.zoomTarget = 2.1;
+  game.zoomSpeed = 1.4;
+  game.panSpeed = 2.2;
+  game.cine = {
+    t: 0,
+    x0: p.x, y0: p.y, z0: p.z || 2.4,
+    sh0: p.shrink || 0,
+    stroke: (game.ropeAnim && game.ropeAnim.stroke) || 0,
+    reach: 0,
+    grabbed: false,
+    retract: 0,
+    door: 0,
+    inCabin: false,
+    pose: null,
+  };
+  p.hidden = false;
   UI.setPrompt(null);
   setPadVisible(false);
 }
@@ -2181,28 +2345,125 @@ function updateCine(dt) {
   const T = c.t;
   if (game.rope) game.rope.hold = true;
 
-  const k = smoothstep(clamp(T / CINE.pull, 0, 1));
-  p.x = lerp(c.x0, r.rope.x, k);
-  p.y = lerp(c.y0, r.rope.y - 0.2, k);
-  p.z = T < CINE.pull ? lerp(c.z0, 9.6, k) : 9.6 + (T - CINE.pull) * 3.9;
+  p.x = r.rope.x;
+  p.y = r.rope.y - 0.1;
   p.moving = false;
+  p.walk = lerp(p.walk, 0, Math.min(1, dt * 6));
+
+  /* 三个关键高度（都是"举起的手离绳索落点多高"）：
+     还差一截 → 够到抓手 → 站上门槛。脚底高度由 zForHandUp 反推。 */
+  const zGrab = zForHandUp(GRAB_UP, GRAB_SHRINK);
+  const zIn = SILL_UP / TILE_Z; // 进舱之后脚底就踩在门槛上
+
+  // 舱口在屏幕上比绳索落点偏机内一点，人被拽进去时要横着挪这一段
+  const NUDGE_GRAB = 6;
+  const NUDGE_IN = 13;
+
+  if (T < CINE.grab) {
+    // --- REACH：最后一把，士兵同时把手伸下来
+    const k = smoothstep(T / CINE.grab);
+    c.stroke += dt * 1.4;
+    p.z = lerp(c.z0, zGrab, k);
+    p.shrink = lerp(c.sh0, GRAB_SHRINK, k);
+    p.nudge = { x: NUDGE_GRAB * k, y: 0 };
+    c.reach = smoothstep(clamp((T - 0.15) / 0.7, 0, 1));
+    // 够到最后那一下：够绳的手改成朝舱口伸，另一只还挂在绳上
+    c.pose = climbPose(Math.sin(c.stroke * Math.PI * 2) * (1 - k), {
+      lean: -0.1 * k,
+      arms: {
+        far: { x: 4.9 + k * 1.6, y: -10.5 - k * 0.5 },
+        near: { x: -3.5 + k * 1.0, y: -10.5 + k * 1.0 },
+      },
+    });
+  } else if (T < CINE.haul) {
+    // --- GRAB：手套扣住手腕。人还吊在舱口外，只有上半身被拽得往里歪
+    if (!c.grabbed) {
+      c.grabbed = true;
+      game.shake = 4.6;
+      SFX.sfxImpact(false);
+      UI.msg('（一只戴手套的手扣住了你的手腕。）', 'good');
+    }
+    const k = smoothstep((T - CINE.grab) / (CINE.haul - CINE.grab));
+    c.reach = 1;
+    p.z = zGrab + k * 0.16;
+    p.shrink = GRAB_SHRINK + k * 0.04;
+    p.nudge = { x: NUDGE_GRAB + k * 1.5, y: 0 };
+    c.pose = {
+      face: 1, noBack: true, grit: true, hideItems: true, holster: true,
+      crouch: 1 - k,
+      lean: -0.12 - k * 0.2,
+      // 被抓住那只手被往上提，另一只手扒上门槛
+      arms: {
+        far: { x: 6.5 + k * 1.2, y: -11 - k * 1.6 },
+        near: { x: -2.5 + k * 4.5, y: -9.5 - k * 2.2 },
+      },
+      legs: { a: -2.4 - k * 2, b: 1.8 + k * 1.5, la: 1 + k * 3, lb: 0.5 + k * 1 },
+    };
+  } else if (T < CINE.in) {
+    // --- HAUL：整个人被拖进舱门，绳索同时回收
+    const k = smoothstep((T - CINE.haul) / (CINE.in - CINE.haul));
+    c.reach = 1 - k * 0.45;
+    /* 上半身越过门槛的那一刻换图层：在这之前人还吊在机外（画在世界层，
+       跟雨夜一起被压暗、又刚好被机腹挡住一点头顶），之后整个人在舱内。 */
+    if (k > 0.35) c.inCabin = true;
+    p.z = lerp(zGrab + 0.16, zIn, k);
+    p.shrink = lerp(GRAB_SHRINK + 0.04, IN_SHRINK, k);
+    p.nudge = { x: lerp(NUDGE_GRAB + 1.5, NUDGE_IN, k), y: 0 };
+    c.retract = clamp((T - CINE.haul - 0.15) / 1.2, 0, 1);
+    // 进舱瞬间从"吊着"变成"扑倒在地板上"：身体压低、腿蹬进来
+    c.pose = {
+      face: 1, noBack: true, grit: true, hideItems: true, holster: true,
+      crouch: -1 + k * 8,
+      sink: k * 1.5,
+      lean: -0.32 + k * 0.5,
+      arms: {
+        far: { x: 7.7 - k * 5.2, y: -15.5 + k * 12 },
+        near: { x: 2.0 - k * 5.0, y: -13.9 + k * 15 },
+      },
+      legs: { a: -4.4 + k * 3, b: 3.3 - k * 2, la: 4 - k * 4, lb: 1.5 - k * 1.5 },
+    };
+    if (k > 0.55 && !c.thud) {
+      c.thud = true;
+      game.shake = 3.2;
+      SFX.sfxThud();
+    }
+  } else {
+    // --- IN / AWAY：人在舱里瘫着，绳收完、门滑上，机头一压离场
+    const k = smoothstep(clamp((T - CINE.in) / 0.7, 0, 1));
+    c.reach = 0.55 * (1 - k);
+    c.retract = 1;
+    c.inCabin = true;
+    c.door = smoothstep(clamp((T - CINE.in - 0.2) / 0.9, 0, 1));
+    p.z = zIn;
+    p.shrink = IN_SHRINK;
+    p.nudge = { x: NUDGE_IN + k * 3, y: 0 };
+    c.pose = {
+      face: 1, noBack: true, hideItems: true, holster: true,
+      crouch: 7 + k * 1.5,
+      sink: 1.5,
+      lean: 0.18 - k * 0.06,
+      arms: { far: { x: 2.5, y: -3.5 }, near: { x: -3.0, y: -2.0 } },
+      legs: { a: 2.5, b: 4.5, la: 0.5, lb: 0 },
+    };
+    // 舱门一封上人就看不见了，别让精灵透过门板露出来
+    if (c.door > 0.85) p.hidden = true;
+    if (T > CINE.away) game.zoomTarget = 1;
+  }
+
   p.aim = Math.atan2(r.rope.y - 2.6 - p.y, r.rope.x - p.x);
   p.aimScreen = normScreenDir(p.aim);
-  p.walk = lerp(p.walk, 0, Math.min(1, dt * 6));
   game.zoomAt = { x: p.x, y: p.y, z: (p.z || 0) + 0.7 };
-  // 拽进舱门之后镜头缓缓拉开，看着直升机飞走
-  if (T > CINE.pull) game.zoomTarget = 1;
 
-  // 直升机跟着往上抬，绳索一起收
+  // 直升机：拽人时几乎不动（有个抬升的趋势），关门之后才真正拉升右飞
   const h = game.heli;
   if (h) {
     h.t += dt;
     const hv = heliHover();
-    const up = Math.max(0, T - 0.4) * 9;
-    h.x = hv.x + Math.sin(h.t * 0.7) * 3 + Math.max(0, T - CINE.pull) * 28;
-    h.y = hv.y + Math.sin(h.t * 1.7) * 2 - up;
+    const off = Math.max(0, T - CINE.away);
+    h.x = hv.x + Math.sin(h.t * 0.7) * 3 + off * off * 13;
+    h.y = hv.y + Math.sin(h.t * 1.7) * 2 - Math.min(T, CINE.away) * 2.2 - off * off * 7;
   }
-  SFX.setRotor(Math.max(0.2, 1 - Math.max(0, T - CINE.pull) * 0.26));
+  SFX.setRotor(Math.max(0.2, 1 - Math.max(0, T - CINE.away) * 0.26));
 
   if (T > CINE.end && game.state !== 'end') {
     game.state = 'end';
@@ -2233,6 +2494,60 @@ const PLAYER_SCALE = 1.12;
 function playerScale() {
   const k = clamp(game.player.shrink || 0, 0, 1);
   return lerp(PLAYER_SCALE, 0.46, k);
+}
+
+/**
+ * 玩家精灵。抽出来是因为它有两个落点：平时按等距深度排在世界层里画，
+ * 被拽进机舱那几秒改挂到 drawHeli 的舱内图层（否则永远在机身背后）。
+ * 两处的坐标系一样（都是世界变换下的画布坐标），所以直接复用。
+ */
+function drawPlayerSprite(g, cam, px, py, zOff, bodyRot) {
+  const p = game.player;
+  const s = playerScreen(cam, { x: px, y: py });
+  const kick = game.gun.recoil * 1.6;
+  const aimS = p.aimScreen || { x: 1, y: 0.5 };
+  const HIP = 13 * 1.12; // 髋部离脚底的像素高度
+  // 旋转是绕髋部做的，所以躺平时要把绘制原点整体下移一个髋高，
+  // 否则身体会浮在床面上方一个髋高的位置。
+  const hipDrop = bodyRot === 0 ? 0 : HIP * Math.min(1, Math.abs(bodyRot / LIE_ROT));
+  // 过场里对齐舱口用的屏幕偏移：世界坐标是等距的，横着挪几像素没法用 x/y 表达
+  const nd = p.nudge;
+  const fx0 = s.x - aimS.x * kick + (nd ? nd.x : 0);
+  const fy0 = s.y - zOff - aimS.y * kick + hipDrop + (nd ? nd.y : 0);
+  let leftItem = game.state === 'play' ? INV.handItem('left') : null;
+  let rightItem = game.state === 'play' ? INV.handItem('right') : null;
+  /* 搏斗段：手电筒别在腰上不参与，枪在"拔枪"那一拍之前还在枪套里。
+     而且枪固定交给**近侧**那只手 —— 不然朝向一变，持枪的手就换边，
+     举枪、格挡、开枪三拍的手臂偏移全对不上。 */
+  if (game.fight) {
+    const gun = game.fight.armed && handOf('pistol') ? 'pistol' : null;
+    const nearIsRight = aimS.x >= 0;
+    leftItem = nearIsRight ? null : gun;
+    rightItem = nearIsRight ? gun : null;
+  }
+  g.save();
+  if (bodyRot !== 0) {
+    g.translate(fx0, fy0 - HIP);
+    g.rotate(bodyRot);
+    g.translate(-fx0, -(fy0 - HIP));
+  }
+  // 手的屏幕坐标留给舱口士兵：它要伸手抓的就是这个点
+  p.hands = A.drawCharacter(g, fx0, fy0, {
+    scale: playerScale(),
+    aim: aimS,
+    walk: p.walk,
+    moving: p.moving && game.state === 'play',
+    leftItem,
+    rightItem,
+    flashOn: inv.flashOn,
+    eyesShut: game.state === 'wake' && game.phase < 1.5,
+    pose:
+      (game.fight && game.fight.pose) ||
+      (game.cine && game.cine.pose) ||
+      (game.ropeAnim && game.ropeAnim.pose) ||
+      null,
+  });
+  g.restore();
 }
 
 const ISO_ANG = Math.atan2(HH, HW);
@@ -2699,48 +3014,101 @@ function drawAreaGlow(g, cam) {
 }
 
 /**
- * 天空层：直升机、探照灯、垂下的绳索。
+ * 天空层：直升机、探照灯、垂下的绳索，以及**吊在绳上的玩家**。
  *
  * 它们在天上，不参与等距深度排序，也不该被地面光照压黑，所以画在光照之后。
  * 坐标是画布坐标（跟着 shx/shy 一起挪），但仍在世界变换里画 —— QTE 近景时
  * 直升机要跟着一起放大，否则天上那架和脚下的天台会各走各的。
+ *
+ * 抓住绳子之后玩家也归这一层管，分两个落点：
+ *
+ *   吊在机外  画在**整架机之上**。绞盘吊臂是伸到机身外侧的，绳子和人都在
+ *             机腹与滑橇的外面。之前他跟着世界层画在机身背后，机腹那个大椭圆
+ *             正好盖住舱口高度的一切 —— 屏幕上就完全看不见人，只剩一根绳。
+ *   拽进舱内  交给 drawHeli 的 inCabin 回调，夹在"舱内背景 + 站姿士兵"和
+ *             "门口士兵 + 舱门"之间，于是接应的人和滑上来的舱门会挡住他。
+ *
+ * 两个落点都在光照之后，所以中途换层不会有明暗跳变；人被探照灯打着，
+ * 比周围亮本来也说得通。
  */
 function drawSky(g, cam, px, py, zOff) {
   const h = game.heli;
   if (!h || !area.roof) return;
   const hx = h.x + (cam.x - area.cam.x);
   const hy = h.y + (cam.y - area.cam.y);
-  const tx = cam.x + (px - py) * HW;
-  const ty = cam.y + (px + py) * HH - zOff;
+  const nd = game.player.nudge;
+  const tx = cam.x + (px - py) * HW + (nd ? nd.x : 0);
+  const ty = cam.y + (px + py) * HH - zOff + (nd ? nd.y : 0);
 
-  // 探照灯：悬停到位之后才打开，照向玩家。灯口位置由 art.js 给，两边不各写一套
-  if (h.k >= 0.5) {
-    const k = Math.min(1, (h.k - 0.5) / 0.5);
-    const lp = A.heliLampAt(hx, hy, -1);
-    A.drawHeliBeam(g, lp.x, lp.y, tx, ty, 30, k * (0.75 + 0.25 * Math.sin(game.t * 1.3)));
-  }
-
-  // 绳索：从舱门绞盘出去，先垂到天台边缘的落点；抓住之后跟着人走
+  const c = game.cine;
   const an = A.heliAnchor(hx, hy, -1);
   const rp = game.rope;
-  if (rp) {
-    const r = area.roof;
+  const retract = c ? c.retract : 0;
+  const r = area.roof;
+  const gx = cam.x + (r.rope.x - r.rope.y) * HW;
+  const gy = cam.y + (r.rope.x + r.rope.y) * HH;
+
+  /* 探照灯：悬停到位之后打开，照住天台上的接应点。
+     以前是照着玩家：人爬到舱口时目标离灯口只剩十几像素，锥体缩成一团，
+     整架直升机被自己的灯打成一片白。改成钉在地面落点上，锥体长度恒定；
+     人被拉进舱之后连灯一起收。 */
+  if (h.k >= 0.5) {
+    const k = Math.min(1, (h.k - 0.5) / 0.5);
+    const fade = c ? 1 - smoothstep(clamp(c.t / CINE.in, 0, 1)) : 1;
+    if (fade > 0.02) {
+      const lp = A.heliLampAt(hx, hy, -1);
+      A.drawHeliBeam(g, lp.x, lp.y, gx, gy, 30, k * fade * (0.75 + 0.25 * Math.sin(game.t * 1.3)));
+    }
+  }
+
+  const drawP = skyPlayer() ? (gg) => drawPlayerSprite(gg, cam, px, py, zOff, 0) : null;
+  const inCabin = c && c.inCabin ? drawP : null;
+
+  /* 舱口的接应：手伸下来的程度、抓哪儿、舱门关到什么程度，全由过场时间轴给 */
+  A.drawHeli(g, hx, hy, game.t, {
+    scale: 1,
+    dir: -1,
+    reach: c ? c.reach : undefined,
+    doorShut: c ? c.door : 0,
+    // 抓哪儿：直接用玩家上一帧那只举起来的手（drawCharacter 会把姿势旋转
+    // 也算进去），手套就永远扣在手腕上，不用两边各推一遍位置
+    grabTo: c && c.reach > 0.35 && game.player.hands ? game.player.hands.left : null,
+    inCabin,
+  });
+
+  /* 绳索：从舱门绞盘出去，先垂到天台边缘的落点。抓住之后末端跟着人走，
+     而且不再画末端那个救援套环 —— 人抓着绳子的时候还在脚下挂一个跟他一样大
+     的圈，看起来像踩着一个甜甜圈。 */
+  if (rp && retract < 1) {
     let ex;
     let ey;
     if (rp.hold) {
       ex = tx;
-      ey = ty - 4;
+      ey = ty + 2;
     } else {
-      const gx = cam.x + (r.rope.x - r.rope.y) * HW;
-      const gy = cam.y + (r.rope.x + r.rope.y) * HH;
       const drop = rp.down ? 1 : smoothstep(clamp(rp.t / 1.3, 0, 1));
       ex = lerp(an.x, gx, drop);
       ey = lerp(an.y, gy, drop);
     }
-    A.drawRope(g, an.x, an.y, ex, ey, game.t, rp.hold ? 0.25 : 1);
+    /* 人进舱之后绞盘把绳收回去：末端一路缩回挂点，最后一小段再淡掉。
+       以前这根绳会一直挂到过场结束，人明明已经上去了绳子还垂在那儿。 */
+    if (retract > 0) {
+      const k = smoothstep(retract);
+      ex = lerp(ex, an.x, k);
+      ey = lerp(ey, an.y, k);
+      g.globalAlpha = 1 - clamp((retract - 0.75) / 0.25, 0, 1);
+    }
+    A.drawRope(g, an.x, an.y, ex, ey, game.t, rp.hold ? 0.25 : 1, !rp.hold);
+    g.globalAlpha = 1;
   }
 
-  A.drawHeli(g, hx, hy, game.t, { scale: 1, dir: -1 });
+  if (drawP && !inCabin) drawP(g);
+}
+
+/** 玩家该不该由天空层来画：抓住绳子那一刻起，一直到进舱被门挡住 */
+function skyPlayer() {
+  if (game.player.hidden) return false;
+  return !!(game.cine || (game.rope && game.rope.hold));
 }
 
 function render() {
@@ -2827,6 +3195,9 @@ function render() {
   const onBed = game.state === 'wake' && zOff > 2;
   items.push({ k: px + py + (onBed ? 0.7 : 0), player: true });
 
+  // 吊在绳上/被拽进舱那一段由 drawSky 负责画，世界层这里跳过，否则会有两个人
+  const cabinPlayer = skyPlayer();
+
   items.sort((a, b) => a.k - b.k);
   for (const it of items) {
     if (it.pr) {
@@ -2836,45 +3207,8 @@ function render() {
     } else if (it.z) {
       const zs = { x: cam.x + (it.z.x - it.z.y) * HW, y: cam.y + (it.z.x + it.z.y) * HH };
       drawZombie(ctx, zs.x, zs.y, it.z, false);
-    } else {
-      const s = playerScreen(cam, { x: px, y: py });
-      const kick = game.gun.recoil * 1.6;
-      const aimS = p.aimScreen || { x: 1, y: 0.5 };
-      const HIP = 13 * 1.12; // 髋部离脚底的像素高度
-      // 旋转是绕髋部做的，所以躺平时要把绘制原点整体下移一个髋高，
-      // 否则身体会浮在床面上方一个髋高的位置。
-      const hipDrop = bodyRot === 0 ? 0 : HIP * Math.min(1, Math.abs(bodyRot / LIE_ROT));
-      const fx0 = s.x - aimS.x * kick;
-      const fy0 = s.y - zOff - aimS.y * kick + hipDrop;
-      let leftItem = game.state === 'play' ? INV.handItem('left') : null;
-      let rightItem = game.state === 'play' ? INV.handItem('right') : null;
-      /* 搏斗段：手电筒别在腰上不参与，枪在"拔枪"那一拍之前还在枪套里。
-         而且枪固定交给**近侧**那只手 —— 不然朝向一变，持枪的手就换边，
-         举枪、格挡、开枪三拍的手臂偏移全对不上。 */
-      if (game.fight) {
-        const gun = game.fight.armed && handOf('pistol') ? 'pistol' : null;
-        const nearIsRight = aimS.x >= 0;
-        leftItem = nearIsRight ? null : gun;
-        rightItem = nearIsRight ? gun : null;
-      }
-      ctx.save();
-      if (bodyRot !== 0) {
-        ctx.translate(fx0, fy0 - HIP);
-        ctx.rotate(bodyRot);
-        ctx.translate(-fx0, -(fy0 - HIP));
-      }
-      A.drawCharacter(ctx, fx0, fy0, {
-        scale: playerScale(),
-        aim: aimS,
-        walk: p.walk,
-        moving: p.moving && game.state === 'play',
-        leftItem,
-        rightItem,
-        flashOn: inv.flashOn,
-        eyesShut: game.state === 'wake' && game.phase < 1.5,
-        pose: (game.fight && game.fight.pose) || (game.ropeAnim && game.ropeAnim.pose) || null,
-      });
-      ctx.restore();
+    } else if (!p.hidden && !cabinPlayer) {
+      drawPlayerSprite(ctx, cam, px, py, zOff, bodyRot);
     }
   }
 
