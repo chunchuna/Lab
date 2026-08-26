@@ -249,10 +249,13 @@ body.devcon-on { cursor: default; }
 /* ---------- QTE ---------- */
 /* 键盘专用，一次只显示一个键。不给触屏加按钮。
    面板不带底板：底板会把近景运镜挡掉一整条，电影感全没了。 */
+/* QTE 面板压在画面下方三分之一。之前是 56%，正好盖在两个角色身上 ——
+   动作演得再细也被键帽挡着看不见。镜头那边也把焦点往下挪了一点，
+   两边合起来把画面中上部整个让给动作。 */
 #qte {
   position: absolute;
   left: 50%;
-  top: 56%;
+  bottom: 1.2em;
   transform: translateX(-50%);
   text-align: center;
   pointer-events: none;
@@ -283,8 +286,8 @@ body.devcon-on { cursor: default; }
 /* 键帽舞台：键帽居中，限时环绕着它往里收 */
 .q-stage {
   position: relative;
-  width: 7em;
-  height: 7em;
+  width: 5.6em;
+  height: 5.6em;
   margin: 0.1em auto 0;
 }
 .q-key {
@@ -299,7 +302,7 @@ body.devcon-on { cursor: default; }
 .q-key span {
   display: block;
   /* 字号只设在内层 span 上：外层同时写 em 尺寸的话会被放大两轮 */
-  font-size: 2.6em;
+  font-size: 2.1em;
   line-height: 1;
   min-width: 1.5em;
   padding: 0.24em 0.3em 0.3em;
@@ -359,9 +362,10 @@ body.devcon-on { cursor: default; }
 #qte.fail .q-ring { opacity: 0; }
 
 /* QTE 期间字幕让位：默认字幕就压在动作名那一行上，两段文字叠在一起没法读。
+   现在 QTE 面板整个挪到画面底部，字幕就搬到顶上去，中间那一大块完整留给动作。
    由 ui.js 在 #hud 上开关 .qte-on（#messages 是 #qte 的前一个兄弟，
    CSS 选不到，只能从父节点下手）。 */
-#hud.qte-on #messages { bottom: 23em; }
+#hud.qte-on #messages { top: 4.2em; bottom: auto; }
 
 /* ---------- 序章结束 ---------- */
 /* 放在 #hud 里用 absolute：#stage 有 transform，position:fixed 会被裁掉 */

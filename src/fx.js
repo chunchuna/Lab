@@ -5,6 +5,7 @@ export class FX {
     this.parts = [];
     this.decals = [];
     this.tracers = [];
+    this.bullets = [];
   }
 
   emit(p) {
@@ -112,6 +113,35 @@ export class FX {
     this.tracers.push({ x0, y0, z0, x1, y1, z1, t: 0 });
   }
 
+  /**
+   * 会飞的子弹。普通射击用 tracer（整条线闪一下就没了，快到看不清也没关系），
+   * 但慢动作近景要让玩家**看见弹头飞过去**，所以这里是一个真的沿着弹道跑的
+   * 亮点 + 一小截拖尾。dur 走的是世界时间，慢动作里自然被拉长。
+   */
+  bullet(x0, y0, z0, x1, y1, z1, dur = 0.11) {
+    this.bullets.push({ x0, y0, z0, x1, y1, z1, t: 0, dur });
+  }
+
+  /** 中弹的血：暗红碎块 + 一层往上飘的血雾 */
+  blood(x, y, z, n = 14, spread = 1.2) {
+    for (let i = 0; i < n; i++) this.debris(x, y, z, 1, i % 3 ? '#5a1f1c' : '#7d2b22');
+    for (let i = 0; i < 4; i++) {
+      this.emit({
+        x, y, z,
+        vx: (Math.random() - 0.5) * 0.5 * spread,
+        vy: (Math.random() - 0.5) * 0.5 * spread,
+        vz: 0.6 + Math.random() * 0.9,
+        life: 0.4 + Math.random() * 0.4,
+        age: 0,
+        g: 1.2,
+        type: 'smoke',
+        col: '120,26,22',
+        size: 1.4 + Math.random() * 1.8,
+        bounce: 0,
+      });
+    }
+  }
+
   decal(x, y, z, kind) {
     this.decals.push({ x, y, z, kind, r: 1.2 + Math.random() * 0.8, a: Math.random() * 6.3 });
     if (this.decals.length > 48) this.decals.shift();
@@ -148,6 +178,10 @@ export class FX {
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       this.tracers[i].t += dt;
       if (this.tracers[i].t > 0.07) this.tracers.splice(i, 1);
+    }
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      this.bullets[i].t += dt;
+      if (this.bullets[i].t > this.bullets[i].dur) this.bullets.splice(i, 1);
     }
   }
 
@@ -190,6 +224,36 @@ export class FX {
       ctx.strokeStyle = `rgba(255,200,120,${a * 0.25})`;
       ctx.lineWidth = 2.6;
       ctx.stroke();
+    }
+
+    for (const b of this.bullets) {
+      const k = Math.min(1, b.t / b.dur);
+      const k0 = Math.max(0, k - 0.22);
+      const at = (u) => ({
+        x: cam.x + (b.x0 + (b.x1 - b.x0) * u - (b.y0 + (b.y1 - b.y0) * u)) * HW,
+        y: cam.y + (b.x0 + (b.x1 - b.x0) * u + (b.y0 + (b.y1 - b.y0) * u)) * HH - (b.z0 + (b.z1 - b.z0) * u) * TILE_Z,
+      });
+      const a = at(k);
+      const t0 = at(k0);
+      // 拖尾
+      ctx.strokeStyle = 'rgba(255,214,150,0.5)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(t0.x, t0.y);
+      ctx.lineTo(a.x, a.y);
+      ctx.stroke();
+      // 弹头
+      ctx.fillStyle = 'rgba(255,246,214,0.95)';
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, 1.5, 0, 6.3);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'lighter';
+      const grd = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, 6);
+      grd.addColorStop(0, 'rgba(255,226,160,0.55)');
+      grd.addColorStop(1, 'rgba(255,226,160,0)');
+      ctx.fillStyle = grd;
+      ctx.fillRect(a.x - 6, a.y - 6, 12, 12);
+      ctx.globalCompositeOperation = 'source-over';
     }
 
     for (const p of this.parts) {

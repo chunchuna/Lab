@@ -235,21 +235,41 @@ export function drawZombie(g, sx, sy, z) {
   drawZombieBody(g, x, y, z);
 }
 
+/**
+ * 搏斗 QTE 用的姿势。平时是 null，走原来的蹒跚步态。
+ * 每个字段都是**像素偏移**，在丧尸自己的精灵空间里算：
+ *
+ *   tilt    躯干绕腰的旋转（正 = 往前扑）
+ *   sink    整个人下压（扑倒 / 被顶住）
+ *   armK    手臂伸出的额外长度倍数
+ *   armDrop 双手往下抓（压在身上时）
+ *   headX/headY  头的额外偏移（被顶开、被打中时头会甩）
+ *   legA/legB    两条腿的水平偏移（蹬地、被踢飞）
+ *   jaw     张嘴的程度 0..1
+ *   dead    爆头瞬间：头没了，只剩一截脖子
+ */
+function poseOf(z) {
+  return z.pose || null;
+}
+
 function drawZombieBody(g, x, y, z) {
   // 面朝：屏幕方向决定朝左还是朝右、正面还是背面
   const f = z.face || { x: 1, y: 0.5 };
   const dir = f.x >= 0 ? 1 : -1;
-  const back = f.y < -0.12; // 朝画面上方走 = 背对镜头
+  const p = poseOf(z);
+  const back = f.y < -0.12 && !(p && p.noBack); // 朝画面上方走 = 背对镜头
 
   // 蹒跚步态：两腿摆动幅度不同，身体跟着一歪一歪
-  const sw = Math.sin(z.walk) * 2.6;
-  const sw2 = Math.sin(z.walk + 0.9) * 1.7;
-  const bob = Math.abs(Math.sin(z.walk * 0.5)) * 1.3;
+  const sw = p && p.legA !== undefined ? p.legA : Math.sin(z.walk) * 2.6;
+  const sw2 = p && p.legB !== undefined ? p.legB : Math.sin(z.walk + 0.9) * 1.7;
+  const bob = p ? 0 : Math.abs(Math.sin(z.walk * 0.5)) * 1.3;
   const tilt = Math.sin(z.walk * 0.5) * 0.9 + (z.stumble > 0 ? 2.2 : 0);
-  const by = y - bob;
+  const sink = p && p.sink ? p.sink : 0;
+  const by = y - bob + sink;
   const skin = SKIN[z.variant];
   const cloth = CLOTH[z.variant];
   const lung = z.lunge * 3;
+  const bodyRot = (p && p.tilt ? p.tilt : 0) + tilt * 0.03;
 
   g.save();
   g.globalAlpha = 0.45;
@@ -260,17 +280,21 @@ function drawZombieBody(g, x, y, z) {
   g.restore();
 
   // 腿
+  const legH = Math.max(3, 9 - sink * 0.7);
+  const lift1 = p && p.liftA ? p.liftA : 0;
+  const lift2 = p && p.liftB ? p.liftB : 0;
   g.fillStyle = '#33383a';
-  g.fillRect(x - 4 + sw, by - 9, 3, 9);
-  g.fillRect(x + 1 - sw2, by - 9, 3, 9);
+  g.fillRect(x - 4 + sw, by - legH - lift1, 3, legH);
+  g.fillRect(x + 1 - sw2, by - legH - lift2, 3, legH);
   g.fillStyle = '#1d2123';
-  g.fillRect(x - 4 + sw - (dir > 0 ? 0 : 1), by - 2, 4, 2);
-  g.fillRect(x + 1 - sw2 - (dir > 0 ? 0 : 1), by - 2, 4, 2);
+  g.fillRect(x - 4 + sw - (dir > 0 ? 0 : 1), by - 2 - lift1, 4, 2);
+  g.fillRect(x + 1 - sw2 - (dir > 0 ? 0 : 1), by - 2 - lift2, 4, 2);
 
-  // 躯干（前倾，随步伐左右歪）
+  // 躯干（前倾，随步伐左右歪；扑与被顶开靠 pose.tilt 转得更狠）
+  const torsoY = by - 14 + sink * 0.4;
   g.save();
-  g.translate(x + tilt * 0.4, by - 14);
-  g.rotate(tilt * 0.03);
+  g.translate(x + tilt * 0.4, torsoY);
+  g.rotate(bodyRot);
   g.fillStyle = cloth;
   g.fillRect(-5, -6, 10, 11);
   g.fillStyle = 'rgba(0,0,0,0.24)';
@@ -281,44 +305,72 @@ function drawZombieBody(g, x, y, z) {
   g.fillRect(1, 1, 2, 4);
   g.restore();
 
-  // 手臂前伸：朝着移动方向探出去
-  const reach = 7 + lung;
+  // 手臂前伸：朝着移动方向探出去。扑上来那几拍伸得更长、往下抓
+  const armK = p && p.armK !== undefined ? p.armK : 1;
+  const drop = p && p.armDrop ? p.armDrop : 0;
+  const reach = (7 + lung) * armK;
   const ax = f.x * reach;
-  const ay = f.y * reach * 0.7;
+  const ay = f.y * reach * 0.7 + drop;
+  const shY = by - 18 + sink * 0.5;
+  const flail = p ? 0 : Math.sin(z.walk * 0.8) * 1.6;
   g.strokeStyle = skin;
   g.lineWidth = 2.4;
   g.lineCap = 'round';
   g.beginPath();
-  g.moveTo(x - 4, by - 18);
-  g.lineTo(x - 4 + ax * 0.8, by - 15 + ay + Math.sin(z.walk * 0.8) * 1.6);
-  g.moveTo(x + 4, by - 18);
-  g.lineTo(x + 4 + ax * 0.8, by - 16 + ay - Math.sin(z.walk * 0.8) * 1.6);
+  g.moveTo(x - 4, shY);
+  g.lineTo(x - 4 + ax * 0.8, shY + 3 + ay + flail);
+  g.moveTo(x + 4, shY);
+  g.lineTo(x + 4 + ax * 0.8, shY + 2 + ay - flail);
   g.stroke();
+  // 抓人的手：伸到底时张开五指，够得着才有威胁感
+  if (armK > 1.15) {
+    g.lineWidth = 1;
+    for (const sd of [-1, 1]) {
+      const gx = x + sd * 4 + ax * 0.8;
+      const gy = shY + 2.5 + ay + flail * sd;
+      g.beginPath();
+      for (let i = -1; i <= 1; i++) {
+        g.moveTo(gx, gy);
+        g.lineTo(gx + f.x * 2.4 + i * 0.9, gy + f.y * 1.8 + i * 1.1);
+      }
+      g.stroke();
+    }
+    g.lineWidth = 2.4;
+  }
 
   // 头（歪着）
-  const hx = x - 3 + dir + tilt * 0.5;
-  const hy = by - 27;
-  g.fillStyle = skin;
-  g.fillRect(hx, hy + 1, 6, 6);
-  g.fillStyle = 'rgba(0,0,0,0.25)';
-  g.fillRect(hx + (dir > 0 ? 4 : 0), hy + 1, 2, 6);
-  g.fillStyle = '#2b241c';
-  g.fillRect(hx - 1, hy, 8, 3);
-  if (back) {
-    // 背对镜头：后脑勺，没有五官
-    g.fillRect(hx - 1, hy, 8, 7);
-  } else {
-    g.fillStyle = '#d8d0b8';
-    if (dir > 0) {
-      g.fillRect(hx + 2, hy + 3, 1, 1);
-      g.fillRect(hx + 4, hy + 3, 1, 1);
-    } else {
-      g.fillRect(hx + 1, hy + 3, 1, 1);
-      g.fillRect(hx + 3, hy + 3, 1, 1);
-    }
-    // 张着的嘴
+  const hx = x - 3 + dir + tilt * 0.5 + (p && p.headX ? p.headX : 0);
+  const hy = by - 27 + sink * 0.6 + (p && p.headY ? p.headY : 0);
+  if (p && p.headGone) {
+    // 爆头之后：脖子上只剩一截，血往上喷
     g.fillStyle = '#4a1512';
-    g.fillRect(hx + (dir > 0 ? 2 : 1), hy + 5, 3, 2);
+    g.fillRect(x - 1.6, hy + 4, 3.4, 4);
+    g.fillStyle = '#6d1f19';
+    g.fillRect(x - 2.2, hy + 4, 4.6, 1.6);
+  } else {
+    g.fillStyle = skin;
+    g.fillRect(hx, hy + 1, 6, 6);
+    g.fillStyle = 'rgba(0,0,0,0.25)';
+    g.fillRect(hx + (dir > 0 ? 4 : 0), hy + 1, 2, 6);
+    g.fillStyle = '#2b241c';
+    g.fillRect(hx - 1, hy, 8, 3);
+    if (back) {
+      // 背对镜头：后脑勺，没有五官
+      g.fillRect(hx - 1, hy, 8, 7);
+    } else {
+      g.fillStyle = '#d8d0b8';
+      if (dir > 0) {
+        g.fillRect(hx + 2, hy + 3, 1, 1);
+        g.fillRect(hx + 4, hy + 3, 1, 1);
+      } else {
+        g.fillRect(hx + 1, hy + 3, 1, 1);
+        g.fillRect(hx + 3, hy + 3, 1, 1);
+      }
+      // 张着的嘴：扑咬那几拍张到最大
+      const jaw = p && p.jaw !== undefined ? p.jaw : 0.35;
+      g.fillStyle = '#4a1512';
+      g.fillRect(hx + (dir > 0 ? 2 : 1), hy + 5, 3, 1.2 + jaw * 2.6);
+    }
   }
 
   // 受击闪白
@@ -347,10 +399,18 @@ function drawCorpse(g, x, y, z) {
   g.fillRect(x - 8, y - 5, 11, 6);
   g.fillStyle = '#33383a';
   g.fillRect(x + 2, y - 4, 8, 4);
-  g.fillStyle = skin;
-  g.fillRect(x - 12, y - 6, 5, 5);
-  g.fillStyle = '#2b241c';
-  g.fillRect(x - 12, y - 7, 5, 2);
+  if (z.headGone) {
+    // 爆头留下的尸体：脖子那头只剩一摊
+    g.fillStyle = '#5a1f1c';
+    g.fillRect(x - 11, y - 4, 4, 3);
+    g.fillStyle = '#3f1210';
+    g.fillRect(x - 14, y - 2, 7, 2);
+  } else {
+    g.fillStyle = skin;
+    g.fillRect(x - 12, y - 6, 5, 5);
+    g.fillStyle = '#2b241c';
+    g.fillRect(x - 12, y - 7, 5, 2);
+  }
   g.strokeStyle = skin;
   g.lineWidth = 2;
   g.beginPath();

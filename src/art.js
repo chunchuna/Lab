@@ -662,9 +662,29 @@ export function makePipeStack(seed = 61) {
  * ------------------------------------------------------------------ */
 
 /**
+ * 姿势。平时全是 0，等于原来的站立/行走；QTE 与过场把这些字段填出来，
+ * 角色才有"看得见的动作"而不是只有坐标在动。全部是**像素偏移**，
+ * 在角色自身的精灵空间里算（+x 屏幕右，+y 屏幕下）。
+ *
+ *   face      强制朝向（>0 朝右），不给就跟着 aim
+ *   crouch    屈身：髋部往下沉多少像素，腿同时缩短
+ *   lean      上半身绕髋部旋转的弧度
+ *   sink      整个人往下压（趴地 / 被压住）
+ *   legs      { a, b } 两条腿各自的水平偏移；{ la, lb } 抬腿高度
+ *   arms      { far:{x,y}, near:{x,y} } 手相对**肩膀**的偏移，覆盖默认摆臂
+ *   armAng    手里那件东西的角度（不给就用 aim 的角度）
+ *   headTilt  头的额外偏移 { x, y }
+ *   hideItems 手上的东西先不画（"拔枪"那一拍之前枪还在枪套里）
+ *   holster   在腰侧画一个枪套
+ */
+const NO_POSE = {};
+
+/**
  * 绘制研究员角色。
  * sx, sy = 脚底屏幕坐标
- * o = { aim:{x,y}(屏幕方向单位向量), walk, moving, leftItem, rightItem, flashOn, crouch }
+ * o = { aim:{x,y}(屏幕方向单位向量), walk, moving, leftItem, rightItem, flashOn, pose }
+ *
+ * 返回两只手与枪口的屏幕坐标（已经过 scale），QTE 要靠枪口位置发弹道。
  */
 export function drawCharacter(g, sx, sy, o) {
   const sc = o.scale || 1;
@@ -675,73 +695,113 @@ export function drawCharacter(g, sx, sy, o) {
     g.translate(-sx, -sy);
   }
   const r = drawCharacterBody(g, sx, sy, o);
-  if (sc !== 1) g.restore();
+  if (sc !== 1) {
+    g.restore();
+    // 精灵空间 -> 屏幕：缩放是绕脚底做的，手的坐标要跟着换算回去
+    for (const k of ['left', 'right', 'muzzle']) {
+      if (!r[k]) continue;
+      r[k] = { x: sx + (r[k].x - sx) * sc, y: sy + (r[k].y - sy) * sc };
+    }
+  }
   return r;
 }
 
 function drawCharacterBody(g, sx, sy, o) {
   const aim = o.aim || { x: 1, y: 0.5 };
-  const dirRight = aim.x >= 0 ? 1 : -1;
-  const back = aim.y < -0.12;
+  const po = o.pose || NO_POSE;
+  const dirRight = (po.face === undefined ? aim.x : po.face) >= 0 ? 1 : -1;
+  const back = aim.y < -0.12 && !po.noBack;
   const phase = o.walk || 0;
   const bob = o.moving ? Math.abs(Math.sin(phase * Math.PI)) * 1.2 : 0;
   const sw = o.moving ? Math.sin(phase * Math.PI * 2) : 0;
   const x = Math.round(sx);
   const y = Math.round(sy);
 
-  // 影子
+  const crouch = po.crouch || 0;
+  const sink = po.sink || 0;
+  const lean = po.lean || 0;
+  const legs = po.legs || null;
+
+  // 影子：屈身/趴下时人更贴地，影子更实
   g.save();
-  g.globalAlpha = 0.5;
+  g.globalAlpha = 0.5 + Math.min(0.25, (crouch + sink) * 0.02);
   g.fillStyle = '#000';
   g.beginPath();
-  g.ellipse(x, y, 6.2, 3.1, 0, 0, Math.PI * 2);
+  g.ellipse(x, y, 6.2 + crouch * 0.14, 3.1, 0, 0, Math.PI * 2);
   g.fill();
   g.restore();
 
-  const baseY = y - bob;
+  const baseY = y - bob + sink;
+  // 髋部：上半身绕它旋转，屈身时它整个下沉
+  const hipY = baseY - 11 + crouch;
 
   // 腿
-  const l1 = sw * 2.2,
-    l2 = -sw * 2.2;
+  const l1 = legs ? legs.a : sw * 2.2;
+  const l2 = legs ? legs.b : -sw * 2.2;
+  const la = legs && legs.la ? legs.la : 0;
+  const lb = legs && legs.lb ? legs.lb : 0;
+  const legTop = baseY - 9 + crouch;
+  const legH = Math.max(2, 8 - crouch);
   g.fillStyle = PAL.pants;
-  g.fillRect(x - 4 + l1, baseY - 9, 3, 8);
-  g.fillRect(x + 1 + l2, baseY - 9, 3, 8);
+  g.fillRect(x - 4 + l1, legTop - la, 3, legH);
+  g.fillRect(x + 1 + l2, legTop - lb, 3, legH);
   g.fillStyle = PAL.pantsD;
-  g.fillRect(x - 4 + l1, baseY - 9, 1, 8);
-  g.fillRect(x + 1 + l2, baseY - 9, 1, 8);
+  g.fillRect(x - 4 + l1, legTop - la, 1, legH);
+  g.fillRect(x + 1 + l2, legTop - lb, 1, legH);
   g.fillStyle = PAL.shoe;
-  g.fillRect(x - 4 + l1 - (dirRight > 0 ? 0 : 1), baseY - 2, 4, 2);
-  g.fillRect(x + 1 + l2 - (dirRight > 0 ? 0 : 1), baseY - 2, 4, 2);
+  g.fillRect(x - 4 + l1 - (dirRight > 0 ? 0 : 1), legTop + legH - 2 - la, 4, 2);
+  g.fillRect(x + 1 + l2 - (dirRight > 0 ? 0 : 1), legTop + legH - 2 - lb, 4, 2);
+
+  /* 上半身：整体绕髋部旋转。侧闪、被压住、举枪格挡这些"看得出用力"的动作
+     全靠这一下 —— 只挪坐标是读不出身体在做什么的。 */
+  g.save();
+  if (lean) {
+    g.translate(x, hipY);
+    g.rotate(lean);
+    g.translate(-x, -hipY);
+  }
+  const upY = crouch; // 上半身随屈身一起下沉
 
   // 白大褂下摆
   g.fillStyle = PAL.coatShade;
-  g.fillRect(x - 5, baseY - 13, 10, 5);
+  g.fillRect(x - 5, baseY - 13 + upY, 10, 5);
   g.fillStyle = PAL.coat;
-  g.fillRect(x - 5, baseY - 13, 10, 3);
+  g.fillRect(x - 5, baseY - 13 + upY, 10, 3);
 
   // 躯干
   g.fillStyle = PAL.coat;
-  g.fillRect(x - 5, baseY - 21, 10, 9);
+  g.fillRect(x - 5, baseY - 21 + upY, 10, 9);
   // 阴影侧
   g.fillStyle = PAL.coatShade;
-  g.fillRect(x + (dirRight > 0 ? 2 : -5), baseY - 21, 3, 9);
+  g.fillRect(x + (dirRight > 0 ? 2 : -5), baseY - 21 + upY, 3, 9);
   // 内衬 / 前襟
   g.fillStyle = '#4d565c';
   if (!back) {
-    g.fillRect(x - 1 + dirRight, baseY - 20, 2, 7);
+    g.fillRect(x - 1 + dirRight, baseY - 20 + upY, 2, 7);
     g.fillStyle = PAL.coatDark;
-    g.fillRect(x - 2 + dirRight, baseY - 20, 1, 8);
+    g.fillRect(x - 2 + dirRight, baseY - 20 + upY, 1, 8);
   } else {
     g.fillStyle = PAL.coatDark;
-    g.fillRect(x - 5, baseY - 17, 10, 1);
+    g.fillRect(x - 5, baseY - 17 + upY, 10, 1);
   }
   // 领子
   g.fillStyle = PAL.coatDark;
-  g.fillRect(x - 4, baseY - 21, 8, 1);
+  g.fillRect(x - 4, baseY - 21 + upY, 8, 1);
+
+  // 腰侧的枪套：拔枪那一拍之前枪在这里，"手去摸枪"才有东西可摸
+  if (po.holster) {
+    const gx = x + dirRight * 3.4 - 1;
+    g.fillStyle = '#2a2f33';
+    g.fillRect(gx, baseY - 13 + upY, 3, 5);
+    g.fillStyle = '#3d444a';
+    g.fillRect(gx, baseY - 13 + upY, 3, 1.4);
+  }
 
   // 头
-  const hx = x - 3 + dirRight;
-  const hy = baseY - 28;
+  const htx = po.headTilt ? po.headTilt.x : 0;
+  const hty = po.headTilt ? po.headTilt.y : 0;
+  const hx = x - 3 + dirRight + htx;
+  const hy = baseY - 28 + upY + hty;
   g.fillStyle = PAL.skin;
   g.fillRect(hx, hy + 1, 6, 6);
   g.fillStyle = PAL.skinD;
@@ -767,18 +827,28 @@ function drawCharacterBody(g, sx, sy, o) {
       g.fillRect(hx, ey, 1, 1);
       g.fillRect(hx + 2, ey, 1, 1);
     }
+    // 咬牙：用力那几拍嘴张开，脸上有事发生
+    if (po.grit) {
+      g.fillStyle = '#2b1c18';
+      g.fillRect(hx + (dirRight > 0 ? 3 : 1), hy + 6, 3, 1.4);
+    }
   }
   // 脖颈阴影
   g.fillStyle = 'rgba(0,0,0,0.25)';
   g.fillRect(hx + 1, hy + 7, 4, 1);
 
   // 手臂
-  const shoulderY = baseY - 19;
+  const shoulderY = baseY - 19 + upY;
   const armLen = 7;
-  const drawArm = (side, item) => {
+  const itemAng = po.armAng === undefined ? null : po.armAng;
+  let muzzle = null;
+  const drawArm = (side, item, off) => {
     const shx = x + side * 4.2;
     let ax, ay;
-    if (item) {
+    if (off) {
+      ax = shx + off.x;
+      ay = shoulderY + off.y;
+    } else if (item) {
       ax = shx + aim.x * armLen;
       ay = shoulderY + aim.y * armLen * 0.72;
     } else {
@@ -800,26 +870,50 @@ function drawCharacterBody(g, sx, sy, o) {
     g.stroke();
     g.fillStyle = PAL.skin;
     g.fillRect(ax - 1, ay - 1, 2.4, 2.4);
-    if (item) drawHeldItem(g, ax, ay, aim, item, o);
+    if (item) {
+      const a = itemAng === null ? Math.atan2(aim.y, aim.x) : itemAng;
+      drawHeldItem(g, ax, ay, a, item, o);
+      if (item === 'pistol') muzzle = { x: ax + Math.cos(a) * 7.5, y: ay + Math.sin(a) * 7.5 };
+    }
     return { x: ax, y: ay };
   };
 
   // 先画远手（背对镜头一侧）
   const farSide = dirRight > 0 ? -1 : 1;
   const nearSide = -farSide;
-  const farItem = farSide < 0 ? o.leftItem : o.rightItem;
-  const nearItem = nearSide < 0 ? o.leftItem : o.rightItem;
-  const farPos = drawArm(farSide, farItem);
-  const nearPos = drawArm(nearSide, nearItem);
+  const hide = !!po.hideItems;
+  const farItem = hide ? null : farSide < 0 ? o.leftItem : o.rightItem;
+  const nearItem = hide ? null : nearSide < 0 ? o.leftItem : o.rightItem;
+  const arms = po.arms || null;
+  const farPos = drawArm(farSide, farItem, arms && arms.far);
+  const nearPos = drawArm(nearSide, nearItem, arms && arms.near);
+  g.restore();
+
+  // 上半身是绕髋部转过的，返回的手/枪口坐标也要跟着转，否则弹道会从旧位置飞出
+  if (lean) {
+    const cs = Math.cos(lean);
+    const sn = Math.sin(lean);
+    const rot = (p) => {
+      if (!p) return p;
+      const dx = p.x - x;
+      const dy = p.y - hipY;
+      return { x: x + dx * cs - dy * sn, y: hipY + dx * sn + dy * cs };
+    };
+    return {
+      left: rot(farSide < 0 ? farPos : nearPos),
+      right: rot(farSide < 0 ? nearPos : farPos),
+      muzzle: rot(muzzle),
+    };
+  }
 
   return {
     left: farSide < 0 ? farPos : nearPos,
     right: farSide < 0 ? nearPos : farPos,
+    muzzle,
   };
 }
 
-function drawHeldItem(g, ax, ay, aim, item, o) {
-  const a = Math.atan2(aim.y, aim.x);
+function drawHeldItem(g, ax, ay, a, item, o) {
   g.save();
   g.translate(ax + 0.5, ay + 0.5);
   g.rotate(a);
@@ -1292,6 +1386,220 @@ export function heliLampAt(x, y, dir = -1) {
   return { x: x - 13 * HELI_S * dir, y: y + 6.5 * HELI_S };
 }
 
+/** 舱门口那名士兵伸到最长时手套的位置 —— 玩家的手腕要被抓在这里 */
+export function heliGrabAt(x, y, dir = -1) {
+  return { x: x + 10.2 * HELI_S * dir, y: y + 8.4 * HELI_S };
+}
+
+/** 舱内地板中心：人被拽进去之后消失在这里 */
+export function heliCabinAt(x, y, dir = -1) {
+  return { x: x + 7.0 * HELI_S * dir, y: y + 2.4 * HELI_S };
+}
+
+/* ------------------------------------------------------------------ *
+ * 机组人员
+ *
+ * 画在直升机的**局部单位**里（1 单位 ≈ HELI_S 逻辑像素），所以跟着机体一起
+ * 缩放、镜像，不用在外面再算一遍偏移。
+ *
+ * 以前舱门口只有一团黑椭圆，夜里跟舱内的黑完全糊在一起 —— 现在按跟玩家同一
+ * 套等距人物的做法拆件：靴子 / 作战裤 / 战术背心（含弹匣袋与肩带）/ 袖子与
+ * 手套 / 露出来的脸 / 头盔（盔沿、夜视仪座、耳机、下巴带）/ 卡宾枪剪影。
+ * ------------------------------------------------------------------ */
+
+const CREW = {
+  helm: '#5c6450',
+  helmHi: '#828c6d',
+  helmDark: '#31362a',
+  vest: '#414936',
+  vestHi: '#5b6449',
+  vestDark: '#262b1d',
+  sleeve: '#4f5742',
+  pant: '#3b4232',
+  pantD: '#2d3327',
+  boot: '#1d211a',
+  glove: '#2a2e22',
+  skin: '#c79a76',
+  skinD: '#8f6a4e',
+  gun: '#191d1b',
+  gunHi: '#3d443e',
+};
+
+const c01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/**
+ * 一名机组人员。(x, y) 是髋部，+x 是机尾/舱门更外的那一侧。
+ *
+ * o = {
+ *   t,                      // 秒，用来做呼吸与机身颠簸
+ *   pose: 'sit' | 'stand',  // 坐在舱门槛上（腿垂在外面）/ 站在舱内
+ *   reach: 0..1,            // 近侧那条手臂往 aim 伸出去多少
+ *   aim: {x, y},            // 伸手的目标（局部单位）
+ *   gun: true,              // 挎着卡宾枪
+ *   seed,
+ * }
+ */
+export function drawCrew(g, x, y, o = {}) {
+  const t = o.t || 0;
+  const seed = o.seed || 0;
+  const sit = o.pose === 'sit';
+  const reach = c01(o.reach || 0);
+  // 悬停中的机身一直在抖，人跟着抖一点点，否则像贴纸
+  const bob = Math.sin(t * 2.1 + seed) * 0.16 + Math.sin(t * 9.7 + seed * 2) * 0.06;
+  const lean = reach * 1.9; // 伸手时整个人往舱外探
+
+  g.save();
+  g.translate(x + lean, y + bob);
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+
+  /* --- 远侧手臂：先画，会被躯干压住一半 --- */
+  g.strokeStyle = CREW.pantD;
+  g.lineWidth = 1.5;
+  g.beginPath();
+  g.moveTo(-1.9, -6.2);
+  g.lineTo(-3.0 - reach * 0.6, -3.4);
+  g.lineTo(-2.4, -0.8 + reach * 0.6);
+  g.stroke();
+
+  /* --- 腿 --- */
+  if (sit) {
+    // 坐在门槛上：大腿朝舱外伸，小腿垂在机外
+    poly(g, [[-1.9, -1.4], [2.6, -1.0], [2.9, 1.4], [-1.9, 1.3]], CREW.pant);
+    poly(g, [[-1.9, -1.4], [2.6, -1.0], [2.6, -0.3], [-1.9, -0.6]], '#464e3b');
+    poly(g, [[1.1, 0.7], [2.3, 0.8], [2.7, 5.0], [1.5, 5.1]], CREW.pantD);
+    poly(g, [[1.9, 0.9], [3.2, 1.0], [3.7, 5.4], [2.4, 5.5]], CREW.pant);
+    g.fillStyle = CREW.boot;
+    poly(g, [[1.4, 4.8], [2.7, 4.9], [2.9, 6.2], [1.2, 6.1]], CREW.boot);
+    poly(g, [[2.3, 5.2], [3.7, 5.3], [4.2, 6.7], [2.1, 6.6]], CREW.boot);
+    poly(g, [[2.3, 6.1], [4.2, 6.2], [4.2, 6.7], [2.1, 6.6]], '#0f120d');
+  } else {
+    poly(g, [[-2.1, -1.2], [-0.4, -1.2], [-0.3, 4.3], [-2.0, 4.3]], CREW.pantD);
+    poly(g, [[0.3, -1.2], [2.1, -1.2], [2.2, 4.3], [0.4, 4.3]], CREW.pant);
+    poly(g, [[-2.2, 4.1], [-0.1, 4.1], [0.1, 5.5], [-2.4, 5.5]], CREW.boot);
+    poly(g, [[0.3, 4.1], [2.3, 4.1], [2.6, 5.5], [0.2, 5.5]], CREW.boot);
+  }
+
+  /* --- 躯干：作战服在里，战术背心叠在外 --- */
+  poly(g, [[-2.5, -7.0], [2.5, -7.0], [2.9, -0.7], [-2.7, -0.7]], CREW.sleeve);
+  poly(g, [[-2.2, -6.5], [2.2, -6.5], [2.5, -1.2], [-2.4, -1.2]], CREW.vest);
+  poly(g, [[-2.2, -6.5], [2.2, -6.5], [2.2, -5.6], [-2.2, -5.6]], CREW.vestHi);
+  // 弹匣袋：三个方块，一眼能读出"这是战术背心"而不是一件外套
+  for (let i = 0; i < 3; i++) {
+    const px = -1.9 + i * 1.4;
+    g.fillStyle = CREW.vestDark;
+    g.fillRect(px, -4.6, 1.1, 2.1);
+    g.fillStyle = 'rgba(214,224,204,0.16)';
+    g.fillRect(px, -4.6, 1.1, 0.38);
+  }
+  // 肩带
+  g.strokeStyle = CREW.vestDark;
+  g.lineWidth = 0.5;
+  g.beginPath();
+  g.moveTo(-1.5, -6.6);
+  g.lineTo(-0.9, -1.6);
+  g.moveTo(1.5, -6.6);
+  g.lineTo(0.9, -1.6);
+  g.stroke();
+
+  /* --- 挎在胸前的卡宾枪 --- */
+  if (o.gun) {
+    g.save();
+    g.translate(0.9, -3.1);
+    g.rotate(-0.46);
+    g.fillStyle = CREW.gun;
+    g.fillRect(-3.6, -0.42, 7.2, 0.9);
+    g.fillStyle = CREW.gunHi;
+    g.fillRect(-3.6, -0.42, 7.2, 0.26);
+    g.fillStyle = CREW.gun;
+    g.fillRect(-0.7, 0.35, 1.0, 2.0); // 弹匣
+    g.fillRect(-3.5, -0.15, 1.6, 1.3); // 枪托
+    g.fillStyle = CREW.gunHi;
+    g.fillRect(2.5, -0.95, 0.42, 0.6); // 准星
+    g.restore();
+  }
+
+  /* --- 头：先脸后盔，脸要露出来才不是一团黑 --- */
+  const hy = -8.5;
+  g.fillStyle = CREW.skinD;
+  g.fillRect(-0.7, -7.7, 1.5, 1.1);
+  g.fillStyle = CREW.skin;
+  g.beginPath();
+  g.ellipse(0.45, hy + 0.1, 1.3, 1.55, 0, 0, 6.3);
+  g.fill();
+  g.fillStyle = CREW.skinD;
+  g.beginPath();
+  g.ellipse(-0.35, hy + 0.2, 1.0, 1.45, 0, 0, 6.3);
+  g.fill();
+  // 眼睛那一道阴影，脸才有方向
+  g.fillStyle = 'rgba(24,26,20,0.75)';
+  g.fillRect(-0.2, hy - 0.35, 1.9, 0.5);
+  // 头盔
+  g.fillStyle = CREW.helm;
+  g.beginPath();
+  g.ellipse(0, hy - 0.4, 2.15, 2.0, 0, Math.PI, 0);
+  g.fill();
+  g.fillRect(-2.15, hy - 0.4, 4.3, 0.95);
+  g.fillStyle = CREW.helmHi;
+  g.beginPath();
+  g.ellipse(-0.4, hy - 1.05, 1.35, 0.9, -0.22, Math.PI, 0);
+  g.fill();
+  g.fillStyle = CREW.helmDark;
+  g.fillRect(-2.15, hy + 0.28, 4.3, 0.44); // 盔沿
+  // 夜视仪座
+  g.fillStyle = CREW.helmDark;
+  g.fillRect(0.7, hy - 2.7, 0.95, 1.4);
+  g.fillStyle = CREW.helmHi;
+  g.fillRect(0.7, hy - 2.7, 0.95, 0.36);
+  // 耳机 + 送话器 + 下巴带
+  g.fillStyle = CREW.helmDark;
+  g.beginPath();
+  g.ellipse(-1.55, hy + 0.15, 0.72, 0.85, 0, 0, 6.3);
+  g.fill();
+  g.strokeStyle = CREW.helmDark;
+  g.lineWidth = 0.3;
+  g.beginPath();
+  g.moveTo(-1.3, hy + 0.5);
+  g.quadraticCurveTo(-0.2, hy + 1.6, 0.85, hy + 1.15);
+  g.moveTo(-1.6, hy + 0.7);
+  g.lineTo(0.1, hy + 1.7);
+  g.lineTo(1.7, hy + 0.6);
+  g.stroke();
+
+  /* --- 近侧手臂：伸手抓人的就是这一条，画在最上面 --- */
+  const aim = o.aim || { x: 3.6, y: 1.4 };
+  const rx = 2.4 + (aim.x - 2.4) * reach;
+  const ry = -1.8 + (aim.y + 1.8) * reach;
+  const ex = 1.0 + (rx - 1.0) * 0.55 + (1 - reach) * 0.9;
+  const ey = -6.2 + (ry + 6.2) * 0.45 + (1 - reach) * 1.6;
+  g.strokeStyle = CREW.sleeve;
+  g.lineWidth = 1.65;
+  g.beginPath();
+  g.moveTo(1.9, -6.2);
+  g.lineTo(ex, ey);
+  g.stroke();
+  g.strokeStyle = CREW.pant;
+  g.lineWidth = 1.45;
+  g.beginPath();
+  g.moveTo(ex, ey);
+  g.lineTo(rx, ry);
+  g.stroke();
+  g.fillStyle = CREW.glove;
+  g.beginPath();
+  g.arc(rx, ry, 0.95, 0, 6.3);
+  g.fill();
+
+  // 肩上的红色识别灯：一闪一闪，暗处能看出舱里确实有人
+  const bl = Math.sin(t * 3.4 + seed * 3) > 0.55;
+  if (bl) {
+    g.fillStyle = 'rgba(255,90,70,0.9)';
+    g.fillRect(-2.3, -6.5, 0.7, 0.7);
+  }
+
+  g.restore();
+  return { x: x + lean + rx, y: y + bob + ry };
+}
+
 /**
  * t 用来转桨与闪航行灯。基础朝向是机头在 -x、尾梁在 +x，所以
  * dir=-1 画出来是**机头朝右**（天台段落用的朝向），dir=1 机头朝左。
@@ -1412,31 +1720,47 @@ export function drawHeli(g, x, y, t, o = {}) {
   g.stroke();
 
   /* --- 敞开的侧舱门 + 探身的机组 --- */
+  const doorShut = c01(o.doorShut || 0);
   g.fillStyle = '#0d1211';
   g.fillRect(1.5, -5.5, 11.5, 11);
+  /* 舱内的顶灯。以前舱里是纯黑，人画得再细也读不出来 ——
+     给一小片自上而下的暖光，机组才是"被舱灯照着的人"而不是剪影。 */
+  const cab = g.createLinearGradient(0, -5.5, 0, 5.5);
+  cab.addColorStop(0, 'rgba(206,196,158,0.30)');
+  cab.addColorStop(0.55, 'rgba(170,168,140,0.14)');
+  cab.addColorStop(1, 'rgba(120,150,150,0.05)');
+  g.fillStyle = cab;
+  g.fillRect(1.5, -5.5, 11.5, 11);
   // 舱内地板的一点反光
-  g.fillStyle = 'rgba(120,150,150,0.1)';
+  g.fillStyle = 'rgba(150,170,160,0.14)';
   g.fillRect(1.5, 3.6, 11.5, 1.9);
-  // 滑开的门板收在后面
-  poly(g, [[13, -6], [15.6, -6], [15.6, 5.6], [13, 5.6]], '#4c5652');
-  poly(g, [[13, -6], [15.6, -6], [15.6, -4.6], [13, -4.6]], '#68736e');
-  // 机组：坐在门口，一条腿垂在外面，手扶着绞盘
-  g.fillStyle = '#2b3540';
-  g.beginPath();
-  g.ellipse(5.6, -0.4, 2.4, 3.4, 0.1, 0, 6.3);
-  g.fill();
-  g.fillStyle = '#1d242a';
-  g.fillRect(4.6, 2.6, 2.0, 4.8);
-  g.fillStyle = '#39424c';
-  g.beginPath();
-  g.ellipse(5.4, -4.2, 1.8, 1.8, 0, 0, 6.3);
-  g.fill();
-  g.strokeStyle = '#2b3540';
-  g.lineWidth = 1.3;
-  g.beginPath();
-  g.moveTo(6.6, -1.6);
-  g.lineTo(10.4, -4.6);
-  g.stroke();
+  // 舱壁上的固定件，给背景一点层次，人才不是浮在黑洞前面
+  g.fillStyle = 'rgba(20,26,24,0.55)';
+  g.fillRect(2.0, -4.6, 1.4, 3.2);
+  g.fillRect(11.2, -4.2, 1.4, 4.6);
+
+  /* 机组两名：里面那个站着待命，门口那个坐在门槛上接应。
+     drawCrew 画在机体局部单位里，所以跟着 scale/dir 一起走。 */
+  drawCrew(g, 4.3, 3.6, { t, pose: 'stand', gun: true, seed: 1.7, aim: { x: 3.1, y: -3.4 }, reach: 0.55 });
+  drawCrew(g, 8.9, 2.6, {
+    t, pose: 'sit', gun: false, seed: 4.1,
+    reach: o.reach === undefined ? 0.26 : c01(o.reach),
+    aim: { x: 5.6, y: 6.4 },
+  });
+
+  // 滑开的门板收在后面；拽人进舱之后会滑回来把舱口封上
+  const dx0 = 13 - doorShut * 11.4;
+  poly(g, [[dx0, -6], [dx0 + 2.6, -6], [dx0 + 2.6, 5.6], [dx0, 5.6]], '#4c5652');
+  poly(g, [[dx0, -6], [dx0 + 2.6, -6], [dx0 + 2.6, -4.6], [dx0, -4.6]], '#68736e');
+  if (doorShut > 0.02) {
+    // 关上的那一段门板：一整块，中间一个小舷窗
+    poly(g, [[dx0 + 2.4, -5.6], [13.2, -5.6], [13.2, 5.4], [dx0 + 2.4, 5.4]], '#414a47');
+    poly(g, [[dx0 + 2.4, -5.6], [13.2, -5.6], [13.2, -4.4], [dx0 + 2.4, -4.4]], '#5b6661');
+    g.fillStyle = 'rgba(150,190,200,0.22)';
+    g.beginPath();
+    g.ellipse(dx0 + 4.6, -1.4, 1.9, 1.6, 0, 0, 6.3);
+    g.fill();
+  }
 
   /* --- 绞盘吊臂：绳子就是从这里出去的 --- */
   g.strokeStyle = '#59635e';

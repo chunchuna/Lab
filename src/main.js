@@ -247,6 +247,7 @@ function enterArea(id, spawnName) {
   game.interact = null;
   UI.setPrompt(null);
   fx.decals.length = 0;
+  fx.bullets.length = 0;
   horde.clear();
   endQTE();
   game.zoom = 1;
@@ -1296,6 +1297,9 @@ function updateQTE() {
   const dt = game.rdt;
 
   if (q.phase === 'win' || q.phase === 'fail') {
+    // 收尾这半秒也要接着演，否则最后一枪打完人物会当场定格
+    const lb = q.beats[Math.min(q.i, q.beats.length - 1)];
+    if (lb) runBeatAnim(lb, 1);
     q.t -= dt;
     if (q.t <= 0) {
       const cb = q.phase === 'fail' ? q.onFail : q.onWin;
@@ -1341,17 +1345,25 @@ function updateQTE() {
   }
 
   if (q.phase === 'hit') {
-    runBeatAnim(b, 1);
+    runBeatAnim(b, b.mash ? 1 : clamp(1 - q.t / Math.max(0.001, b.hit), 0, 1));
     q.t -= dt;
     if (q.t <= 0) nextBeat();
   }
 }
 
-/** 一拍的表演：把这一拍的动作按进度 k 推给对应的动画器 */
+/**
+ * 一拍的表演：把这一拍的动作按进度 k 推给对应的动画器。
+ *
+ * 一拍其实是**两段**动作：引子/等键那段（anim）是"对方在做什么"，
+ * 按中之后那段（animHit）才是"我做了什么" —— 闪身、蹬腿、拔枪、格挡、开枪
+ * 全在这一段里演，所以命中段也要有自己的进度，不能一直喂 1。
+ */
 function runBeatAnim(b, k) {
   const ph = game.qte.phase;
+  let name = b.anim;
   // 连按段落进入 mash 之后换成爬绳动作，命中收尾那一小段也接着爬
-  const name = b.animMash && (ph === 'mash' || ph === 'hit') ? b.animMash : b.anim;
+  if (b.animMash && (ph === 'mash' || ph === 'hit')) name = b.animMash;
+  else if (b.animHit && (ph === 'hit' || ph === 'win')) name = b.animHit;
   if (!name) return;
   if (game.qte.id === 'fight') setFightAnim(name, k);
   else if (game.qte.id === 'rope') setRopeAnim(name, k);
@@ -1462,8 +1474,9 @@ function openTent() {
 const FIGHT_BEATS = [
   {
     key: 'a', caption: '它从帐篷里扑出来 · 侧身闪开',
-    lead: 1.15, window: 2.2, ts: 0.4, tsKey: 0.2, zoom: 2.0, zoomKey: 2.35, focus: 0.55,
-    anim: 'lunge',
+    lead: 1.15, window: 2.2, ts: 0.4, tsKey: 0.2, tsHit: 0.3, hit: 0.55,
+    zoom: 2.0, zoomKey: 2.35, focus: 0.55,
+    anim: 'lunge', animHit: 'dodge',
     onLead: () => {
       SFX.sfxImpact(false);
       game.shake = 3.4;
@@ -1478,19 +1491,23 @@ const FIGHT_BEATS = [
   },
   {
     key: 'w', caption: '它翻身压上来 · 蹬开它',
-    lead: 0.95, window: 2.1, ts: 0.36, tsKey: 0.18, zoom: 2.25, zoomKey: 2.55, focus: 0.5,
-    anim: 'pin',
+    lead: 0.95, window: 2.1, ts: 0.36, tsKey: 0.18, tsHit: 0.32, hit: 0.6,
+    zoom: 2.25, zoomKey: 2.55, focus: 0.5,
+    anim: 'pin', animHit: 'kick',
     onHit: () => {
-      game.fight.kick = 0.72;
+      game.fight.kick = 0.95;
       game.shake = 4.2;
       SFX.sfxThud();
-      fx.debris(game.tentZ.x, game.tentZ.y, 0.8, 5, '#3c4a3a');
+      const z = game.tentZ;
+      fx.debris(z.x, z.y, 0.8, 6, '#3c4a3a');
+      fx.dust(z.x, z.y, 0.1, 6);
     },
   },
   {
     key: 'r', caption: '右手够到枪套 · 拔枪',
-    lead: 1.0, window: 2.2, ts: 0.42, tsKey: 0.16, zoom: 2.6, zoomKey: 2.85, focus: 0.12,
-    anim: 'draw',
+    lead: 1.0, window: 2.2, ts: 0.42, tsKey: 0.16, tsHit: 0.34, hit: 0.6,
+    zoom: 2.6, zoomKey: 2.85, focus: 0.2,
+    anim: 'draw', animHit: 'drawn',
     onHit: () => {
       SFX.sfxReload(1);
       game.fight.armed = true;
@@ -1499,49 +1516,114 @@ const FIGHT_BEATS = [
   },
   {
     key: 'd', caption: '它又咬下来 · 枪身横着顶住',
-    lead: 0.85, window: 2.0, ts: 0.34, tsKey: 0.17, zoom: 2.35, zoomKey: 2.65, focus: 0.62,
-    anim: 'bite',
+    lead: 0.85, window: 2.0, ts: 0.34, tsKey: 0.17, tsHit: 0.3, hit: 0.55,
+    zoom: 2.35, zoomKey: 2.65, focus: 0.62,
+    anim: 'bite', animHit: 'block',
     onLead: () => {
       game.shake = 2.6;
       SFX.sfxImpact(false);
     },
     onHit: () => {
-      game.fight.kick = 0.4;
+      const z = game.tentZ;
+      game.fight.kick = 1.35; // 顶开得够远，最后那一枪才有一段看得见的弹道
       game.shake = 3.6;
+      SFX.sfxImpact(true);
       SFX.sfxThud();
+      fx.spark(z.x, z.y, 1.45, 7, 0.6);
     },
   },
   {
-    key: 'e', caption: '枪口顶住它的额头 · 开枪',
-    lead: 1.25, window: 2.4, ts: 0.28, tsKey: 0.12, tsHit: 1, zoom: 2.7, zoomKey: 2.9, focus: 0.85,
-    hit: 0.45,
-    anim: 'muzzle',
+    key: 'e', caption: '它扑回来的半路 · 抬枪打头',
+    lead: 1.25, window: 2.4, ts: 0.28, tsKey: 0.12, tsHit: 0.14, hit: 1.1,
+    zoom: 2.7, zoomKey: 2.9, focus: 0.7,
+    anim: 'muzzle', animHit: 'fire',
+    onHit: () => fireKillShot(),
   },
 ];
+
+/**
+ * 最后一枪。这一段整个在慢动作里：先出枪口焰与后坐，再让**弹头自己飞过去**
+ * （fx.bullet 是沿弹道跑的亮点，不是一闪就没的 tracer），命中判定交给
+ * setFightAnim 的 'fire'，两边看到的是同一个时间轴。
+ */
+function fireKillShot() {
+  const f = game.fight;
+  const z = game.tentZ;
+  const p = game.player;
+  if (!f || !z) return;
+  const mx = p.x + Math.cos(p.aim) * 0.42;
+  const my = p.y + Math.sin(p.aim) * 0.42;
+  f.shotFrom = { x: mx, y: my, z: 1.32 };
+  f.shotTo = { x: z.x, y: z.y, z: 1.52 };
+  f.shotHit = false;
+  f.recoil = 1;
+  fx.bullet(mx, my, 1.32, z.x, z.y, 1.52, 0.13);
+  fx.spark(mx, my, 1.32, 5, 0.35);
+  fx.smoke(mx, my, 1.36, 3);
+  fx.casing(p.x, p.y, 1.15, p.aim);
+  if (game.gun.mag > 0) game.gun.mag--;
+  game.flash = 0.075;
+  game.shake = 5.2;
+  SFX.sfxShot();
+  syncHUD();
+}
+
+/**
+ * 扭打的"上镜轴"。
+ *
+ * 等距投影下，世界方向 (1,1) 在屏幕上是**竖直**的 —— 玩家从北边走过来掀帐篷，
+ * 扭打轴就正好是竖的，两个精灵完全叠在一起，动作演得再细也看不出来。
+ * 所以这里把轴掰到接近屏幕水平的两个方向之一（左右各一个），两个人并排站，
+ * 再让丧尸略微靠近镜头一点，压住玩家时有前后关系。
+ */
+const FIGHT_AXES = [
+  { x: 1.22, y: -0.78 }, // 丧尸在画面右
+  { x: -0.78, y: 1.22 }, // 丧尸在画面左
+].map((v) => {
+  const l = Math.hypot(v.x, v.y);
+  return { x: v.x / l, y: v.y / l };
+});
 
 function startFightQTE() {
   const p = game.player;
   const z = game.tentZ;
   if (!z) return;
-  // 扭打的基准点与朝向整段固定：镜头绕着它转，两个人都相对它摆位
+  // 它现在实际在哪个方向：轴要从这里出发，慢慢转到上镜轴，不能瞬移
   let ux = z.x - p.x;
   let uy = z.y - p.y;
   const l = Math.hypot(ux, uy) || 1;
   ux /= l;
   uy /= l;
+
+  /* 上镜轴挑哪一边：丧尸要退到 2 格外扑过来，那一侧得是空地，
+     否则它会被帐篷/女儿墙"埋"进去。 */
+  let best = FIGHT_AXES[0];
+  let bestRoom = -1;
+  for (const a of FIGHT_AXES) {
+    const room = freeRun(p.x, p.y, a.x, a.y, 2.1) + (a.x * ux + a.y * uy) * 0.4;
+    if (room > bestRoom) {
+      bestRoom = room;
+      best = a;
+    }
+  }
+
   /* 闪避那一拍会把玩家沿扭打轴的垂线整个平移过去，而这一段是直接赋值坐标、
      不走碰撞的。玩家多半是从楼梯间那侧（西北）走过来掀的帐篷，站位就在帐篷
      北边一点，往那个方向滑 0.66 格正好滑进帐篷的碰撞盒 —— QTE 结束后就再也
-     走不出来。所以在这里先量一量两侧各有多少空地，挑宽的那边，滑不满就少滑。 */
-  const nx = -uy;
-  const ny = ux;
+     走不出来。所以在这里先量一量两侧各有多少空地，挑宽的那边，滑不满就少滑。
+     垂线按**上镜轴**算：闪避发生时轴已经转过去了。 */
+  const nx = -best.y;
+  const ny = best.x;
   const room = 0.66;
   const rp = freeRun(p.x, p.y, nx, ny, room);
   const rm = freeRun(p.x, p.y, -nx, -ny, room);
   const dodge = rp >= rm ? rp : -rm;
   game.fight = {
-    px: p.x, py: p.y, ux, uy, d: Math.min(2.2, l),
-    side: 0, side0: 0, zside: 0, kick: 0, armed: false, dodge,
+    px: p.x, py: p.y,
+    ux, uy, // 当前轴，逐帧转向 u1
+    u0: { x: ux, y: uy }, u1: best, axisK: 0,
+    d: Math.min(2.2, l),
+    side: 0, side0: 0, zside: 0, kick: 0, armed: false, dodge, recoil: 0,
   };
   startQTE({
     id: 'fight',
@@ -1553,8 +1635,12 @@ function startFightQTE() {
 }
 
 /**
- * 搏斗的每一拍摆位。丧尸挂在**扭打基准点**上而不是挂在玩家身上 ——
+ * 搏斗的每一拍摆位与**姿势**。丧尸挂在**扭打基准点**上而不是挂在玩家身上 ——
  * 挂在玩家身上的话，玩家一闪它就跟着平移，看起来像贴纸，闪避完全读不出来。
+ *
+ * 位置只解决"谁在哪"，读不出"谁在做什么"，所以这里同时给两边填姿势：
+ * 玩家的 game.fight.pose 交给 art.js 的 drawCharacter，丧尸的 z.pose 交给
+ * zombies.js 的 drawZombieBody。每个动作名都对应一拍里的一段表演。
  */
 function setFightAnim(name, k) {
   const f = game.fight;
@@ -1568,29 +1654,53 @@ function setFightAnim(name, k) {
   let side = f.side0; // 玩家的侧移
   let zside = f.side0; // 丧尸的侧移（闪避那一拍它不跟）
   let lunge = 0.3;
+  let ease = 6;
+
   if (name === 'lunge') {
-    d = lerp(1.95, 0.44, s);
+    d = lerp(1.95, 0.5, s);
     zside = 0;
     lunge = 0.2 + s * 0.8;
+  } else if (name === 'dodge') {
+    // 玩家已经滑到侧面（side0 变了），丧尸沿原线继续冲过去，扑空
+    d = lerp(0.5, 1.05, s);
+    zside = 0;
+    lunge = 1 - s * 0.5;
+    ease = 11;
   } else if (name === 'pin') {
-    d = 0.58 + Math.sin(rt * 5.4) * 0.05;
+    d = 0.56 + Math.sin(rt * 5.4) * 0.05;
     lunge = 0.5;
+  } else if (name === 'kick') {
+    d = lerp(0.56, 1.5, s);
+    lunge = 0.2 * (1 - s);
+    ease = 12;
   } else if (name === 'draw') {
-    d = 0.76 + Math.sin(rt * 3.2) * 0.04;
+    d = 0.8 + Math.sin(rt * 3.2) * 0.04;
     lunge = 0.22;
+  } else if (name === 'drawn') {
+    d = 0.9 + s * 0.15;
+    lunge = 0.15;
   } else if (name === 'bite') {
-    d = lerp(0.9, 0.42, s);
+    d = lerp(0.95, 0.42, s);
     lunge = 0.3 + s * 0.7;
+  } else if (name === 'block') {
+    d = lerp(0.42, 1.1, s);
+    lunge = 0.5 * (1 - s);
+    ease = 12;
   } else if (name === 'muzzle') {
-    d = 0.44 + Math.sin(rt * 2.1) * 0.02;
-    lunge = 0.12;
+    // 顶开之后它正扑回来：留一段看得见的距离，最后那一枪才有弹道可看
+    d = lerp(1.85, 1.35, s) + Math.sin(rt * 2.1) * 0.03;
+    lunge = 0.3 + s * 0.35;
+  } else if (name === 'fire') {
+    d = 1.35 + s * 0.55; // 中弹之后被打得往后退
+    lunge = 0.2 * (1 - s);
+    ease = 9;
   }
 
   // 每次成功顶开都给一下后坐，随后缓缓被它重新逼近
   f.kick = Math.max(0, f.kick - game.rdt * 1.1);
   d += f.kick;
 
-  const e = Math.min(1, game.rdt * 6);
+  const e = Math.min(1, game.rdt * ease);
   f.d = lerp(f.d, d, e);
   f.side = lerp(f.side, side, e);
   f.zside = lerp(f.zside, zside, e);
@@ -1615,27 +1725,237 @@ function setFightAnim(name, k) {
   p.aimScreen = normScreenDir(p.aim);
   p.walk = lerp(p.walk, 0, Math.min(1, game.rdt * 8));
 
+  applyFightPose(name, s, f, z, p);
+
   const fo = (beatOf(game.qte) || { focus: 0.5 }).focus;
-  game.zoomAt = { x: lerp(p.x, z.x, fo), y: lerp(p.y, z.y, fo), z: 0.55 };
+  game.zoomAt = { x: lerp(p.x, z.x, fo), y: lerp(p.y, z.y, fo), z: 0.6 };
 }
 
-/** 成功：顶着额头一枪 */
+/**
+ * 一拍里两个人各自的身体动作。全部在**精灵空间**里给像素偏移：
+ * sg = 丧尸在屏幕上的哪一侧（+1 右 / -1 左），sf = 指向丧尸的屏幕单位向量。
+ */
+function applyFightPose(name, s, f, z, p) {
+  const sf = p.aimScreen || { x: 1, y: 0.5 };
+  const sg = sf.x >= 0 ? 1 : -1;
+  const zdir = z.face.x >= 0 ? 1 : -1;
+  const rt = game.rt;
+  const armed = f.armed;
+  // 手臂长度上限：超过这个数手就脱离身体了
+  const A = 8.5;
+
+  // 默认：低架势的搏斗站姿，两手在身前护着
+  const pp = {
+    face: sg,
+    crouch: 3,
+    lean: 0,
+    grit: true,
+    holster: !armed,
+    hideItems: !armed,
+    legs: { a: -2.4 * sg, b: 2.0 * sg },
+    arms: {
+      far: { x: sg * 3.2, y: -3.4 },
+      near: { x: sg * 5.0, y: -1.6 },
+    },
+  };
+  const zp = { noBack: true, tilt: 0.32 * zdir, jaw: 0.4, armK: 1.1 };
+
+  if (name === 'lunge') {
+    // 它加速扑过来；玩家重心压低往后靠，两手抬起来护住
+    pp.crouch = 2 + s * 2;
+    pp.lean = -0.16 * sg * s;
+    pp.legs = { a: -2.2 * sg - s * 1.6 * sg, b: 2.4 * sg };
+    pp.arms.far = { x: sg * (2.6 + s * 1.4), y: -4.2 - s * 1.2 };
+    pp.arms.near = { x: sg * (4.4 + s * 1.6), y: -2.6 - s * 1.6 };
+    zp.tilt = (0.28 + s * 0.34) * zdir;
+    zp.armK = 1.1 + s * 0.7;
+    zp.jaw = 0.3 + s * 0.7;
+    zp.sink = s * 2.2;
+    zp.legA = -3 * zdir - s * 3 * zdir;
+    zp.legB = 2.4 * zdir + s * 2.4 * zdir;
+  } else if (name === 'dodge') {
+    // 侧闪：上身整个拧开，前脚跨一大步，另一只手扫过去卸力
+    pp.crouch = 4 - s * 1.5;
+    pp.lean = -0.52 * sg * Math.sin(s * Math.PI * 0.9);
+    pp.legs = { a: -5.5 * sg * s - 1.5 * sg, b: 3.6 * sg * s + 1.5 * sg, la: 1.5 * s };
+    pp.arms.far = { x: -sg * (2 + s * 3), y: 1.5 + s * 2 };
+    pp.arms.near = { x: sg * (5 - s * 7), y: -2 + s * 6 };
+    pp.headTilt = { x: -sg * s * 1.5, y: s * 1.2 };
+    // 它扑空：整个人还保持前扑的姿势往前栽
+    zp.tilt = (0.62 - s * 0.1) * zdir;
+    zp.armK = 1.8 - s * 0.3;
+    zp.jaw = 0.9;
+    zp.sink = 2.5 + s * 1.5;
+    zp.legA = -6 * zdir;
+    zp.legB = 5 * zdir;
+  } else if (name === 'pin') {
+    // 被压住：几乎坐倒在地，两手死死顶住它的肩膀
+    const push = Math.sin(rt * 6.2) * 0.7;
+    pp.crouch = 7;
+    pp.sink = 1.5;
+    pp.lean = 0.14 * sg;
+    pp.legs = { a: -4 * sg, b: 1.2 * sg };
+    pp.arms.far = { x: sg * (4.2 + push), y: -6.2 };
+    pp.arms.near = { x: sg * (6.0 + push), y: -5.4 };
+    zp.tilt = 0.5 * zdir;
+    zp.sink = 6;
+    zp.armK = 1.5;
+    zp.armDrop = 5.5;
+    zp.jaw = 0.85;
+    zp.legA = -2 * zdir;
+    zp.legB = 4 * zdir;
+  } else if (name === 'kick') {
+    // 蹬开：靠近它那条腿整条弹出去，两手在身后撑地
+    const kick = Math.sin(Math.min(1, s * 1.4) * Math.PI * 0.7);
+    pp.crouch = 8 - s * 2;
+    pp.sink = 2.5;
+    pp.lean = -0.3 * sg * kick;
+    pp.legs = { a: sg * (2 + kick * 9), la: kick * 7, b: -sg * 2.4 };
+    pp.arms.far = { x: -sg * (4 + kick * 2), y: 5.5 };
+    pp.arms.near = { x: -sg * (2 + kick * 2), y: 6.5 };
+    // 它被蹬得整个人往后仰、脚离地
+    zp.tilt = (0.4 - s * 1.05) * zdir;
+    zp.sink = 5 - s * 6;
+    zp.armK = 1.4;
+    zp.armDrop = 5 - s * 12;
+    zp.headY = -s * 3.5;
+    zp.jaw = 0.95;
+    zp.legA = -3 * zdir - s * 5 * zdir;
+    zp.legB = 3 * zdir + s * 6 * zdir;
+    zp.liftA = s * 4;
+    zp.liftB = s * 6;
+  } else if (name === 'draw') {
+    // 拔枪：一只手继续顶住它，另一只手往腰上摸，摸了两下才摸到
+    const fumble = Math.sin(rt * 15) * 0.9;
+    pp.crouch = 6;
+    pp.lean = 0.1 * sg;
+    pp.legs = { a: -3.4 * sg, b: 1.6 * sg };
+    pp.arms.far = { x: sg * 6.2, y: -5.0 };
+    pp.arms.near = { x: -sg * (2.6 + fumble * 0.5), y: 5.4 + fumble };
+    pp.headTilt = { x: -sg * 1, y: 0.5 };
+    zp.tilt = 0.44 * zdir;
+    zp.sink = 4;
+    zp.armK = 1.35;
+    zp.armDrop = 3.5;
+    zp.jaw = 0.6;
+  } else if (name === 'drawn') {
+    // 枪抽出来：手从腰侧一路甩到身前，枪跟着入画
+    const up = smoothstep(clamp(s * 1.3, 0, 1));
+    pp.crouch = 6 - up * 2;
+    pp.holster = false;
+    pp.hideItems = false;
+    pp.arms.far = { x: sg * (6.2 - up * 2), y: -5.0 + up * 1.5 };
+    pp.arms.near = {
+      x: lerp(-sg * 2.6, sg * 5.4, up),
+      y: lerp(5.4, -3.2, up),
+    };
+    pp.armAng = Math.atan2(sf.y, sf.x);
+    zp.tilt = 0.4 * zdir;
+    zp.sink = 3.5;
+    zp.armK = 1.25;
+    zp.jaw = 0.5;
+  } else if (name === 'bite') {
+    // 它咬下来：玩家双手把枪横过来举到脸前
+    pp.crouch = 5 + s * 2;
+    pp.lean = 0.08 * sg;
+    pp.arms.far = { x: sg * (2.6 + s * 0.8), y: -7.0 - s * 0.8 };
+    pp.arms.near = { x: sg * (4.8 + s * 1.0), y: -7.2 - s * 0.8 };
+    pp.armAng = Math.atan2(-sf.x, sf.y); // 枪身横过来当挡杆
+    pp.headTilt = { x: -sg * 1, y: 1 };
+    zp.tilt = (0.4 + s * 0.22) * zdir;
+    zp.sink = 3 + s * 4.5;
+    zp.armK = 1.3 + s * 0.4;
+    zp.armDrop = 3 + s * 3.5;
+    zp.headY = s * 3.2;
+    zp.jaw = 1;
+  } else if (name === 'block') {
+    // 顶住：双臂猛地往上一送，把它的下巴顶开
+    const shove = Math.sin(Math.min(1, s * 1.5) * Math.PI * 0.8);
+    pp.crouch = 6 - shove * 3;
+    pp.lean = -0.14 * sg * shove;
+    pp.arms.far = { x: sg * (3.0 + shove * 1.2), y: -7.6 - shove * 2.2 };
+    pp.arms.near = { x: sg * (5.4 + shove * 1.4), y: -7.8 - shove * 2.4 };
+    pp.armAng = Math.atan2(-sf.x, sf.y);
+    zp.tilt = (0.6 - shove * 0.95) * zdir;
+    zp.sink = 6 - shove * 7;
+    zp.armK = 1.5;
+    zp.armDrop = 4 - shove * 10;
+    zp.headY = -shove * 5.5;
+    zp.jaw = 1;
+    zp.legA = -3 * zdir - shove * 3 * zdir;
+    zp.legB = 3 * zdir + shove * 4 * zdir;
+  } else if (name === 'muzzle') {
+    // 举枪瞄准：持枪那只手完全伸直指向它的头，另一只手托住手腕
+    const rise = smoothstep(clamp(s * 1.25, 0, 1));
+    pp.crouch = 4 - rise * 2;
+    pp.holster = false;
+    pp.hideItems = false;
+    pp.legs = { a: -2.8 * sg, b: 2.6 * sg };
+    pp.arms.near = { x: sf.x * A, y: sf.y * (A * 0.7) - lerp(1, 5.6, rise) };
+    pp.arms.far = { x: sf.x * (A * 0.6), y: sf.y * (A * 0.45) - lerp(0, 4.4, rise) };
+    pp.armAng = Math.atan2(sf.y * 0.7 - 0.12, sf.x);
+    zp.tilt = (0.34 + s * 0.2) * zdir;
+    zp.armK = 1.2 + s * 0.4;
+    zp.jaw = 0.6 + s * 0.35;
+    zp.sink = s * 2;
+  } else if (name === 'fire') {
+    // 开枪：先枪口上跳（后坐），再回到瞄准线；弹头飞到之后它的头才炸开
+    f.recoil = Math.max(0, (f.recoil || 0) - game.rdt * 2.4);
+    const rc = f.recoil;
+    pp.crouch = 2;
+    pp.holster = false;
+    pp.hideItems = false;
+    pp.lean = -0.06 * sg * rc;
+    pp.legs = { a: -3.2 * sg, b: 2.8 * sg };
+    pp.arms.near = { x: sf.x * (A - rc * 1.6), y: sf.y * (A * 0.7) - 5.6 - rc * 2.6 };
+    pp.arms.far = { x: sf.x * (A * 0.6 - rc), y: sf.y * (A * 0.45) - 4.4 - rc * 1.8 };
+    pp.armAng = Math.atan2(sf.y * 0.7 - 0.12, sf.x) - rc * 0.42 * sg;
+
+    // 弹头到没到？到了就爆头
+    const hit = s > 0.28;
+    if (hit && !f.shotHit) {
+      f.shotHit = true;
+      const hz = 1.52;
+      fx.spark(z.x, z.y, hz, 9, 0.7);
+      fx.blood(z.x, z.y, hz, 20, 1.5);
+      fx.decal(z.x + 0.12, z.y + 0.1, 0.02, 'floor');
+      fx.decal(z.x - 0.22, z.y + 0.26, 0.02, 'floor');
+      game.shake = 6.5;
+      SFX.sfxImpact(false);
+      SFX.sfxThud();
+      UI.msg('（一声闷响。它不动了。）');
+    }
+    const kb = hit ? smoothstep(clamp((s - 0.28) / 0.5, 0, 1)) : 0;
+    zp.headGone = hit;
+    zp.tilt = (0.4 - kb * 1.25) * zdir;
+    zp.sink = -kb * 2;
+    zp.armK = 1.2;
+    zp.armDrop = -kb * 9;
+    zp.jaw = 1;
+    zp.legA = -3 * zdir - kb * 4 * zdir;
+    zp.legB = 3 * zdir + kb * 5 * zdir;
+    zp.liftA = kb * 3;
+  }
+
+  f.pose = pp;
+  z.pose = zp;
+}
+
+/**
+ * 收尾。枪、弹头、爆头都在最后一拍的 'fire' 里演完了，这里只负责让它倒下、
+ * 把镜头慢慢拉回全景。
+ */
 function winFight() {
   const z = game.tentZ;
   game.roofPhase = 'clear';
   game.roofT = 0;
   if (z) {
+    z.pose = null;
+    z.headGone = true; // 尸体也没有头
     horde.damage(z, 99);
-    fx.spark(z.x, z.y, 1.4, 6, 0.5);
-    for (let i = 0; i < 18; i++) fx.debris(z.x, z.y, 1.4, 1, '#5a1f1c');
+    fx.debris(z.x, z.y, 0.5, 6, '#5a1f1c');
     fx.decal(z.x, z.y, 0.02, 'floor');
-    fx.decal(z.x + 0.3, z.y + 0.2, 0.02, 'floor');
   }
-  if (game.gun.mag > 0) game.gun.mag--;
-  game.shake = 6;
-  game.flash = 0.08;
-  SFX.sfxShot();
-  UI.msg('（一声闷响。它不动了。）');
   game.zoomTarget = 1;
   game.zoomSpeed = 1.4; // 拉回全景要慢，别把最后那一枪甩掉
   game.tsTarget = 1;
@@ -1900,6 +2220,19 @@ function updateCine(dt) {
 
 function playerScreen(cam, p) {
   return { x: cam.x + (p.x - p.y) * HW, y: cam.y + (p.x + p.y) * HH };
+}
+
+/**
+ * 玩家精灵的缩放。地面上恒定 1.12；被吊上直升机那一段要**逐渐变小**。
+ *
+ * 直升机是按"在天上、离得远"的比例画的，舱门只有 21 像素高，而站姿角色有
+ * 31 像素 —— 保持地面尺寸的话人根本塞不进舱门，看起来就只能是"挂在机外"。
+ * 随高度缩小既解决了比例，也正好是"越升越远"的透视暗示。
+ */
+const PLAYER_SCALE = 1.12;
+function playerScale() {
+  const k = clamp(game.player.shrink || 0, 0, 1);
+  return lerp(PLAYER_SCALE, 0.46, k);
 }
 
 const ISO_ANG = Math.atan2(HH, HW);
@@ -2424,10 +2757,13 @@ function render() {
   const zm = game.zoom || 1;
   if (zm > 1.001) {
     const za = game.zoomAtCur || game.zoomAt;
+    /* QTE 期间焦点再往下压一点，两个角色就落在画面中上部 —— 键帽面板在下面
+       三分之一，两者不再叠在一起。焦点被 clamp 夹住时这一下会自动打折。 */
+    const lift = game.qte ? 20 : 0;
     const f = za
       ? {
           x: area.cam.x + (za.x - za.y) * HW,
-          y: area.cam.y + (za.x + za.y) * HH - 14 - (za.z || 0) * TILE_Z,
+          y: area.cam.y + (za.x + za.y) * HH - 14 - (za.z || 0) * TILE_Z + lift,
         }
       : { x: VIEW_W / 2, y: VIEW_H / 2 };
     /* 围着焦点慢慢摇一点。用 game.rt（真实秒）而不是 game.t —— 慢动作时
@@ -2510,6 +2846,17 @@ function render() {
       const hipDrop = bodyRot === 0 ? 0 : HIP * Math.min(1, Math.abs(bodyRot / LIE_ROT));
       const fx0 = s.x - aimS.x * kick;
       const fy0 = s.y - zOff - aimS.y * kick + hipDrop;
+      let leftItem = game.state === 'play' ? INV.handItem('left') : null;
+      let rightItem = game.state === 'play' ? INV.handItem('right') : null;
+      /* 搏斗段：手电筒别在腰上不参与，枪在"拔枪"那一拍之前还在枪套里。
+         而且枪固定交给**近侧**那只手 —— 不然朝向一变，持枪的手就换边，
+         举枪、格挡、开枪三拍的手臂偏移全对不上。 */
+      if (game.fight) {
+        const gun = game.fight.armed && handOf('pistol') ? 'pistol' : null;
+        const nearIsRight = aimS.x >= 0;
+        leftItem = nearIsRight ? null : gun;
+        rightItem = nearIsRight ? gun : null;
+      }
       ctx.save();
       if (bodyRot !== 0) {
         ctx.translate(fx0, fy0 - HIP);
@@ -2517,14 +2864,15 @@ function render() {
         ctx.translate(-fx0, -(fy0 - HIP));
       }
       A.drawCharacter(ctx, fx0, fy0, {
-        scale: 1.12,
+        scale: playerScale(),
         aim: aimS,
         walk: p.walk,
         moving: p.moving && game.state === 'play',
-        leftItem: game.state === 'play' ? INV.handItem('left') : null,
-        rightItem: game.state === 'play' ? INV.handItem('right') : null,
+        leftItem,
+        rightItem,
         flashOn: inv.flashOn,
         eyesShut: game.state === 'wake' && game.phase < 1.5,
+        pose: (game.fight && game.fight.pose) || (game.ropeAnim && game.ropeAnim.pose) || null,
       });
       ctx.restore();
     }
