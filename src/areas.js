@@ -3,7 +3,7 @@ import { buildLevel } from './level.js';
 import * as A from './art.js';
 import {
   newArea, closeArea, paintFloor, wallBase, wallPipes, doorBay,
-  floorT, northT, northPt, westT, southT, resetT, pt, THEMES, PAD, mulberry32,
+  floorT, northT, northPt, westT, eastT, southT, resetT, pt, THEMES, PAD, mulberry32,
 } from './areakit.js';
 import { makeCanvas, shade } from './util.js';
 
@@ -69,8 +69,37 @@ function corridorFloorAndWalls(a, rand, th, bays, opts = {}) {
   resetT(g);
 }
 
+/**
+ * 矮护墙的立面。调用前先把墙面变换设好，v0 传护墙顶在该平面里的 v
+ * （northT / westT / eastT 是 (wallH - h) * TILE_Z，southT 是 -h * TILE_Z）。
+ * 上面留空，露出后面的东西或夜空。
+ */
+function parapetFace(g, len, hTiles, v0, th, rand) {
+  const H = hTiles * TILE_Z;
+  const grd = g.createLinearGradient(0, v0, 0, v0 + H);
+  grd.addColorStop(0, th.wallMid);
+  grd.addColorStop(1, th.wallLow);
+  g.fillStyle = grd;
+  g.fillRect(0, v0, len, H);
+  // 压顶画亮一点，暗处才能看出这里有一道墙
+  g.fillStyle = shade(th.wallTop, 0.3);
+  g.fillRect(0, v0, len, 3);
+  g.fillStyle = 'rgba(255,255,255,0.16)';
+  g.fillRect(0, v0, len, 1.2);
+  for (let u = 0; u <= len; u += TILE_W * 2) {
+    g.fillStyle = 'rgba(0,0,0,0.3)';
+    g.fillRect(u, v0, 1.4, H);
+  }
+  for (let i = 0; i < len / 26; i++) {
+    g.globalAlpha = 0.24 + rand() * 0.24;
+    g.fillStyle = rand() > 0.5 ? '#3f1210' : '#0a0a0a';
+    g.fillRect(rand() * len, v0 + rand() * H * 0.7, 2 + rand() * 8, 3 + rand() * 8);
+    g.globalAlpha = 1;
+  }
+}
+
 /** 近侧矮护墙 + 门框，画在道具之后（前景层） */
-function corridorParapet(a, rand, th, doors) {
+function corridorParapet(a, rand, th, doors, opts = {}) {
   const ph = 0.82; // 高度（瓦片）：够读出"这边也是一排门"，又不挡住走廊地面
   const { c, g } = makeCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
   g.save();
@@ -114,6 +143,16 @@ function corridorParapet(a, rand, th, doors) {
     g.globalAlpha = 1;
   }
   g.restore();
+
+  /* 东端封口。x=w 是**近侧**墙，画满高会把走廊内部盖掉（跟南墙同理），
+     所以只做一道齐腰的封口，并且和南护墙一样放前景层。 */
+  if (opts.eastCap) {
+    g.save();
+    eastT(g, a.sox, a.soy, a.w, a.wallH);
+    parapetFace(g, a.h * TILE_W, 0.86, (a.wallH - 0.86) * TILE_Z, th, rand);
+    g.restore();
+  }
+
   resetT(g);
   return { img: c, ox: a.sox, oy: a.soy };
 }
@@ -232,6 +271,8 @@ function buildCorr2() {
  * ------------------------------------------------------------------ */
 
 export const DORM_DOOR_X = 13.4;
+/** 走廊东端通天台楼梯的那扇门 */
+export const ROOF_DOOR_X = 22.1;
 
 function buildCorr3() {
   const a = newArea('corr3', '三层宿舍走廊', CORR_W, CORR_H);
@@ -245,7 +286,8 @@ function buildCorr3() {
     // 唯一完好、可进入的房间
     { u0: DORM_DOOR_X - 1.1, u1: DORM_DOOR_X + 1.1, state: 'closed', kind: 'dorm', label: '312', intact: true },
     { u0: 17.2, u1: 19.4, state: 'open', kind: 'dorm' },
-    { u0: 21.0, u1: 23.2, state: 'sealed', kind: 'dorm' },
+    // 走廊东端：通天台楼梯的防火门
+    { u0: ROOF_DOOR_X - 1.1, u1: ROOF_DOOR_X + 1.1, state: 'closed', kind: 'office', label: 'ROOF' },
   ];
   corridorFloorAndWalls(a, rand, th, bays, { endDoor: true, floorMark: '3F' });
   bayLights(a, bays);
@@ -258,7 +300,7 @@ function buildCorr3() {
     ['chair', A.makeChair(305), 11.0, 3.4, null, null],
     ['chair2', A.makeChair(306), 20.0, 2.2, null, null],
     ['table', A.makeTable(307), 5.2, 2.2, [2.3, 1.05], [2.3, 1.05, 0.9]],
-    ['barrel', A.makeBarrel(308), 22.4, 3.4, [0.88, 0.88], [0.88, 0.88, 1.12]],
+    ['barrel', A.makeBarrel(308), 22.9, 3.9, [0.88, 0.88], [0.88, 0.88, 1.12]],
     ['shelf', A.makeShelf(309), 16.0, 1.0, [0.9, 1.7], [0.9, 1.7, 2.05]],
   ];
   for (const [id, s, x, y, col, occ] of props) a.props.push({ id, s, x, y, col, occ });
@@ -287,6 +329,9 @@ function buildCorr3() {
   });
 
   a.spawns.fromStair = { x: 1.9, y: 2.5 };
+  // 从 312 出来时站在自己门口，不要落到走廊正中央
+  a.spawns.fromDorm = { x: DORM_DOOR_X, y: 1.5 };
+  a.spawns.fromRoofStair = { x: ROOF_DOOR_X, y: 1.6 };
   a.links.push({
     x: 1.0,
     y: 2.4,
@@ -308,12 +353,31 @@ function buildCorr3() {
     short: '进入',
     anchor: { x: DORM_DOOR_X, y: 0.1, z: 2.4 },
   });
-  a.fg = corridorParapet(a, rand, th, [
-    [3.2, 5.2],
-    [8.0, 10.0],
-    [12.6, 14.6],
-    [17.4, 19.4],
-  ]);
+  // 天台楼梯：对讲机剧情走完之前锁着，不让玩家没头没脑地上天台
+  a.links.push({
+    x: ROOF_DOOR_X,
+    y: 0.9,
+    r: 1.7,
+    to: 'stairRoof',
+    spawn: 'fromCorr3',
+    text: '推开通往天台的防火门',
+    short: '天台',
+    needsRadio: true,
+    lockedText: '门锁着 · 先弄清对讲机在说什么',
+    anchor: { x: ROOF_DOOR_X, y: 0.1, z: 2.4 },
+  });
+  a.fg = corridorParapet(
+    a,
+    rand,
+    th,
+    [
+      [3.2, 5.2],
+      [8.0, 10.0],
+      [12.6, 14.6],
+      [17.4, 19.4],
+    ],
+    { eastCap: true },
+  );
   return closeArea(a);
 }
 
@@ -489,6 +553,7 @@ function buildStair() {
   a.lights.push({ id: 'exit', x: EXIT_SIGN.x, y: 0.5, z: 2.3, r: 4.4, color: [110, 235, 140], power: 0.62, seed: 4.4, mode: 5 });
   // 上行开口透出的一点光，让"上面还有路"看得出来
   a.lights.push({ id: 'upglow', x: 6.9, y: 0.5, z: 2.2, r: 3.6, color: [180, 196, 206], power: 0.3, seed: 2.6, mode: 5 });
+  a.exitSign = EXIT_SIGN.x;
 
   a.spawns.fromCorr2 = { x: 2.1, y: 1.6 };
   a.spawns.fromCorr3 = { x: 4.9, y: 2.3 }; // 上行梯段脚下，碰撞体左侧
@@ -504,6 +569,242 @@ function buildStair() {
     { x: 6.9, y: 3.2, r: 2.0, text: '往上走 · 三层', anchor: { x: 6.9, y: 2.6, z: 1.9 } },
     { x: 6.9, y: 5.2, r: 1.8, text: '往下走 · 一层', anchor: { x: 6.9, y: 5.2, z: 0.9 } },
   ];
+  return closeArea(a);
+}
+
+/* ------------------------------------------------------------------ *
+ * 天台楼梯间：只往上，没有下行井
+ * ------------------------------------------------------------------ */
+
+function buildStairRoof() {
+  const a = newArea('stairRoof', '天台楼梯', 9, 8);
+  const rand = mulberry32(0x4f0f);
+  const th = THEMES.stair;
+  const g = a.g;
+
+  paintFloor(g, a.sox, a.soy, a.w, a.h, rand, th);
+
+  g.save();
+  northT(g, a.sox, a.soy, a.wallH);
+  wallBase(g, a.w * TILE_W, rand, th, a.wallH);
+  // 回三层走廊的门
+  doorBay(g, 1.0 * TILE_W, 3.2 * TILE_W, rand, th, { state: 'closed', kind: 'office', label: '3F' }, a.wallH);
+  // 安全出口标志底座
+  const sx = EXIT_SIGN.x * TILE_W;
+  g.fillStyle = '#14180f';
+  g.fillRect(sx - 15, 14, 30, 13);
+  g.fillStyle = '#1f2a18';
+  g.fillRect(sx - 13, 16, 26, 9);
+
+  // 上行梯段顶端的开口：这一段通到天台，没有继续往下的井
+  const upU = 6.9 * TILE_W;
+  g.fillStyle = '#07090a';
+  g.fillRect(upU - 30, 6, 60, 42);
+  g.fillStyle = '#2b3134';
+  g.fillRect(upU - 32, 4, 64, 4);
+  g.fillStyle = 'rgba(255,255,255,0.08)';
+  g.fillRect(upU - 32, 4, 64, 1.4);
+  g.fillStyle = 'rgba(215,215,205,0.62)';
+  g.font = 'bold 15px monospace';
+  g.fillText('4F', upU - 34, 44);
+  g.font = 'bold 11px monospace';
+  g.fillText('ROOF', upU - 34, 55);
+  g.fillStyle = 'rgba(210,210,200,0.22)';
+  g.font = 'bold 26px monospace';
+  g.fillText('3F', 22, 36);
+  // 有人用喷漆在墙上留过话
+  g.fillStyle = 'rgba(196,72,54,0.5)';
+  g.font = 'bold 13px monospace';
+  g.fillText('UP = OUT', 118, 62);
+  g.restore();
+
+  g.save();
+  westT(g, a.sox, a.soy, a.wallH);
+  wallBase(g, a.h * TILE_W, rand, th, a.wallH);
+  g.restore();
+  resetT(g);
+
+  /* 只有上行梯段。出生点与落脚点都留在碰撞体外面。 */
+  const STEPS = 6;
+  const RISE = 0.3;
+  const RUN = 0.44;
+  const Y_BOTTOM = 3.62;
+  const stepSprite = A.makeStep(2.3, RUN, RISE, 17);
+  for (let i = 0; i < STEPS; i++) {
+    a.props.push({ id: 'step' + i, s: stepSprite, x: 6.9, y: Y_BOTTOM - i * RUN, zOff: i * RISE, col: null, occ: null });
+  }
+  a.props.push({
+    id: 'landing',
+    s: A.makeLanding(2.3, 0.8, 19),
+    x: 6.9,
+    y: Y_BOTTOM - STEPS * RUN - 0.2,
+    zOff: STEPS * RISE,
+    col: null,
+    occ: null,
+  });
+  a.ramps = [{ x0: 5.75, y0: 0.7, x1: 8.05, y1: 3.9, hi: { y: 1.0, z: STEPS * RISE }, lo: { y: 3.9, z: 0 } }];
+  // 到达高度就换层，不用容易走偏的方框
+  a.triggers = [{ zAbove: 1.55, to: 'roof', spawn: 'fromStair' }];
+
+  // 下半场堆着被人推过来堵门的杂物：这条楼梯只通天台
+  a.props.push({ id: 'crate', s: A.makeCrate(0.9, 521), x: 6.6, y: 6.4, col: [0.9, 0.9], occ: [0.9, 0.9, 0.86] });
+  a.props.push({ id: 'crate2', s: A.makeCrate(0.78, 522), x: 7.6, y: 5.6, col: [0.78, 0.78], occ: [0.78, 0.78, 0.74] });
+  a.props.push({ id: 'barrel', s: A.makeBarrel(523), x: 1.2, y: 6.6, col: [0.88, 0.88], occ: [0.88, 0.88, 1.12] });
+  a.props.push({ id: 'rub1', s: A.makeRubble(524), x: 3.0, y: 5.2, col: null, occ: null });
+  a.props.push({ id: 'rub2', s: A.makeRubble(525), x: 4.4, y: 7.0, col: null, occ: null });
+
+  a.fixtures.push({ x: 3.2, y: 3.6, z: WALL_H - 0.28, len: 1.8, light: 'rs0', tilt: -0.3, mode: 0 });
+  a.lights.push({ id: 'rs0', x: 3.2, y: 3.6, z: WALL_H - 0.3, r: 5.4, color: [204, 216, 224], power: 0.46, seed: 2.3, mode: 0 });
+  a.lights.push({ id: 'exit', x: EXIT_SIGN.x, y: 0.5, z: 2.3, r: 4.4, color: [110, 235, 140], power: 0.62, seed: 4.4, mode: 5 });
+  // 天台开口透进来的一点雨夜天光
+  a.lights.push({ id: 'skyglow', x: 6.9, y: 0.5, z: 2.2, r: 4.4, color: [140, 170, 200], power: 0.34, seed: 1.4, mode: 5 });
+  a.exitSign = EXIT_SIGN.x;
+
+  a.spawns.fromCorr3 = { x: 2.1, y: 1.6 };
+  a.spawns.fromRoof = { x: 4.9, y: 2.3 }; // 上行梯段脚下，碰撞体左侧
+  a.links.push({
+    x: 2.1,
+    y: 0.6,
+    r: 1.6,
+    to: 'corr3',
+    spawn: 'fromRoofStair',
+    text: '回到三层走廊',
+    short: '三层',
+    anchor: { x: 2.1, y: 0.1, z: 2.4 },
+  });
+  a.hints = [{ x: 6.9, y: 3.2, r: 2.0, text: '往上走 · 天台', anchor: { x: 6.9, y: 2.6, z: 1.9 } }];
+  return closeArea(a);
+}
+
+/* ------------------------------------------------------------------ *
+ * 天台：暴雨、帐篷、直升机
+ * ------------------------------------------------------------------ */
+
+/** 天台上各个剧情点的位置，main.js 用它驱动流程 */
+export const ROOF = {
+  door: { x: 1.0, y: 2.5 }, // 楼道门
+  tent: { x: 9.6, y: 6.1 },
+  edge: { x0: 8.4, x1: 13.6, y1: 2.0 }, // 直升机段落的天台边缘
+  rope: { x: 11.0, y: 0.7 }, // 绳索落点
+};
+
+/** 远处的城市剪影：画在墙面平面里，位于矮女儿墙之后 */
+function skyline(g, len, topV, rand) {
+  let u = -24;
+  while (u < len + 24) {
+    const w = 13 + rand() * 42;
+    const h = 10 + rand() * 44;
+    g.fillStyle = ['#0c1216', '#101820', '#090e11'][(rand() * 3) | 0];
+    g.fillRect(u, topV - h, w, h + 6);
+    // 楼顶的红色障碍灯
+    if (rand() > 0.5) {
+      g.fillStyle = 'rgba(255,90,70,0.45)';
+      g.fillRect(u + w / 2 - 1, topV - h - 3, 2, 2);
+    }
+    // 还亮着的窗：整座城市并没有全黑
+    const win = (rand() * 6) | 0;
+    for (let i = 0; i < win; i++) {
+      g.fillStyle = rand() > 0.5 ? 'rgba(224,196,120,0.28)' : 'rgba(150,178,196,0.18)';
+      g.fillRect(u + 3 + rand() * Math.max(1, w - 6), topV - h + 4 + rand() * Math.max(1, h - 8), 2, 2.4);
+    }
+    u += w + 2 + rand() * 12;
+  }
+}
+
+/** 天台近侧（x=w / y=h）的女儿墙，放前景层，压在角色之上 */
+function roofParapetFg(a, rand, th) {
+  const { c, g } = makeCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
+  const ph = 0.98;
+  g.save();
+  eastT(g, a.sox, a.soy, a.w, a.wallH);
+  parapetFace(g, a.h * TILE_W, ph, (a.wallH - ph) * TILE_Z, th, rand);
+  g.restore();
+  g.save();
+  southT(g, a.sox, a.soy, a.h);
+  parapetFace(g, a.w * TILE_W, ph, -ph * TILE_Z, th, rand);
+  g.restore();
+  resetT(g);
+  return { img: c, ox: a.sox, oy: a.soy };
+}
+
+function buildRoof() {
+  // 墙高给得比室内高：露天场景要留出画天际线的空间
+  const a = newArea('roof', '天台', 16, 10, 4.6);
+  const rand = mulberry32(0x40f0);
+  const th = THEMES.roof;
+  const g = a.g;
+
+  paintFloor(g, a.sox, a.soy, a.w, a.h, rand, th, { puddles: 13 });
+
+  const PH = 1.15; // 女儿墙高度（瓦片）
+  const topV = (a.wallH - PH) * TILE_Z;
+
+  // 远侧（y=0）：天际线 + 矮女儿墙。这一侧不封高墙，直升机从这边进画。
+  g.save();
+  northT(g, a.sox, a.soy, a.wallH);
+  skyline(g, a.w * TILE_W, topV, rand);
+  parapetFace(g, a.w * TILE_W, PH, topV, th, rand);
+  g.restore();
+
+  // 左侧（x=0）：楼梯出口房（满高）+ 其余段落矮女儿墙
+  g.save();
+  westT(g, a.sox, a.soy, a.wallH);
+  skyline(g, a.h * TILE_W, topV, rand);
+  parapetFace(g, a.h * TILE_W, PH, topV, th, rand);
+  g.save();
+  g.translate(0.9 * TILE_W, 0);
+  wallBase(g, 3.4 * TILE_W, rand, th, a.wallH);
+  doorBay(g, 0.5 * TILE_W, 2.9 * TILE_W, rand, th, { state: 'closed', kind: 'office', label: 'R' }, a.wallH);
+  // 门头的应急灯壳（灯光本身由烘焙光源给）
+  g.fillStyle = '#232a2b';
+  g.fillRect(1.4 * TILE_W, a.wallH * TILE_Z - 50, 22, 9);
+  g.fillStyle = '#39423f';
+  g.fillRect(1.4 * TILE_W, a.wallH * TILE_Z - 50, 22, 3);
+  g.fillStyle = 'rgba(198,224,238,0.5)';
+  g.fillRect(1.4 * TILE_W + 2, a.wallH * TILE_Z - 47, 18, 4);
+  g.restore();
+  g.restore();
+  resetT(g);
+
+  const props = [
+    ['tent', A.makeTent(701), ROOF.tent.x, ROOF.tent.y, [1.9, 1.5], [1.9, 1.5, 1.1]],
+    ['vent1', A.makeRoofVent(711), 4.4, 7.6, [0.95, 0.95], [0.95, 0.95, 0.9]],
+    ['vent2', A.makeRoofVent(712), 13.6, 3.4, [0.95, 0.95], [0.95, 0.95, 0.9]],
+    ['mast', A.makePipeStack(715), 2.4, 6.2, [0.6, 1.4], [0.6, 1.4, 2.6]],
+    ['crate', A.makeCrate(0.9, 713), 6.2, 8.7, [0.9, 0.9], [0.9, 0.9, 0.86]],
+    ['barrel', A.makeBarrel(714), 12.8, 7.4, [0.88, 0.88], [0.88, 0.88, 1.12]],
+    ['chair', A.makeChair(718), 8.0, 7.8, null, null],
+    ['rub1', A.makeRubble(716), 6.8, 3.2, null, null],
+    ['rub2', A.makeRubble(717), 14.4, 6.6, null, null],
+    ['rub3', A.makeRubble(719), 4.0, 4.4, null, null],
+  ];
+  for (const [id, s, x, y, col, occ] of props) a.props.push({ id, s, x, y, col, occ });
+
+  /* 静态光：少而冷。全部走烘焙（ensureAreaLights），别每帧 add()。 */
+  a.lights.push({ id: 'plamp', x: 1.1, y: ROOF.door.y, z: 2.3, r: 5.8, color: [156, 190, 214], power: 0.52, seed: 1.2, mode: 5 });
+  a.lights.push({ id: 'obst', x: 2.4, y: 6.2, z: 2.7, r: 3.8, color: [255, 92, 70], power: 0.5, seed: 3.1, mode: 5 });
+  // 城市余光：把天台压到"看得清脚下但看不清远处"的程度
+  a.lights.push({ id: 'city1', x: 7.5, y: 1.2, z: 0, r: 11, color: [86, 112, 142], power: 0.17, seed: 5.2, mode: 5 });
+  a.lights.push({ id: 'city2', x: 12.5, y: 8.0, z: 0, r: 10, color: [70, 94, 122], power: 0.14, seed: 6.4, mode: 5 });
+
+  a.spawns.fromStair = { x: 1.9, y: ROOF.door.y };
+  a.links.push({
+    x: ROOF.door.x,
+    y: ROOF.door.y,
+    r: 1.5,
+    to: 'stairRoof',
+    spawn: 'fromRoof',
+    text: '回到楼梯间',
+    short: '下楼',
+    roofDoor: true,
+    anchor: { x: 0.15, y: ROOF.door.y, z: 2.4 },
+  });
+
+  a.fg = roofParapetFg(a, rand, th);
+  a.storm = true;
+  a.ambient = 'rgba(30,46,64,0.045)';
+  a.dark = 'rgba(2,4,7,1)';
+  a.roof = ROOF;
   return closeArea(a);
 }
 
@@ -570,6 +871,8 @@ const BUILDERS = {
   corr3: buildCorr3,
   corr1: buildCorr1,
   stair: buildStair,
+  stairRoof: buildStairRoof,
+  roof: buildRoof,
   dorm312: buildDorm312,
 };
 
