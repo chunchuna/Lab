@@ -392,7 +392,8 @@ body.devcon-on { cursor: default; }
   transition: opacity 1.8s ease-in;
 }
 #ending.on { opacity: 1; }
-#ending h2 { font-size: 4.6em; margin: 0; letter-spacing: 0.3em; font-weight: 400; }
+/* text-indent 抵掉 letter-spacing 在末字后面多出来的一格，否则整行会偏左半格 */
+#ending h2 { font-size: 4.6em; margin: 0; letter-spacing: 0.3em; text-indent: 0.3em; font-weight: 400; }
 
 /* ---------- 人脸识别终端 ---------- */
 #scan {
