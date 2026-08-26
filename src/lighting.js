@@ -204,12 +204,15 @@ export class Lighting {
     d.drawImage(this.light.c, 0, 0);
     d.globalCompositeOperation = 'source-over';
 
+    /* 光照层一直保持 1× 分辨率：它是一层软渐变，放大不会露馅，而每盏动态光都要
+       在整张缓冲上走一次 filter: blur()，跟着世界层一起超采样的话这一步会翻好几倍。
+       画的时候按逻辑尺寸给目标宽高，由基础变换负责放到真实像素上。 */
     ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(this.dark.c, 0, 0);
+    ctx.drawImage(this.dark.c, 0, 0, this.w, this.h);
     // 彩色辉光
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = 0.38;
-    ctx.drawImage(this.light.c, 0, 0);
+    ctx.drawImage(this.light.c, 0, 0, this.w, this.h);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
   }

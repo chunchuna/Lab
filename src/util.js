@@ -35,13 +35,55 @@ export function shade(hex, amt) {
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }
 
-export function makeCanvas(w, h) {
+/**
+ * 离屏画布。
+ *
+ * ss 是超采样倍率：画布的**真实**像素是 w×h 的 ss 倍，但基础变换里已经乘好了 ss，
+ * 所以画的时候照旧写逻辑坐标。逻辑尺寸记在 `c.lw / c.lh` 上，画到别处时要用它们
+ * 当目标宽高，否则会按真实像素画出 ss 倍大。
+ */
+export function makeCanvas(w, h, ss = 1) {
   const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.ceil(w));
-  c.height = Math.max(1, Math.ceil(h));
+  c.width = Math.max(1, Math.ceil(w * ss));
+  c.height = Math.max(1, Math.ceil(h * ss));
+  c.lw = Math.max(1, Math.ceil(w));
+  c.lh = Math.max(1, Math.ceil(h));
   const g = c.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  return { c, g };
+  // 超采样之后不再走"像素风放大"，交给默认的平滑缩放
+  g.imageSmoothingEnabled = ss > 1;
+  if (g.imageSmoothingEnabled) g.imageSmoothingQuality = 'high';
+  setBase(g, ss, 0, 0, ss, 0, 0);
+  return { c, g, lw: c.lw, lh: c.lh, ss };
+}
+
+/**
+ * 记住并应用一个上下文的**基础变换**。
+ *
+ * 地板/墙面那几套绘制空间原本是直接 setTransform 的绝对变换，一旦基础变换不再是
+ * 单位阵（超采样倍率、近景变焦），绝对 setTransform 就会把它抹掉。所以统一改成
+ * 「先回到基础变换，再 transform 叠上去」。
+ */
+export function setBase(g, a, b, c, d, e, f) {
+  g.baseT = [a, b, c, d, e, f];
+  g.setTransform(a, b, c, d, e, f);
+}
+
+/** 回到基础变换（原来的 resetT） */
+export function baseT(g) {
+  const b = g.baseT;
+  if (b) g.setTransform(b[0], b[1], b[2], b[3], b[4], b[5]);
+  else g.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+/** 在基础变换之上叠一层局部变换 */
+export function localT(g, a, b, c, d, e, f) {
+  baseT(g);
+  g.transform(a, b, c, d, e, f);
+}
+
+/** 画一张 makeCanvas 出来的贴图：按它的**逻辑**尺寸画，不按真实像素 */
+export function blit(g, c, x, y) {
+  g.drawImage(c, x, y, c.lw || c.width, c.lh || c.height);
 }
 
 /** 闪烁函数：返回 0..1 的亮度系数 */

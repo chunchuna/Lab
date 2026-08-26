@@ -36,12 +36,13 @@ html, body {
   background: #000;
 }
 
+/* 画布的真实像素由 JS 按渲染倍率设定（config.js 的 RS），这里只做等比铺满。
+   刻意不写 image-rendering: pixelated —— 那套「低分辨率再放大」正是画面糊、
+   边缘一块一块的来源，现在改成高分辨率渲染 + 默认平滑缩放。 */
 #game {
   display: block;
   width: 100%;
   height: 100%;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
 }
 
 #hud {
@@ -136,7 +137,7 @@ html, body {
   align-items: center;
   justify-content: center;
 }
-.hand .icon { width: 3.8em; height: 3.8em; image-rendering: pixelated; }
+.hand .icon { width: 3.8em; height: 3.8em; }
 .hand .label { font-size: 1.05em; letter-spacing: 0.1em; opacity: 0.72; }
 .hand .label .kbd { margin-right: 0; margin-left: 0.3em; }
 .hand .item { font-size: 1.05em; margin-top: 0.1em; }
@@ -453,7 +454,7 @@ body.devcon-on { cursor: default; }
   padding-bottom: 0.4em;
 }
 .portrait-wrap { position: relative; width: 12.6em; }
-#portrait { display: block; width: 12.6em; height: 21em; image-rendering: pixelated; }
+#portrait { display: block; width: 12.6em; height: 21em; }
 .portrait-name { font-size: 1.05em; letter-spacing: 0.14em; text-align: center; opacity: 0.72; }
 .portrait-name span { display: block; font-size: 0.8em; letter-spacing: 0.28em; opacity: 0.6; }
 
@@ -468,7 +469,7 @@ body.devcon-on { cursor: default; }
 }
 .hand-slot.left { left: -7.1em; }
 .hand-slot.right { right: -7.1em; }
-.hand-slot .icon { width: 4.6em; height: 4.6em; image-rendering: pixelated; }
+.hand-slot .icon { width: 4.6em; height: 4.6em; }
 .hand-slot .hs-label {
   position: absolute;
   bottom: -1.6em;
@@ -495,7 +496,7 @@ body.devcon-on { cursor: default; }
   justify-content: center;
 }
 .cell.filled { background: rgba(222, 216, 200, 0.22); }
-.cell .icon { width: 78%; height: 78%; image-rendering: pixelated; }
+.cell .icon { width: 78%; height: 78%; }
 .cell .count { position: absolute; right: 0.25em; bottom: 0.05em; font-size: 1em; }
 /* 拖拽目标：反色，不用描边 */
 .drop-hover { background: var(--text) !important; }
@@ -524,7 +525,7 @@ body.devcon-on { cursor: default; }
   pointer-events: none;
   z-index: 9999;
 }
-.drag-ghost canvas { width: 100%; height: 100%; image-rendering: pixelated; }
+.drag-ghost canvas { width: 100%; height: 100%; }
 
 /* ---------- 标题 ---------- */
 #title {

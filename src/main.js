@@ -1,5 +1,5 @@
 import {
-  VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, WALL_H,
+  VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, WALL_H, RS,
   PLAYER_R, PLAYER_SPEED, MAG_SIZE, START_SPARE_MAGS, RELOAD_TIME, FIRE_COOLDOWN,
 } from './config.js';
 import { toWorld, wallNorthPt, wallNorthTransform } from './iso.js';
@@ -22,11 +22,18 @@ import { initDevcon, toggleDevcon, closeDevcon, isDevconOpen } from './devcon.js
 import {
   pad, initControls, setButton, setPadVisible, endFrameControls, screenDirToWorld,
 } from './controls.js';
-import { clamp, flicker, lerp, makeCanvas, smoothstep } from './util.js';
+import { clamp, flicker, lerp, makeCanvas, smoothstep, setBase, blit } from './util.js';
 
+/* 画布的**真实**像素是逻辑视口的 RS 倍（见 config.js 的 pickRenderScale）。
+   世界仍然按 640×360 这套逻辑坐标画，倍率折进基础变换里，所以下面所有绘制
+   代码都不用改坐标。以前是 640×360 直接靠 CSS 放大 + image-rendering:pixelated，
+   窗口不是整数倍时就是一片糊掉的像素块。 */
 const canvas = document.getElementById('game');
+canvas.width = VIEW_W * RS;
+canvas.height = VIEW_H * RS;
 const ctx = canvas.getContext('2d', { alpha: false });
-ctx.imageSmoothingEnabled = false;
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
 
 const stage = document.getElementById('stage');
 
@@ -109,6 +116,7 @@ function ensureAreaLights(a) {
      没有它的话，屋面以外一律被 area.dark 压成纯黑，远景层等于白画。
      跟静态灯一样是烘焙的，每帧只做一次 drawImage。 */
   if (a.skyPaint) {
+    // 光照相关的缓冲一律留在 1× —— 光是软的，放大也不会糊，却省下几倍填充率
     const t = makeCanvas(VIEW_W, VIEW_H);
     a.skyPaint(t.g);
     t.g.globalCompositeOperation = 'destination-out';
@@ -2051,7 +2059,7 @@ function drawHighlight(g, cam) {
   const sy = cam.y + (pr.x + pr.y) * HH - (pr.zOff || 0) * TILE_Z;
   g.save();
   g.globalAlpha = a;
-  g.drawImage(ring.img, Math.round(sx - pr.s.ox - ring.pad), Math.round(sy - pr.s.oy - ring.pad));
+  blit(g, ring.img, Math.round(sx - pr.s.ox - ring.pad), Math.round(sy - pr.s.oy - ring.pad));
   g.restore();
 }
 
@@ -2244,8 +2252,15 @@ function drawDoorDamage(g, cam) {
  */
 const viewXform = { s: 1, tx: 0, ty: 0 };
 
+/** 世界层：逻辑坐标 -> 变焦 -> 超采样倍率 */
 function applyView(g) {
-  g.setTransform(viewXform.s, 0, 0, viewXform.s, viewXform.tx, viewXform.ty);
+  const s = viewXform.s * RS;
+  setBase(g, s, 0, 0, s, viewXform.tx * RS, viewXform.ty * RS);
+}
+
+/** 屏幕空间层（雨、黑幕、闪光）：不吃变焦，但仍要吃超采样倍率 */
+function applyScreen(g) {
+  setBase(g, RS, 0, 0, RS, 0, 0);
 }
 
 /** 世界层里那些临时改过变换的绘制收尾用 */
@@ -2437,7 +2452,7 @@ function render() {
     viewXform.ty = 0;
   }
 
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  applyScreen(ctx);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   applyView(ctx);
@@ -2445,10 +2460,10 @@ function render() {
   /* 远景背景层（露天区域才有）：夜空、云、三层城市剪影、楼下的街区。
      它在世界之外，不参与等距排序，也不走墙面那套画法 —— 直接一张
      屏幕空间贴图铺在最底下，跟着镜头抖动与变焦一起走。 */
-  if (area.backdrop) ctx.drawImage(area.backdrop, shx, shy);
+  if (area.backdrop) blit(ctx, area.backdrop, shx, shy);
 
   // 静态图层
-  ctx.drawImage(area.statics.img, Math.round(cam.x - area.statics.ox), Math.round(cam.y - area.statics.oy));
+  blit(ctx, area.statics.img, Math.round(cam.x - area.statics.ox), Math.round(cam.y - area.statics.oy));
   if (area.id === 'lab' && game.door.hits > 0) drawDoorDamage(ctx, cam);
   fx.drawDecals(ctx, cam);
 
@@ -2481,7 +2496,7 @@ function render() {
     if (it.pr) {
       const sx = cam.x + (it.pr.x - it.pr.y) * HW;
       const sy = cam.y + (it.pr.x + it.pr.y) * HH - (it.pr.zOff || 0) * TILE_Z;
-      ctx.drawImage(it.pr.s.img, Math.round(sx - it.pr.s.ox), Math.round(sy - it.pr.s.oy));
+      blit(ctx, it.pr.s.img, Math.round(sx - it.pr.s.ox), Math.round(sy - it.pr.s.oy));
     } else if (it.z) {
       const zs = { x: cam.x + (it.z.x - it.z.y) * HW, y: cam.y + (it.z.x + it.z.y) * HH };
       drawZombie(ctx, zs.x, zs.y, it.z, false);
@@ -2517,7 +2532,7 @@ function render() {
 
   // 近侧矮护墙：必须压在道具与角色之上
   if (area.fg) {
-    ctx.drawImage(area.fg.img, Math.round(cam.x - area.fg.ox), Math.round(cam.y - area.fg.oy));
+    blit(ctx, area.fg.img, Math.round(cam.x - area.fg.ox), Math.round(cam.y - area.fg.oy));
   }
 
   fx.draw(ctx, cam);
@@ -2648,7 +2663,7 @@ function render() {
   }
 
   /* --- 以下是屏幕空间层：不跟着近景变焦缩放 --- */
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  applyScreen(ctx);
 
   // 雨：画在光照之后，所以不会被压黑；两次 stroke，不做 filter: blur()
   if (game.storm) {
@@ -2725,7 +2740,7 @@ function render() {
     ctx.fillStyle = '#ded8c8';
     ctx.fillRect(sx - 0.6, sy - 0.6, 1.4 * k, 1.4 * k);
     ctx.restore();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    applyScreen(ctx);
   }
 
   // 互动提示跟随物体：世界坐标 -> 画布坐标 -> 舞台 CSS 像素。

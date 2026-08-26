@@ -1,5 +1,5 @@
-import { HW, HH, TILE_W, TILE_Z } from './config.js';
-import { makeCanvas, mulberry32, shade } from './util.js';
+import { HW, HH, TILE_W, TILE_Z, RS } from './config.js';
+import { makeCanvas, mulberry32, shade, baseT, localT, blit } from './util.js';
 
 export const PAL = {
   floor: '#343b40',
@@ -67,19 +67,17 @@ export function isoBox(g, ox, oy, x0, y0, z0, w, d, h, cTop, cR, cL, outline) {
 
 /** 顶面绘制空间（1 瓦片 = TILE_W 像素） */
 export function faceTop(g, ox, oy, z) {
-  g.setTransform(HW / TILE_W, HH / TILE_W, -HW / TILE_W, HH / TILE_W, ox, oy - z * TILE_Z);
+  localT(g, HW / TILE_W, HH / TILE_W, -HW / TILE_W, HH / TILE_W, ox, oy - z * TILE_Z);
 }
 /** +x 面（朝右下），u=y*TILE_W，v 向下为负 z */
 export function faceRight(g, ox, oy, xr) {
-  g.setTransform(-HW / TILE_W, HH / TILE_W, 0, 1, ox + xr * HW, oy + xr * HH);
+  localT(g, -HW / TILE_W, HH / TILE_W, 0, 1, ox + xr * HW, oy + xr * HH);
 }
 /** +y 面（朝左下），u=x*TILE_W，v 向下为负 z */
 export function faceLeft(g, ox, oy, yl) {
-  g.setTransform(HW / TILE_W, HH / TILE_W, 0, 1, ox - yl * HW, oy + yl * HH);
+  localT(g, HW / TILE_W, HH / TILE_W, 0, 1, ox - yl * HW, oy + yl * HH);
 }
-export function resetT(g) {
-  g.setTransform(1, 0, 0, 1, 0, 0);
-}
+export const resetT = baseT;
 
 /** 足迹阴影 */
 export function aoShadow(g, ox, oy, w, d, a = 0.45) {
@@ -118,22 +116,25 @@ export function outlineRing(img, color = '#ded8c8', r = 1) {
   let cached = ringCache.get(key);
   if (cached) return cached;
 
-  const sil = makeCanvas(img.width, img.height);
-  sil.g.drawImage(img, 0, 0);
+  // 精灵是按 RS 烘焙的，描边的偏移量要按逻辑像素给，才和以前一样粗
+  const lw = img.lw || img.width;
+  const lh = img.lh || img.height;
+  const sil = makeCanvas(lw, lh, RS);
+  blit(sil.g, img, 0, 0);
   sil.g.globalCompositeOperation = 'source-in';
   sil.g.fillStyle = color;
-  sil.g.fillRect(0, 0, img.width, img.height);
+  sil.g.fillRect(0, 0, lw, lh);
 
   const pad = r + 1;
-  const { c, g } = makeCanvas(img.width + pad * 2, img.height + pad * 2);
+  const { c, g } = makeCanvas(lw + pad * 2, lh + pad * 2, RS);
   for (const [dx, dy] of [
     [-r, 0], [r, 0], [0, -r], [0, r],
     [-r, -r], [r, -r], [-r, r], [r, r],
   ]) {
-    g.drawImage(sil.c, pad + dx, pad + dy);
+    blit(g, sil.c, pad + dx, pad + dy);
   }
   g.globalCompositeOperation = 'destination-out';
-  g.drawImage(sil.c, pad, pad);
+  blit(g, sil.c, pad, pad);
   g.globalCompositeOperation = 'source-over';
 
   cached = { img: c, pad };
@@ -148,7 +149,7 @@ export function makeProp(w, d, h, draw, pad = 6) {
   const ch = Math.ceil(2 * s * HH + h * TILE_Z) + pad * 2;
   const ox = pad + s * HW;
   const oy = pad + s * HH + h * TILE_Z;
-  const { c, g } = makeCanvas(cw, ch);
+  const { c, g } = makeCanvas(cw, ch, RS);
   draw(g, ox, oy);
   resetT(g);
   return { img: c, ox, oy, w, d, h };

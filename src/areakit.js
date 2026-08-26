@@ -1,6 +1,6 @@
-import { HW, HH, TILE_W, TILE_Z, WALL_H } from './config.js';
+import { HW, HH, TILE_W, TILE_Z, WALL_H, RS } from './config.js';
 import { boundsFor, camFor } from './iso.js';
-import { makeCanvas, mulberry32, shade } from './util.js';
+import { makeCanvas, mulberry32, shade, baseT, localT } from './util.js';
 
 export const PAD = 10;
 
@@ -10,18 +10,18 @@ export const PAD = 10;
 
 /** 地面：1 瓦片 = TILE_W 像素的正方形 */
 export function floorT(g, ox, oy) {
-  g.setTransform(HW / TILE_W, HH / TILE_W, -HW / TILE_W, HH / TILE_W, ox, oy);
+  localT(g, HW / TILE_W, HH / TILE_W, -HW / TILE_W, HH / TILE_W, ox, oy);
 }
 /** 远侧长墙（y=0），u 沿 +x，v 自墙顶向下 */
 export function northT(g, ox, oy, wallH = WALL_H) {
-  g.setTransform(HW / TILE_W, HH / TILE_W, 0, 1, ox, oy - wallH * TILE_Z);
+  localT(g, HW / TILE_W, HH / TILE_W, 0, 1, ox, oy - wallH * TILE_Z);
 }
 export function northPt(u, v, ox, oy, wallH = WALL_H) {
   return { x: ox + (u * HW) / TILE_W, y: oy - wallH * TILE_Z + (u * HH) / TILE_W + v };
 }
 /** 左端墙（x=0），u 沿 +y */
 export function westT(g, ox, oy, wallH = WALL_H) {
-  g.setTransform(-HW / TILE_W, HH / TILE_W, 0, 1, ox, oy - wallH * TILE_Z);
+  localT(g, -HW / TILE_W, HH / TILE_W, 0, 1, ox, oy - wallH * TILE_Z);
 }
 /**
  * 右端墙（x=w），u 沿 +y，v 自墙顶向下。
@@ -29,7 +29,7 @@ export function westT(g, ox, oy, wallH = WALL_H) {
  * 而且要画进前景层（a.fg）或明确接受被角色压住。
  */
 export function eastT(g, ox, oy, roomW, wallH = WALL_H) {
-  g.setTransform(-HW / TILE_W, HH / TILE_W, 0, 1, ox + roomW * HW, oy + roomW * HH - wallH * TILE_Z);
+  localT(g, -HW / TILE_W, HH / TILE_W, 0, 1, ox + roomW * HW, oy + roomW * HH - wallH * TILE_Z);
 }
 export function eastPt(u, v, ox, oy, roomW, wallH = WALL_H) {
   return {
@@ -39,11 +39,9 @@ export function eastPt(u, v, ox, oy, roomW, wallH = WALL_H) {
 }
 /** 近侧矮墙（y=H）的内表面，v=0 在地面，向上为负 */
 export function southT(g, ox, oy, roomH) {
-  g.setTransform(HW / TILE_W, HH / TILE_W, 0, 1, ox - roomH * HW, oy + roomH * HH);
+  localT(g, HW / TILE_W, HH / TILE_W, 0, 1, ox - roomH * HW, oy + roomH * HH);
 }
-export function resetT(g) {
-  g.setTransform(1, 0, 0, 1, 0, 0);
-}
+export const resetT = baseT;
 export function pt(ox, oy, x, y, z = 0) {
   return { x: ox + (x - y) * HW, y: oy + (x + y) * HH - z * TILE_Z };
 }
@@ -578,7 +576,7 @@ export function doorBay(g, u0, u1, rand, th, opts = {}, wallH = WALL_H) {
 export function newArea(id, name, w, h, wallH = WALL_H) {
   const bounds = boundsFor(w, h, wallH);
   const cam = camFor(bounds);
-  const { c, g } = makeCanvas(bounds.w + PAD * 2, bounds.h + PAD * 2);
+  const { c, g } = makeCanvas(bounds.w + PAD * 2, bounds.h + PAD * 2, RS);
   const sox = -bounds.x0 + PAD;
   const soy = -bounds.y0 + PAD;
   return {
