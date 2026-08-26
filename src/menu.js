@@ -17,7 +17,7 @@
  * 静态层与光照贴图就要再被放大一轮，等于退回低分辨率再吹大。
  */
 
-import { VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, pixelScale, withPixelBoost } from './config.js';
+import { VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, ART_TEXEL, pixelScale, withPixelBoost } from './config.js';
 import * as A from './art.js';
 import {
   newArea, closeArea, paintFloor, wallBase, wallPipes, doorBay,
@@ -399,8 +399,11 @@ function buildScene() {
  * 每帧
  * ------------------------------------------------------------------ */
 
-/** 人物的暂存框：脚底是锚点，上方留够站姿与举起来的手 */
-const CHAR_BOX = { w: 96, h: 112, ax: 48, ay: 88 };
+/**
+ * 人物的暂存框：脚底是锚点，上方留够站姿与举起来的手。
+ * grid 跟这一幕的静态层一样是 SCALE 倍（整幕放大 SCALE，纹素才和游戏里等大）。
+ */
+const CHAR_BOX = { w: 96, h: 112, ax: 48, ay: 88, grid: SCALE * ART_TEXEL };
 
 function sc(cam, x, y, z = 0) {
   return { x: cam.x + (x - y) * HW, y: cam.y + (x + y) * HH - z * TILE_Z };

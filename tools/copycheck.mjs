@@ -40,6 +40,16 @@ console.log('menu buttons:', menu.buttons);
 console.log('menu 多余节点:', menu.nodes);
 console.log('menu 中点   :', menu.text.includes('·'));
 
+const pause = await page.evaluate(() => {
+  const p = document.querySelector('#pause');
+  return {
+    buttons: Array.from(p.querySelectorAll('.p-btn')).map((b) => b.textContent.trim()),
+    text: p.textContent.replace(/\s+/g, ' ').trim(),
+  };
+});
+console.log('pause buttons:', pause.buttons);
+console.log('pause 中点   :', pause.text.includes('·'), '英文:', /[A-Za-z]/.test(pause.text));
+
 const ending = await page.evaluate(() => {
   const e = document.querySelector('#ending');
   return { text: e.textContent.replace(/\s+/g, ' ').trim(), children: e.children.length };

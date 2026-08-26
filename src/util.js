@@ -124,14 +124,16 @@ function scratchFor(key, a, lw, lh) {
  * 精灵必须落在这个框里，超出的部分会被裁掉。
  * draw(g2, ax, ay) 里的写法跟直接画在目标上完全一样，只是原点换了。
  *
- * 纹素倍率是从目标的基础变换反推的：主菜单那一幕整帧放大 2 倍，
- * 暂存画布也得跟着抬到 2 倍，屏幕上的纹素才和游戏里一样大。
+ * box.grid 指定纹素网格，默认跟同场景那些预生成的精灵一致（artScale）。
+ * 主菜单整幕放大 2 倍，那一幕的静态层与道具也是按 2 倍烘的，所以它传 2。
+ * 注意**不要**跟着 QTE 的近景变焦走：变焦是整帧一起放大的，地板与道具的
+ * 纹素本来就会跟着变大，角色也得一起变大才不会显得比周围精细一档。
  *
  * 返回 { value, dx, dy }：value 是 draw 的返回值，dx/dy 用来把暂存画布里
  * 算出来的坐标（比如手的位置）换算回目标空间。
  */
 export function pixelSprite(g, x, y, box, draw) {
-  const a = Math.max(1, Math.round(((g.baseT ? g.baseT[0] : pixelScale()) / pixelScale()) * artScale()));
+  const a = Math.max(1, Math.round(box.grid || artScale()));
   const s = scratchFor(a + ':' + depth, a, box.w, box.h);
   baseT(s.g);
   s.g.clearRect(0, 0, box.w, box.h);
