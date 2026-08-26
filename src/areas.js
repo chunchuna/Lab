@@ -5,7 +5,7 @@ import {
   newArea, closeArea, paintFloor, wallBase, wallPipes, doorBay,
   floorT, northT, northPt, westT, eastT, southT, resetT, pt, THEMES, PAD, mulberry32,
 } from './areakit.js';
-import { makeCanvas, shade } from './util.js';
+import { makeCanvas, makeArtCanvas, shade } from './util.js';
 
 /** 每个敞开的门洞给一盏弱光，让"能看进房间"在暗处也成立 */
 function bayLights(a, bays) {
@@ -101,7 +101,7 @@ function parapetFace(g, len, hTiles, v0, th, rand) {
 /** 近侧矮护墙 + 门框，画在道具之后（前景层） */
 function corridorParapet(a, rand, th, doors, opts = {}) {
   const ph = 0.82; // 高度（瓦片）：够读出"这边也是一排门"，又不挡住走廊地面
-  const { c, g } = makeCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
+  const { c, g } = makeArtCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
   g.save();
   southT(g, a.sox, a.soy, a.h);
   const H = ph * TILE_Z;
@@ -855,7 +855,7 @@ const ROOF_PH = 1.15;
 
 /** 天台近侧（x=w / y=h）的女儿墙，放前景层，压在角色之上 */
 function roofParapetFg(a, rand, th) {
-  const { c, g } = makeCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
+  const { c, g } = makeArtCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
   const ph = 0.98;
   g.save();
   eastT(g, a.sox, a.soy, a.w, a.wallH);

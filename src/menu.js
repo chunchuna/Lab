@@ -25,7 +25,7 @@ import {
 } from './areakit.js';
 import { computeVisibility } from './visibility.js';
 import { Lighting } from './lighting.js';
-import { clamp, flicker, setBase, blit } from './util.js';
+import { clamp, flicker, setBase, blit, pixelSprite } from './util.js';
 
 const SCALE = 2;
 const SW = VIEW_W / SCALE;
@@ -399,6 +399,9 @@ function buildScene() {
  * 每帧
  * ------------------------------------------------------------------ */
 
+/** 人物的暂存框：脚底是锚点，上方留够站姿与举起来的手 */
+const CHAR_BOX = { w: 96, h: 112, ax: 48, ay: 88 };
+
 function sc(cam, x, y, z = 0) {
   return { x: cam.x + (x - y) * HW, y: cam.y + (x + y) * HH - z * TILE_Z };
 }
@@ -533,9 +536,10 @@ export function drawMenuScene(ctx, t) {
   items.sort((m, n) => m.k - n.k);
 
   for (const it of items) {
+    // 人物跟游戏里一样先落到纹素网格上，再最近邻贴回来
     if (it.c) {
       const p = sc(cam, it.c.x, it.c.y);
-      A.drawStaff(ctx, Math.round(p.x), Math.round(p.y), { ...it.c, t });
+      pixelSprite(ctx, p.x, p.y, CHAR_BOX, (g2, ax, ay) => A.drawStaff(g2, ax, ay, { ...it.c, t }));
       continue;
     }
     const p = it.p;
@@ -544,7 +548,9 @@ export function drawMenuScene(ctx, t) {
       const cx = Math.round(s.x);
       const cy = Math.round(s.y);
       blit(ctx, p.chamber.back.img, cx - p.chamber.back.ox, cy - p.chamber.back.oy);
-      A.drawSpecimen(ctx, cx + 1, cy - A.CHAMBER_FLOOR_Z * TILE_Z, { t, press });
+      pixelSprite(ctx, cx + 1, cy - A.CHAMBER_FLOOR_Z * TILE_Z, CHAR_BOX, (g2, ax, ay) =>
+        A.drawSpecimen(g2, ax, ay, { t, press }),
+      );
       blit(ctx, p.chamber.front.img, cx - p.chamber.front.ox, cy - p.chamber.front.oy);
       continue;
     }

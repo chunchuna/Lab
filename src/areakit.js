@@ -1,6 +1,6 @@
 import { HW, HH, TILE_W, TILE_Z, WALL_H } from './config.js';
 import { boundsFor, camFor } from './iso.js';
-import { makeCanvas, mulberry32, shade, baseT, localT } from './util.js';
+import { makeArtCanvas, mulberry32, shade, baseT, localT } from './util.js';
 
 export const PAD = 10;
 
@@ -576,7 +576,7 @@ export function doorBay(g, u0, u1, rand, th, opts = {}, wallH = WALL_H) {
 export function newArea(id, name, w, h, wallH = WALL_H) {
   const bounds = boundsFor(w, h, wallH);
   const cam = camFor(bounds);
-  const { c, g } = makeCanvas(bounds.w + PAD * 2, bounds.h + PAD * 2);
+  const { c, g } = makeArtCanvas(bounds.w + PAD * 2, bounds.h + PAD * 2);
   const sox = -bounds.x0 + PAD;
   const soy = -bounds.y0 + PAD;
   return {

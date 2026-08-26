@@ -2,7 +2,7 @@ import { HW, HH, TILE_W, TILE_Z, ROOM_W, ROOM_H, WALL_H } from './config.js';
 import {
   BOUNDS, boundsFor, camFor, floorTransform, wallNorthTransform, wallWestTransform, wallNorthPt,
 } from './iso.js';
-import { makeCanvas, mulberry32, shade } from './util.js';
+import { makeArtCanvas, mulberry32, shade } from './util.js';
 import * as A from './art.js';
 
 const PAD = 10;
@@ -725,7 +725,7 @@ export function buildStatic() {
   const rand = mulberry32(20260824);
   const sox = -BOUNDS.x0 + PAD;
   const soy = -BOUNDS.y0 + PAD;
-  const { c, g } = makeCanvas(BOUNDS.w + PAD * 2, BOUNDS.h + PAD * 2);
+  const { c, g } = makeArtCanvas(BOUNDS.w + PAD * 2, BOUNDS.h + PAD * 2);
   paintFloor(g, sox, soy, rand);
   paintNorthWall(g, sox, soy, rand);
   paintWestWall(g, sox, soy, rand);

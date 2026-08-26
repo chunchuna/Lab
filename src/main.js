@@ -24,7 +24,7 @@ import { initDevcon, toggleDevcon, closeDevcon, isDevconOpen } from './devcon.js
 import {
   pad, initControls, setButton, setPadVisible, endFrameControls, screenDirToWorld,
 } from './controls.js';
-import { clamp, flicker, lerp, makeCanvas, smoothstep, setBase, blit } from './util.js';
+import { clamp, flicker, lerp, makeCanvas, pixelSprite, smoothstep, setBase, blit } from './util.js';
 
 /* 世界直接画在 640N×360N 的像素网格上（4K 时 N=6 → 3840×2160）。
    逻辑坐标仍是 640×360，倍率折进基础变换。#game 的 backing store 就是这张
@@ -2796,8 +2796,11 @@ function playerScale() {
  * 被拽进机舱那几秒改挂到 drawHeli 的舱内图层（否则永远在机身背后）。
  * 两处的坐标系一样（都是世界变换下的画布坐标），所以直接复用。
  */
-function drawPlayerSprite(g, cam, px, py, zOff, bodyRot) {
+function drawPlayerSprite(g, cam, px, py, zOff, bodyRot, off) {
   const p = game.player;
+  // 被拽进机舱那几秒是画在直升机的暂存画布里，锚点要跟着挪
+  const ofx = off ? off.x : 0;
+  const ofy = off ? off.y : 0;
   const s = playerScreen(cam, { x: px, y: py });
   const kick = game.gun.recoil * 1.6;
   const aimS = p.aimScreen || { x: 1, y: 0.5 };
@@ -2807,8 +2810,8 @@ function drawPlayerSprite(g, cam, px, py, zOff, bodyRot) {
   const hipDrop = bodyRot === 0 ? 0 : HIP * Math.min(1, Math.abs(bodyRot / LIE_ROT));
   // 过场里对齐舱口用的屏幕偏移：世界坐标是等距的，横着挪几像素没法用 x/y 表达
   const nd = p.nudge;
-  const fx0 = s.x - aimS.x * kick + (nd ? nd.x : 0);
-  const fy0 = s.y - zOff - aimS.y * kick + hipDrop + (nd ? nd.y : 0);
+  const fx0 = s.x - aimS.x * kick + (nd ? nd.x : 0) + ofx;
+  const fy0 = s.y - zOff - aimS.y * kick + hipDrop + (nd ? nd.y : 0) + ofy;
   let leftItem = game.state === 'play' ? INV.handItem('left') : null;
   let rightItem = game.state === 'play' ? INV.handItem('right') : null;
   /* 搏斗段：手电筒别在腰上不参与，枪在"拔枪"那一拍之前还在枪套里。
@@ -2820,29 +2823,64 @@ function drawPlayerSprite(g, cam, px, py, zOff, bodyRot) {
     leftItem = nearIsRight ? null : gun;
     rightItem = nearIsRight ? gun : null;
   }
-  g.save();
-  if (bodyRot !== 0) {
-    g.translate(fx0, fy0 - HIP);
-    g.rotate(bodyRot);
-    g.translate(-fx0, -(fy0 - HIP));
-  }
-  // 手的屏幕坐标留给舱口士兵：它要伸手抓的就是这个点
-  p.hands = A.drawCharacter(g, fx0, fy0, {
-    scale: playerScale(),
-    aim: aimS,
-    walk: p.walk,
-    moving: p.moving && game.state === 'play',
-    leftItem,
-    rightItem,
-    flashOn: inv.flashOn,
-    eyesShut: game.state === 'wake' && game.phase < 1.5,
-    pose:
-      (game.fight && game.fight.pose) ||
-      (game.cine && game.cine.pose) ||
-      (game.ropeAnim && game.ropeAnim.pose) ||
-      null,
+  /* 角色画在纹素网格上再最近邻贴回来：1.12 倍缩放、绕髋部的旋转、
+     走路的小数位移全在量化之前做完，贴出来是一块块硬边方块，
+     而不是设备像素级的平滑矢量图形。 */
+  const r = pixelSprite(g, fx0, fy0, CHAR_BOX, (gg, ax, ay) => {
+    if (bodyRot !== 0) {
+      gg.save();
+      gg.translate(ax, ay - HIP);
+      gg.rotate(bodyRot);
+      gg.translate(-ax, -(ay - HIP));
+    }
+    const hands = A.drawCharacter(gg, ax, ay, {
+      scale: playerScale(),
+      aim: aimS,
+      walk: p.walk,
+      moving: p.moving && game.state === 'play',
+      leftItem,
+      rightItem,
+      flashOn: inv.flashOn,
+      eyesShut: game.state === 'wake' && game.phase < 1.5,
+      pose:
+        (game.fight && game.fight.pose) ||
+        (game.cine && game.cine.pose) ||
+        (game.ropeAnim && game.ropeAnim.pose) ||
+        null,
+    });
+    if (bodyRot !== 0) gg.restore();
+    return hands;
   });
-  g.restore();
+  // 手的屏幕坐标留给舱口士兵：它要伸手抓的就是这个点。
+  // 算的时候在暂存画布里，得挪回屏幕空间。
+  p.hands = mapSpritePts(r.value, r.dx - ofx, r.dy - ofy);
+}
+
+/**
+ * 角色的暂存框。足底是锚点：上方留够站姿（约 38px）加上举手、
+ * 起床时绕髋部躺平横过来的长度；下方留给影子与下压的姿势。
+ */
+const CHAR_BOX = { w: 120, h: 128, ax: 60, ay: 100 };
+
+/** 丧尸：drawZombie 内部还会按 z.z 抬高，框子上方多留一截 */
+const ZOMBIE_BOX = { w: 96, h: 140, ax: 48, ay: 112 };
+
+/** 直升机：机身中心是锚点，尾梁与桨叶都要框得下（机体单位 × HELI_S） */
+const HELI_BOX = { w: 360, h: 260, ax: 180, ay: 130 };
+
+function drawZombiePix(g, x, y, z) {
+  pixelSprite(g, x, y, ZOMBIE_BOX, (gg, ax, ay) => drawZombie(gg, ax, ay, z));
+}
+
+/** 把暂存画布里算出来的点（手、枪口）挪回目标空间 */
+function mapSpritePts(o, dx, dy) {
+  if (!o) return o;
+  const out = {};
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    out[k] = v && typeof v.x === 'number' ? { x: v.x + dx, y: v.y + dy } : v;
+  }
+  return out;
 }
 
 const ISO_ANG = Math.atan2(HH, HW);
@@ -3361,16 +3399,25 @@ function drawSky(g, cam, px, py, zOff) {
   const drawP = skyPlayer() ? (gg) => drawPlayerSprite(gg, cam, px, py, zOff, 0) : null;
   const inCabin = c && c.inCabin ? drawP : null;
 
-  /* 舱口的接应：手伸下来的程度、抓哪儿、舱门关到什么程度，全由过场时间轴给 */
-  A.drawHeli(g, hx, hy, game.t, {
-    scale: 1,
-    dir: -1,
-    reach: c ? c.reach : undefined,
-    doorShut: c ? c.door : 0,
-    // 抓哪儿：直接用玩家上一帧那只举起来的手（drawCharacter 会把姿势旋转
-    // 也算进去），手套就永远扣在手腕上，不用两边各推一遍位置
-    grabTo: c && game.player.hands ? game.player.hands.left : null,
-    inCabin,
+  /* 舱口的接应：手伸下来的程度、抓哪儿、舱门关到什么程度，全由过场时间轴给。
+     整架机体跟角色一样先落到纹素网格上 —— 机身、桨叶、舱门都是斜的，
+     不量化的话它会是画面里唯一一个平滑矢量物件。 */
+  pixelSprite(g, hx, hy, HELI_BOX, (gg, ax, ay) => {
+    // 舱内的玩家是套在里面画的：抓手点按同样的位移换算回暂存画布
+    const off = { x: ax - Math.round(hx), y: ay - Math.round(hy) };
+    A.drawHeli(gg, ax, ay, game.t, {
+      scale: 1,
+      dir: -1,
+      reach: c ? c.reach : undefined,
+      doorShut: c ? c.door : 0,
+      // 抓哪儿：直接用玩家上一帧那只举起来的手（drawCharacter 会把姿势旋转
+      // 也算进去），手套就永远扣在手腕上，不用两边各推一遍位置
+      grabTo:
+        c && game.player.hands
+          ? { x: game.player.hands.left.x + off.x, y: game.player.hands.left.y + off.y }
+          : null,
+      inCabin: inCabin ? (g2) => drawPlayerSprite(g2, cam, px, py, zOff, 0, off) : null,
+    });
   });
 
   /* 绳索：从舱门绞盘出去，先垂到天台边缘的落点。抓住之后末端跟着人走，
@@ -3509,7 +3556,7 @@ function render() {
       blit(ctx, it.pr.s.img, snap(sx - it.pr.s.ox), snap(sy - it.pr.s.oy));
     } else if (it.z) {
       const zs = { x: cam.x + (it.z.x - it.z.y) * HW, y: cam.y + (it.z.x + it.z.y) * HH };
-      drawZombie(ctx, zs.x, zs.y, it.z, false);
+      drawZombiePix(ctx, zs.x, zs.y, it.z);
     } else if (!p.hidden && !cabinPlayer) {
       drawPlayerSprite(ctx, cam, px, py, zOff, bodyRot);
     }

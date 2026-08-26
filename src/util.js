@@ -1,4 +1,4 @@
-import { pixelScale } from './config.js';
+import { pixelScale, artScale } from './config.js';
 
 export function mulberry32(a) {
   return function () {
@@ -44,8 +44,7 @@ export function shade(hex, amt) {
  * 逻辑尺寸记在 `c.lw / c.lh` 上，`blit` 按它们画，这样叠到同样带 N 变换
  * 的目标上是 1:1，不会再被乘一次。
  */
-export function makeCanvas(w, h) {
-  const n = pixelScale();
+export function makeCanvas(w, h, n = pixelScale()) {
   const c = document.createElement('canvas');
   c.lw = Math.max(1, Math.ceil(w));
   c.lh = Math.max(1, Math.ceil(h));
@@ -83,9 +82,72 @@ export function localT(g, a, b, c, d, e, f) {
   g.transform(a, b, c, d, e, f);
 }
 
+/**
+ * 美术用的离屏画布：分辨率取纹素网格（见 config.js 的 ART_TEXEL），
+ * 比设备像素粗，贴回去时每个纹素是一块实心方块。
+ */
+export function makeArtCanvas(w, h) {
+  return makeCanvas(w, h, artScale());
+}
+
 /** 画一张 makeCanvas 出来的贴图：按它的**逻辑**尺寸画，不按真实像素 */
 export function blit(g, c, x, y) {
   g.drawImage(c, x, y, c.lw || c.width, c.lh || c.height);
+}
+
+/* ------------------------------------------------------------------ *
+ * 每帧现画的东西怎么落到纹素网格上
+ *
+ * 道具那种一次生成、反复贴的精灵直接用 makeArtCanvas 就行。角色不一样：
+ * 姿势、朝向、缩放每帧都变，没法预生成。做法是留一张暂存画布，
+ * 每帧先把角色画在纹素网格上，再最近邻贴回去 —— 1.12 倍缩放、绕髋部旋转
+ * 这些会产生小数边的变换，全都在量化之前完成，贴出来仍然是硬边方块。
+ * ------------------------------------------------------------------ */
+
+/* 暂存画布按「倍率 + 嵌套层数」缓存：直升机那一段是把玩家画进机舱图层里的，
+   内外两次量化不能抢同一张画布。 */
+const scratches = new Map();
+let depth = 0;
+
+function scratchFor(key, a, lw, lh) {
+  const old = scratches.get(key);
+  if (old && old.lw >= lw && old.lh >= lh) return old;
+  const s = makeCanvas(Math.max(lw, old ? old.lw : 0), Math.max(lh, old ? old.lh : 0), a);
+  scratches.set(key, s);
+  return s;
+}
+
+/**
+ * 在纹素网格上画一个精灵，然后贴到 g 的 (x, y)。
+ *
+ * box = { w, h, ax, ay }：暂存画布的逻辑尺寸，以及锚点在画布内的位置；
+ * 精灵必须落在这个框里，超出的部分会被裁掉。
+ * draw(g2, ax, ay) 里的写法跟直接画在目标上完全一样，只是原点换了。
+ *
+ * 纹素倍率是从目标的基础变换反推的：主菜单那一幕整帧放大 2 倍，
+ * 暂存画布也得跟着抬到 2 倍，屏幕上的纹素才和游戏里一样大。
+ *
+ * 返回 { value, dx, dy }：value 是 draw 的返回值，dx/dy 用来把暂存画布里
+ * 算出来的坐标（比如手的位置）换算回目标空间。
+ */
+export function pixelSprite(g, x, y, box, draw) {
+  const a = Math.max(1, Math.round(((g.baseT ? g.baseT[0] : pixelScale()) / pixelScale()) * artScale()));
+  const s = scratchFor(a + ':' + depth, a, box.w, box.h);
+  baseT(s.g);
+  s.g.clearRect(0, 0, box.w, box.h);
+  depth++;
+  let value;
+  try {
+    value = draw(s.g, box.ax, box.ay);
+  } finally {
+    depth--;
+  }
+  baseT(s.g);
+  // 锚点落在整数逻辑格上，纹素边界才对得上设备像素
+  const dx = Math.round(x) - box.ax;
+  const dy = Math.round(y) - box.ay;
+  g.drawImage(s.c, 0, 0, box.w * a, box.h * a, dx, dy, box.w, box.h);
+  return { value, dx, dy };
 }
 
 /** 闪烁函数：返回 0..1 的亮度系数 */

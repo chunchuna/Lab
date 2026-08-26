@@ -1,5 +1,5 @@
 import { HW, HH, TILE_W, TILE_Z } from './config.js';
-import { makeCanvas, mulberry32, shade, baseT, localT, blit } from './util.js';
+import { makeCanvas, makeArtCanvas, mulberry32, shade, baseT, localT, blit } from './util.js';
 
 export const PAL = {
   floor: '#343b40',
@@ -121,14 +121,16 @@ export function outlineRing(img, color = '#ded8c8', r = 1) {
 
   const lw = img.lw || img.width;
   const lh = img.lh || img.height;
-  const sil = makeCanvas(lw, lh);
+  // 描边跟着源精灵的网格走：粗细不一致的话，轮廓会比本体细一圈
+  const n = img.pix;
+  const sil = makeCanvas(lw, lh, n);
   blit(sil.g, img, 0, 0);
   sil.g.globalCompositeOperation = 'source-in';
   sil.g.fillStyle = color;
   sil.g.fillRect(0, 0, lw, lh);
 
   const pad = r + 1;
-  const { c, g } = makeCanvas(lw + pad * 2, lh + pad * 2);
+  const { c, g } = makeCanvas(lw + pad * 2, lh + pad * 2, n);
   for (const [dx, dy] of [
     [-r, 0], [r, 0], [0, -r], [0, r],
     [-r, -r], [r, -r], [-r, r], [r, r],
@@ -151,7 +153,7 @@ export function makeProp(w, d, h, draw, pad = 6) {
   const ch = Math.ceil(2 * s * HH + h * TILE_Z) + pad * 2;
   const ox = pad + s * HW;
   const oy = pad + s * HH + h * TILE_Z;
-  const { c, g } = makeCanvas(cw, ch);
+  const { c, g } = makeArtCanvas(cw, ch);
   draw(g, ox, oy);
   resetT(g);
   return { img: c, ox, oy, w, d, h };
