@@ -2402,7 +2402,7 @@ function updateCine(dt) {
   } else if (T < CINE.in) {
     // --- HAUL：整个人被拖进舱门，绳索同时回收
     const k = smoothstep((T - CINE.haul) / (CINE.in - CINE.haul));
-    c.reach = 1 - k * 0.45;
+    c.reach = 1; // 手一直扣着，是这只手把人拖进去的，中途松开就白演了
     /* 上半身越过门槛的那一刻换图层：在这之前人还吊在机外（画在世界层，
        跟雨夜一起被压暗、又刚好被机腹挡住一点头顶），之后整个人在舱内。 */
     if (k > 0.35) c.inCabin = true;
@@ -2416,9 +2416,10 @@ function updateCine(dt) {
       crouch: -1 + k * 8,
       sink: k * 1.5,
       lean: -0.32 + k * 0.5,
+      // 被抓的那只手一直吊在上面，另一只手先落地撑住
       arms: {
-        far: { x: 7.7 - k * 5.2, y: -15.5 + k * 12 },
-        near: { x: 2.0 - k * 5.0, y: -13.9 + k * 15 },
+        far: { x: 7.7 - k * 3.4, y: -15.5 + k * 4.5 },
+        near: { x: 2.0 - k * 5.4, y: -13.9 + k * 15 },
       },
       legs: { a: -4.4 + k * 3, b: 3.3 - k * 2, la: 4 - k * 4, lb: 1.5 - k * 1.5 },
     };
@@ -2430,7 +2431,7 @@ function updateCine(dt) {
   } else {
     // --- IN / AWAY：人在舱里瘫着，绳收完、门滑上，机头一压离场
     const k = smoothstep(clamp((T - CINE.in) / 0.7, 0, 1));
-    c.reach = 0.55 * (1 - k);
+    c.reach = 1 - k; // 人到地板上了，士兵这才松手坐回门槛
     c.retract = 1;
     c.inCabin = true;
     c.door = smoothstep(clamp((T - CINE.in - 0.2) / 0.9, 0, 1));
@@ -3072,7 +3073,7 @@ function drawSky(g, cam, px, py, zOff) {
     doorShut: c ? c.door : 0,
     // 抓哪儿：直接用玩家上一帧那只举起来的手（drawCharacter 会把姿势旋转
     // 也算进去），手套就永远扣在手腕上，不用两边各推一遍位置
-    grabTo: c && c.reach > 0.35 && game.player.hands ? game.player.hands.left : null,
+    grabTo: c && game.player.hands ? game.player.hands.left : null,
     inCabin,
   });
 
