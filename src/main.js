@@ -2042,6 +2042,15 @@ function render() {
   // 角色周围的一点自体可见度，避免完全隐入黑暗
   lighting.add({ x: litX, y: litY, r: 1.7, color: [150, 168, 178], power: 0.12, vis: pvis, cam, blur: 2.5 });
 
+  // 搏斗 QTE：给扭打处补一盏小的动态光。雨夜的天台本来就黑，近景又把手电
+  // 的光锥推出了画面，不补光的话这一段只剩两团黑影在动。
+  if (game.qte && game.qte.id === 'fight' && game.tentZ && !game.tentZ.dead) {
+    const z = game.tentZ;
+    lighting.add({
+      x: (px + z.x) / 2, y: (py + z.y) / 2, r: 3.6, color: [226, 214, 188], power: 0.6, vis: pvis, cam, blur: 2.2,
+    });
+  }
+
   // 手电筒
   const flashHand = INV.equipped('flashlight');
   if (game.state !== 'wake' && flashHand && inv.flashOn) {

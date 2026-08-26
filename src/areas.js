@@ -788,21 +788,14 @@ function buildRoof() {
   a.lights.push({ id: 'city2', x: 12.5, y: 8.0, z: 0, r: 10, color: [70, 94, 122], power: 0.14, seed: 6.4, mode: 5 });
 
   a.spawns.fromStair = { x: 1.9, y: ROOF.door.y };
-  a.links.push({
-    x: ROOF.door.x,
-    y: ROOF.door.y,
-    r: 1.5,
-    to: 'stairRoof',
-    spawn: 'fromRoof',
-    text: '回到楼梯间',
-    short: '下楼',
-    roofDoor: true,
-    anchor: { x: 0.15, y: ROOF.door.y, z: 2.4 },
-  });
+  /* 这里**故意不放 link**：楼道门上的互动只有"锁死"一个动作（见 main.js 的
+     roofInteract）。同一个位置既能锁门又能下楼的话，E 会变成两义的 —— 而且
+     对讲机刚交代过"上去以后先把楼道门锁死"，天台本来就是单向的。 */
 
   a.fg = roofParapetFg(a, rand, th);
   a.storm = true;
-  a.ambient = 'rgba(30,46,64,0.045)';
+  // 露天但没有月亮：比室内更冷、更暗，又不能暗到找不到帐篷（玩家有手电）
+  a.ambient = 'rgba(34,52,72,0.07)';
   a.dark = 'rgba(2,4,7,1)';
   a.roof = ROOF;
   return closeArea(a);
