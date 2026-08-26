@@ -35,10 +35,10 @@ export class Horde {
   }
 
   spawnOne(x, y, opt = {}) {
-    this.list.push({
+    const z = {
       x,
       y,
-      hp: 2 + (Math.random() < 0.35 ? 1 : 0),
+      hp: opt.hp || 2 + (Math.random() < 0.35 ? 1 : 0),
       spd: (opt.fast ? 2.95 : 2.0) + Math.random() * 0.7,
       walk: Math.random() * 6,
       hurt: 0,
@@ -53,7 +53,12 @@ export class Horde {
       // 面朝方向（屏幕空间单位向量），决定画正面还是背面
       face: { x: 1, y: 0.5 },
       z: 0,
-    });
+      // 爬出来的过场：emerge 秒内只做"从地面/帐篷里钻出"的动画，不移动也不咬人
+      emerge: opt.emerge || 0,
+      emergeMax: opt.emerge || 0,
+    };
+    this.list.push(z);
+    return z;
   }
 
   get alive() {
@@ -84,6 +89,11 @@ export class Horde {
       }
       z.hurt = Math.max(0, z.hurt - dt * 3);
       z.biteCd = Math.max(0, z.biteCd - dt);
+      if (z.emerge > 0) {
+        z.emerge = Math.max(0, z.emerge - dt);
+        z.walk += dt * 3.2;
+        continue;
+      }
 
       let dx = player.x - z.x;
       let dy = player.y - z.y;
@@ -209,6 +219,23 @@ export function drawZombie(g, sx, sy, z) {
     return;
   }
 
+  // 钻出来：整体往下压，再裁掉脚线以下，看起来像从帐篷/地面里爬出
+  if (z.emerge > 0 && z.emergeMax > 0) {
+    const k = z.emerge / z.emergeMax; // 1 刚开始 → 0 完全站起
+    g.save();
+    g.beginPath();
+    g.rect(x - 18, y - 40, 36, 42);
+    g.clip();
+    g.translate(0, k * 28);
+    drawZombieBody(g, x, y, z);
+    g.restore();
+    return;
+  }
+
+  drawZombieBody(g, x, y, z);
+}
+
+function drawZombieBody(g, x, y, z) {
   // 面朝：屏幕方向决定朝左还是朝右、正面还是背面
   const f = z.face || { x: 1, y: 0.5 };
   const dir = f.x >= 0 ? 1 : -1;

@@ -11,7 +11,7 @@ import { getArea, EXIT_SIGN } from './areas.js';
 import { Horde, drawZombie } from './zombies.js';
 import { computeVisibility, computeVisibilityCone, raycast, lineOfSight } from './visibility.js';
 import { Lighting } from './lighting.js';
-import { FX } from './fx.js';
+import { FX, Rain } from './fx.js';
 import * as A from './art.js';
 import * as UI from './ui.js';
 import * as SFX from './audio.js';
@@ -30,7 +30,9 @@ ctx.imageSmoothingEnabled = false;
 const stage = document.getElementById('stage');
 
 const lighting = new Lighting();
+const AMBIENT_DEFAULT = lighting.ambient;
 const fx = new FX();
+const rain = new Rain();
 const horde = new Horde();
 
 const BED_TOP = 0.86;
@@ -40,7 +42,7 @@ let area = getArea('lab');
 
 const game = {
   t: 0,
-  state: 'title', // title | wake | play | scan | dead
+  state: 'title', // title | wake | play | scan | dead | cine | end
   phase: 0,
   shake: 0,
   flash: 0,
@@ -59,8 +61,23 @@ const game = {
   areaT: 0, // 进入当前区域后的时间，用来驱动定时事件
   hordeReleased: false,
   doomed: 0,
-  radioStep: -1,
-  radioT: 0,
+  /** 对讲机剧情：进 312 自动呼叫，玩家应答后才播完整段 */
+  radio: { phase: 'idle', step: 0, t: 0, done: false },
+  /** 死了从哪重来：一层剧情杀回楼梯间，天台 QTE 失败回 312 重听对讲机 */
+  checkpoint: 'stair',
+  /** 天台流程：arrive → fight → clear → heli → rope → cine → done */
+  roofPhase: 'arrive',
+  roofT: 0,
+  roofDoorLocked: false,
+  tentZ: null,
+  rope: null,
+  heli: null,
+  storm: null,
+  qte: null,
+  // 近景 QTE 用的整帧变焦。1 = 正常
+  zoom: 1,
+  zoomTarget: 1,
+  zoomAt: null,
 };
 
 /**
@@ -92,6 +109,12 @@ initInput(stage, (k) => {
   }
   if (game.state !== 'play') return;
 
+  // QTE 期间键盘只喂给 QTE，别顺手开背包 / 换弹把节奏打断
+  if (game.qte) {
+    qteKey(k);
+    return;
+  }
+
   if (k === 'i' || k === 'b' || k === 'tab') toggleBag();
   else if (k === 'escape' && game.bagOpen) toggleBag();
   else if (k === 'v') toggleLOS();
@@ -116,6 +139,7 @@ function doAction(act) {
     return;
   }
   if (game.state !== 'play') return;
+  if (game.qte) return;
   if (act === 'bag') toggleBag();
   else if (game.bagOpen) return;
   else if (act === 'interact') tryInteract();
@@ -181,10 +205,40 @@ function enterArea(id, spawnName) {
   UI.setPrompt(null);
   fx.decals.length = 0;
   horde.clear();
-  if (id !== 'corr2') game.radioStep = id === 'dorm312' ? -1 : game.radioStep;
+  endQTE();
+  game.zoom = 1;
+  game.zoomTarget = 1;
+  game.zoomAt = null;
+  game.tentZ = null;
+  game.rope = null;
+  game.heli = null;
+  game.cine = null;
+  game.roofSaidHint = false;
+
+  // 对讲机：进 312 且剧情没走完就自动呼叫；走开就别再喊了。
+  // 注意别每次进 312 都把进度打回起点，只有天台失败重生才重置（见 respawn）。
+  if (id === 'dorm312') {
+    if (!game.radio.done) startRadioCall();
+  } else if (game.radio.phase === 'call' || game.radio.phase === 'talk') {
+    game.radio.phase = 'idle';
+  }
+
+  if (id === 'roof') {
+    game.checkpoint = 'radio312';
+    game.roofPhase = 'arrive';
+    game.roofT = 0;
+    game.roofDoorLocked = false;
+    startStorm();
+  } else {
+    if (id !== 'stairRoof') game.checkpoint = 'stair';
+    stopStorm();
+  }
+
   UI.msg(area.name, 'good');
   SFX.sfxThud();
-  game.shake = 1.6;
+  /* 换区不再抖屏。之前这里会 game.shake = 1.6，而抖动偏移在渲染里是浮点：
+     静态层/道具各自 Math.round，烘焙光用未取整的偏移，几层各进各的整数格，
+     看起来就是"某些物件在抖"。抖屏只留给枪声、受伤、门坏、闪电。 */
 }
 
 function startWake() {
@@ -278,6 +332,10 @@ function currentInteract() {
   for (const lk of area.links) {
     if (lk.needsDoorOpen && !game.door.broken) continue;
     if (dist(p.x, p.y, lk.x, lk.y) > lk.r) continue;
+    // 天台楼梯的门：对讲机剧情走完前锁着，只给提示不给按键
+    if (lk.needsRadio && !game.radio.done) {
+      return { id: 'locked', hint: true, text: lk.lockedText || '这扇门锁着', anchor: lk.anchor };
+    }
     return { id: 'link', link: lk, text: lk.text, short: lk.short, anchor: lk.anchor, target: lk.target };
   }
   // 纯提示（楼梯这类走过去就触发的，不需要按键）
@@ -289,15 +347,16 @@ function currentInteract() {
     }
   }
   if (area.id !== 'lab') {
-    if (area.radio && dist(p.x, p.y, area.radio.x, area.radio.y + 0.9) < 1.5 && game.radioStep < 0) {
+    if (area.radio && dist(p.x, p.y, area.radio.x, area.radio.y + 0.9) < 1.5 && game.radio.phase === 'call') {
       return {
         id: 'radio',
-        text: '拿起对讲机',
-        short: '对讲机',
+        text: '拿起对讲机回话',
+        short: '回话',
         target: 'desk',
         anchor: { x: area.radio.x, y: area.radio.y, z: 1.5 },
       };
     }
+    if (area.roof) return roofInteract(p);
     return null;
   }
 
@@ -337,6 +396,35 @@ function currentInteract() {
   return null;
 }
 
+/** 天台上的三个互动点：楼道门、帐篷、绳索 */
+function roofInteract(p) {
+  const r = area.roof;
+  if (dist(p.x, p.y, r.door.x, r.door.y) < 1.6) {
+    if (!game.roofDoorLocked) {
+      return {
+        id: 'lockRoofDoor',
+        text: '把楼道门锁死',
+        short: '锁门',
+        anchor: { x: 0.15, y: r.door.y, z: 2.3 },
+      };
+    }
+    return { id: 'roofDoorLocked', hint: true, text: '门已经从里面锁死了', anchor: { x: 0.15, y: r.door.y, z: 2.3 } };
+  }
+  if (game.roofPhase === 'arrive' && dist(p.x, p.y, r.tent.x + 0.5, r.tent.y + 0.4) < 1.8) {
+    return {
+      id: 'tent',
+      text: '掀开帐篷',
+      short: '帐篷',
+      target: 'tent',
+      anchor: { x: r.tent.x, y: r.tent.y, z: 1.6 },
+    };
+  }
+  if (game.roofPhase === 'rope' && game.rope && game.rope.down && dist(p.x, p.y, r.rope.x, r.rope.y + 0.8) < 2.1) {
+    return { id: 'rope', text: '抓住绳索', short: '绳索', anchor: { x: r.rope.x, y: r.rope.y, z: 2.4 } };
+  }
+  return null;
+}
+
 function tryInteract() {
   const it = currentInteract();
   if (!it || it.hint) return;
@@ -345,7 +433,19 @@ function tryInteract() {
     return;
   }
   if (it.id === 'radio') {
-    startRadio();
+    answerRadio();
+    return;
+  }
+  if (it.id === 'lockRoofDoor') {
+    lockRoofDoor();
+    return;
+  }
+  if (it.id === 'tent') {
+    openTent();
+    return;
+  }
+  if (it.id === 'rope') {
+    startRopeQTE();
     return;
   }
   if (it.id === 'doorOpen') {
@@ -361,7 +461,7 @@ function tryInteract() {
     UI.startScan(() => {
       game.state = 'play';
       setPadVisible(true);
-      UI.setObjective('门打不开，在房间里找找别的办法');
+      UI.msg('门打不开……在房间里找找别的办法。', 'warn');
       SFX.sfxThud();
       game.shake = 2.5;
     });
@@ -380,7 +480,7 @@ function tryInteract() {
     INV.addItem('pistol');
     INV.addItem('mag', START_SPARE_MAGS);
     SFX.sfxPickup();
-    UI.setObjective('打开背包（I），把手电筒和手枪拖到左右手');
+    UI.msg('打开背包（I），把手电筒和手枪拖到左右手。');
     setTimeout(() => {
       if (game.state === 'play' && !game.bagOpen) toggleBag();
     }, 700);
@@ -498,7 +598,7 @@ function shootDoor() {
     SFX.sfxServo(false);
     fx.spark(DOOR.cx / TILE_W, 0.05, 1.2, 34, 1.6);
     fx.dust(DOOR.cx / TILE_W, 0.6, 0.4, 12);
-    UI.setObjective('出去看看走廊');
+    UI.msg('门锁被打坏了。出去看看走廊。');
   }
 }
 
@@ -663,6 +763,8 @@ function update(dt) {
 
   game.hurtFlash = Math.max(0, game.hurtFlash - dt * 2.2);
   game.player.invuln = Math.max(0, game.player.invuln - dt);
+  game.zoom = lerp(game.zoom, game.zoomTarget, Math.min(1, dt * 3.4));
+  updateStorm(dt);
 
   // 实验室墙面破损处的电火花
   game.sparkPower = Math.max(0, game.sparkPower - dt * 3.4);
@@ -677,6 +779,13 @@ function update(dt) {
   }
 
   if (game.state === 'title') return;
+  if (game.state === 'end') return;
+
+  if (game.state === 'cine') {
+    updateCine(dt);
+    horde.update(dt, game.player, blocked, area);
+    return;
+  }
 
   if (game.state === 'dead') {
     game.phase += dt;
@@ -718,6 +827,24 @@ function update(dt) {
   if (game.bagOpen) {
     game.player.moving = false;
     game.player.walk = lerp(game.player.walk, 0, Math.min(1, dt * 10));
+    return;
+  }
+
+  // QTE：锁移动与开火，只跑 QTE 计时和对手的动画
+  if (game.qte) {
+    const p = game.player;
+    p.moving = false;
+    p.walk = lerp(p.walk, 0, Math.min(1, dt * 10));
+    const z = game.tentZ;
+    if (game.qte.id === 'fight' && z && !z.dead) {
+      // 扭打期间被咬不掉血：胜负由 QTE 决定，不是靠 HP
+      p.invuln = Math.max(p.invuln, 0.4);
+      p.aim = Math.atan2(z.y - p.y, z.x - p.x);
+      p.aimScreen = normScreenDir(p.aim);
+      game.zoomAt = { x: (p.x + z.x) / 2, y: (p.y + z.y) / 2 };
+    }
+    updateQTE(dt);
+    horde.update(dt, p, blocked, area);
     return;
   }
 
@@ -783,7 +910,7 @@ function updateAreaEvents(dt) {
   if (area.horde && !game.hordeReleased && game.areaT > area.horde.delay) {
     game.hordeReleased = true;
     horde.release(area.horde.count, { x: area.horde.x, y: area.horde.y }, 0.38);
-    UI.setObjective('往楼梯间退，边退边打');
+    UI.msg('往楼梯间退，边退边打！', 'warn');
     SFX.sfxError();
     game.shake = 3;
   }
@@ -804,41 +931,94 @@ function updateAreaEvents(dt) {
     }
   }
 
-  // 对讲机播报
-  if (game.radioStep >= 0 && game.radioStep < RADIO_LINES.length) {
-    game.radioT -= dt;
-    if (game.radioT <= 0) {
-      const line = RADIO_LINES[game.radioStep];
-      UI.msg(line.t, line.warn ? 'warn' : '');
-      SFX.sfxBeep(line.warn ? 320 : 760, 0.05, 0.07);
-      game.radioT = line.d;
-      game.radioStep++;
-      if (game.radioStep >= RADIO_LINES.length) {
-        UI.setObjective('这里暂时安全');
-      }
+  updateRadio(dt);
+  if (area.roof) updateRoof(dt);
+}
+
+/* ------------------------------------------------------------------ *
+ * 312 的对讲机
+ *
+ * 三个阶段：进屋自动呼喊（循环，等玩家应答）→ 玩家按 E 回话 → 对方交代
+ * 天台 / 直升机 → done。done 之后再进 312 不重播，只留一盏慢闪的指示灯。
+ * ------------------------------------------------------------------ */
+
+/** 没人应答时循环喊的那几句 */
+const RADIO_CALL = [
+  { t: '……沙沙……有谁在这个房间里面吗？', d: 4.4 },
+  { t: '……听得见就回一声。随便说句什么都行……', d: 4.8 },
+  { t: '……沙沙……还有活着的人吗……', d: 4.6 },
+];
+
+/** 玩家应答之后的完整对话 */
+const RADIO_TALK = [
+  { t: '（我拿起对讲机）我在。我是从二层上来的。', d: 3.4, me: true },
+  { t: '……天啊，真的有人。别放下，听我说完。', d: 3.6 },
+  { t: '别去一层。一层全是它们，下去就上不来了。', d: 3.8, warn: true },
+  { t: '往上走。四楼天台，那是唯一还能接人的地方。', d: 4.0 },
+  { t: '我们有一架直升机，它会去天台上空。', d: 3.8 },
+  { t: '上去以后先把楼道门锁死，然后等绳索放下来。', d: 4.2 },
+  { t: '……沙沙……（信号断了）', d: 2.8 },
+  { t: '（走廊东头那道门。天台。）', d: 3.0, me: true },
+];
+
+function startRadioCall() {
+  const r = game.radio;
+  if (r.done) return;
+  r.phase = 'call';
+  r.step = 0;
+  r.t = 1.3;
+}
+
+function answerRadio() {
+  const r = game.radio;
+  if (r.phase !== 'call') return;
+  r.phase = 'talk';
+  r.step = 0;
+  r.t = 0.35;
+  SFX.sfxClick();
+  SFX.sfxStatic(0.5, 0.14);
+}
+
+function updateRadio(dt) {
+  const r = game.radio;
+  if (r.phase === 'call') {
+    r.t -= dt;
+    if (r.t > 0) return;
+    const line = RADIO_CALL[r.step % RADIO_CALL.length];
+    UI.msg(line.t);
+    SFX.sfxStatic(0.34, 0.1);
+    SFX.sfxBeep(660, 0.05, 0.05);
+    r.t = line.d;
+    r.step++;
+  } else if (r.phase === 'talk') {
+    r.t -= dt;
+    if (r.t > 0) return;
+    const line = RADIO_TALK[r.step];
+    UI.msg(line.t, line.warn ? 'warn' : '');
+    if (!line.me) {
+      SFX.sfxStatic(0.3, 0.09);
+      SFX.sfxBeep(line.warn ? 320 : 760, 0.05, 0.06);
+    }
+    r.t = line.d;
+    r.step++;
+    if (r.step >= RADIO_TALK.length) {
+      r.phase = 'done';
+      r.done = true;
     }
   }
 }
 
-const RADIO_LINES = [
-  { t: '……沙沙……有人吗？还有人在听吗……', d: 3.4 },
-  { t: '这里是三层，312。我把门堵住了，撑不了太久。', d: 3.6 },
-  { t: '别去一层。一层全是它们。', d: 3.4, warn: true },
-  { t: '……如果你能到天台……信号塔那边还有一条路……', d: 3.8 },
-  { t: '……沙沙……（信号断了）', d: 2.6 },
-];
-
-function startRadio() {
-  game.radioStep = 0;
-  game.radioT = 0.4;
-  SFX.sfxClick();
-}
+/* ------------------------------------------------------------------ *
+ * 死亡与重生
+ * ------------------------------------------------------------------ */
 
 function die() {
   if (game.state === 'dead') return;
   game.state = 'dead';
   game.phase = 0;
   game.shake = 8;
+  game.zoomTarget = 1;
+  endQTE();
   SFX.sfxThud();
   UI.setPrompt(null);
   setPadVisible(false);
@@ -855,13 +1035,393 @@ function respawn() {
   setPadVisible(true);
   horde.clear();
   game.trans = null;
-  // 一律回到楼梯间
-  enterArea('stair', 'respawn');
+  if (game.checkpoint === 'radio312') {
+    // 天台上死掉：回 312，对讲机那段从头再来（自动呼喊也会重新开始）
+    game.radio = { phase: 'idle', step: 0, t: 0, done: false };
+    game.roofPhase = 'arrive';
+    game.roofDoorLocked = false;
+    enterArea('dorm312', 'enter');
+  } else {
+    enterArea('stair', 'respawn');
+  }
   game.trans = { to: null, spawn: null, t: 0, phase: 'in' };
   game.gun.mag = MAG_SIZE;
   if (INV.countItem('mag') < 1) INV.addItem('mag', 1);
-  UI.setObjective('再想想该往哪走');
   syncHUD();
+}
+
+/* ------------------------------------------------------------------ *
+ * 暴雨与闪电
+ *
+ * 雨是屏幕空间粒子，画在光照之后（见 render）。闪电走 lighting.addFlat
+ * 加一次短抖屏，雷声按距离延迟若干秒再响。
+ * ------------------------------------------------------------------ */
+
+function startStorm() {
+  rain.setOn(true);
+  game.storm = { next: 2.6 + Math.random() * 3, flash: 0, thunder: -1, near: 0.6 };
+  SFX.setRain(true);
+}
+
+function stopStorm() {
+  if (!game.storm) return;
+  rain.setOn(false);
+  game.storm = null;
+  SFX.setRain(false);
+  SFX.setRotor(0);
+}
+
+function updateStorm(dt) {
+  const s = game.storm;
+  if (!s) return;
+  rain.update(dt);
+  s.flash = Math.max(0, s.flash - dt * 3.1);
+  s.next -= dt;
+  if (s.next <= 0) {
+    s.near = Math.random();
+    s.next = 5.5 + Math.random() * 9;
+    s.flash = 1;
+    game.shake = Math.max(game.shake, 1.4 + s.near * 2.6);
+    s.thunder = 0.3 + (1 - s.near) * 2.4; // 越远的雷，声音来得越晚
+  }
+  if (s.thunder > 0) {
+    s.thunder -= dt;
+    if (s.thunder <= 0) {
+      SFX.sfxThunder(s.near);
+      s.thunder = -1;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * QTE
+ *
+ * 只走键盘：面板、按键提示、限时条都是 DOM（见 index.html 的 #qte）。
+ * QTE 期间锁移动与开火，键盘输入全部转给 qteKey。
+ * ------------------------------------------------------------------ */
+
+const QTE_POOL = ['e', 'f', 'r', 'q', 'a', 'd', 'w', ' '];
+
+function randKeys(n, pool) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let k = pool[(Math.random() * pool.length) | 0];
+    if (k === out[out.length - 1]) k = pool[(pool.indexOf(k) + 1) % pool.length];
+    out.push(k);
+  }
+  return out;
+}
+
+function startQTE(o) {
+  game.qte = {
+    id: o.id,
+    seq: o.seq,
+    idx: 0,
+    window: o.window,
+    t: o.window,
+    over: 0,
+    failed: false,
+    onWin: o.onWin,
+    onFail: o.onFail,
+  };
+  UI.showQTE(o.title, o.seq, o.hint);
+  UI.setPrompt(null);
+  game.lastPrompt = '';
+}
+
+function endQTE() {
+  if (!game.qte) return;
+  game.qte = null;
+  UI.hideQTE();
+}
+
+function updateQTE(dt) {
+  const q = game.qte;
+  if (!q) return;
+  if (q.over > 0) {
+    // 成败已定，停半拍再收面板，玩家才看得清自己按到哪一步
+    q.over -= dt;
+    if (q.over <= 0) {
+      const cb = q.failed ? q.onFail : q.onWin;
+      game.qte = null;
+      UI.hideQTE();
+      if (cb) cb();
+    }
+    return;
+  }
+  q.t -= dt;
+  UI.updateQTE(q.idx, q.t / q.window);
+  if (q.t <= 0) qteFail();
+}
+
+/** 无关按键忽略，按错池子里的键才算失手 */
+function qteKey(k) {
+  const q = game.qte;
+  if (!q || q.over > 0) return;
+  if (!QTE_POOL.includes(k)) return;
+  if (k !== q.seq[q.idx]) {
+    qteFail();
+    return;
+  }
+  q.idx++;
+  SFX.sfxBeep(760 + q.idx * 130, 0.04, 0.09);
+  if (q.idx >= q.seq.length) {
+    q.over = 0.3;
+    UI.updateQTE(q.idx, 1);
+    return;
+  }
+  q.window = Math.max(0.58, q.window - 0.06);
+  q.t = q.window;
+  UI.updateQTE(q.idx, 1);
+}
+
+function qteFail() {
+  const q = game.qte;
+  if (!q || q.failed) return;
+  q.failed = true;
+  q.over = 0.55;
+  UI.qteFailed('失手');
+  SFX.sfxError();
+  game.shake = 5.5;
+}
+
+/* ------------------------------------------------------------------ *
+ * 天台流程
+ * arrive（可锁门 / 掀帐篷）→ fight（搏斗 QTE）→ clear（等 5 秒）
+ * → heli（直升机进画）→ rope（走到边缘放绳、抓绳 QTE）→ cine → done
+ * ------------------------------------------------------------------ */
+
+/** 直升机的悬停点（画布坐标）。天台边缘在画面右上，机身停在它斜上方 */
+function heliHover() {
+  const r = area.roof;
+  return {
+    x: area.cam.x + (r.rope.x - r.rope.y) * HW + 44,
+    y: area.cam.y + (r.rope.x + r.rope.y) * HH - 152,
+  };
+}
+
+function lockRoofDoor() {
+  game.roofDoorLocked = true;
+  SFX.sfxServo(false);
+  SFX.sfxThud();
+  game.shake = 2.4;
+  UI.msg('门闩落下。这下谁也上不来了。');
+}
+
+function openTent() {
+  const r = area.roof;
+  game.roofPhase = 'fight';
+  game.roofT = 0;
+  game.shake = 3.2;
+  SFX.sfxThud();
+  fx.dust(r.tent.x, r.tent.y, 0.5, 8);
+  UI.msg('帐篷里有东西——', 'warn');
+  // 从 +x 那侧的开口爬出来，位置要落在帐篷碰撞体外面，否则它会卡住
+  game.tentZ = horde.spawnOne(r.tent.x + 1.5, r.tent.y - 0.1, { emerge: 1.1, hp: 3 });
+}
+
+function startFightQTE() {
+  startQTE({
+    id: 'fight',
+    title: '挣脱',
+    hint: '按下亮起的键 · 慢一步就被它咬穿喉咙',
+    seq: randKeys(5, ['e', 'f', 'r', 'q']),
+    window: 0.95,
+    onWin: winFight,
+    onFail: () => failRoof('它把你按进了积水里。'),
+  });
+  game.zoomTarget = 2.1;
+}
+
+/** 成功：顶着额头一枪 */
+function winFight() {
+  const z = game.tentZ;
+  game.roofPhase = 'clear';
+  game.roofT = 0;
+  if (z) {
+    horde.damage(z, 99);
+    fx.spark(z.x, z.y, 1.4, 6, 0.5);
+    for (let i = 0; i < 18; i++) fx.debris(z.x, z.y, 1.4, 1, '#5a1f1c');
+    fx.decal(z.x, z.y, 0.02, 'floor');
+    fx.decal(z.x + 0.3, z.y + 0.2, 0.02, 'floor');
+  }
+  if (game.gun.mag > 0) game.gun.mag--;
+  game.shake = 6;
+  game.flash = 0.08;
+  SFX.sfxShot();
+  UI.msg('（枪口顶着它的额头。）');
+  game.zoomTarget = 1;
+  game.tentZ = null;
+  syncHUD();
+}
+
+function failRoof(text) {
+  UI.msg(text, 'warn');
+  game.checkpoint = 'radio312';
+  game.zoomTarget = 1;
+  die();
+}
+
+function startHeli() {
+  game.roofPhase = 'heli';
+  game.roofT = 0;
+  game.heli = { t: 0, x: VIEW_W + 190, y: 26, k: 0 };
+  SFX.setRotor(0.3);
+  UI.msg('……雨里有别的声音。');
+}
+
+function startRopeQTE() {
+  startQTE({
+    id: 'rope',
+    title: '抓住绳索',
+    hint: '跟着提示按键 · 最后一下按空格起跳',
+    seq: [...randKeys(3, ['a', 'd', 'w']), ' '],
+    window: 0.95,
+    onWin: startEscapeCine,
+    onFail: () => failRoof('手一滑。风把你甩了回来。'),
+  });
+  game.zoomTarget = 1.65;
+  game.zoomAt = { x: area.roof.rope.x, y: area.roof.rope.y + 0.8 };
+}
+
+function updateRoof(dt) {
+  const r = area.roof;
+  const p = game.player;
+  game.roofT += dt;
+
+  if (game.roofPhase === 'arrive') {
+    if (game.roofT > 1.6 && !game.roofSaidHint) {
+      game.roofSaidHint = true;
+      UI.msg(game.roofDoorLocked ? '天台上只有那顶帐篷。' : '先把楼道门锁死。');
+    }
+    return;
+  }
+
+  if (game.roofPhase === 'fight') {
+    // 等它从帐篷里完全爬出来再进搏斗
+    if (game.roofT > 1.35 && !game.qte) startFightQTE();
+    return;
+  }
+
+  if (game.roofPhase === 'clear') {
+    if (game.roofT > 5) startHeli();
+    return;
+  }
+
+  if (game.roofPhase === 'heli') {
+    const h = game.heli;
+    const hv = heliHover();
+    h.t += dt;
+    h.k = Math.min(1, h.t / 4.6);
+    const k = smoothstep(h.k);
+    h.x = lerp(VIEW_W + 190, hv.x, k);
+    h.y = lerp(26, hv.y, k) + Math.sin(h.t * 1.7) * 2.2;
+    SFX.setRotor(0.25 + 0.75 * k);
+    if (h.k >= 1) {
+      game.roofPhase = 'rope';
+      game.roofT = 0;
+      UI.msg('他们看见我了。到天台边上去。', 'good');
+    }
+    return;
+  }
+
+  if (game.roofPhase === 'rope') {
+    const h = game.heli;
+    const hv = heliHover();
+    h.t += dt;
+    h.x = hv.x + Math.sin(h.t * 0.7) * 3;
+    h.y = hv.y + Math.sin(h.t * 1.7) * 2.4;
+    if (!game.rope) {
+      if (p.x > r.edge.x0 && p.x < r.edge.x1 && p.y < r.edge.y1) {
+        game.rope = { t: 0, down: false };
+        UI.msg('舱门开了。绳索放下来了。', 'good');
+      }
+    } else {
+      game.rope.t += dt;
+      if (!game.rope.down && game.rope.t > 1.3) game.rope.down = true;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 逃脱过场：冲刺 → 起跳 → 抓绳 → 被拉上去 → 序章结束
+ * 这段不接受 WASD，state 切成 'cine'。
+ * ------------------------------------------------------------------ */
+
+const CINE = { run: 1.0, jump: 1.9, pull: 3.9, fadeAt: 4.6, end: 6.4 };
+
+function startEscapeCine() {
+  const p = game.player;
+  game.roofPhase = 'cine';
+  game.state = 'cine';
+  game.zoomTarget = 1;
+  game.cine = { t: 0, x0: p.x, y0: p.y, jumped: false };
+  UI.setPrompt(null);
+  setPadVisible(false);
+}
+
+function updateCine(dt) {
+  const c = game.cine;
+  const p = game.player;
+  const r = area.roof;
+  c.t += dt;
+  const T = c.t;
+  const takeoff = { x: r.rope.x, y: r.rope.y + 1.15 };
+
+  if (T < CINE.run) {
+    const k = smoothstep(T / CINE.run);
+    p.x = lerp(c.x0, takeoff.x, k);
+    p.y = lerp(c.y0, takeoff.y, k);
+    p.z = 0;
+    p.moving = true;
+    p.walk += dt * 11;
+    p.stepT -= dt * 1.6;
+    if (p.stepT <= 0) {
+      p.stepT = 0.24;
+      SFX.sfxStep();
+    }
+  } else if (T < CINE.jump) {
+    const k = (T - CINE.run) / (CINE.jump - CINE.run);
+    if (!c.jumped) {
+      c.jumped = true;
+      SFX.sfxThud();
+      fx.dust(p.x, p.y, 0.05, 8);
+    }
+    p.x = lerp(takeoff.x, r.rope.x, k);
+    p.y = lerp(takeoff.y, r.rope.y - 0.35, k);
+    p.z = Math.sin(k * Math.PI) * 1.6 + k * 0.9;
+    p.moving = false;
+  } else if (T < CINE.pull) {
+    const k = smoothstep((T - CINE.jump) / (CINE.pull - CINE.jump));
+    if (game.rope) game.rope.hold = true;
+    p.z = 2.5 + k * 7.6;
+    p.moving = false;
+  } else {
+    p.z = 10.1 + (T - CINE.pull) * 3.4;
+  }
+  p.aim = Math.atan2(r.rope.y - 2 - p.y, r.rope.x - p.x);
+  p.aimScreen = normScreenDir(p.aim);
+  p.walk = lerp(p.walk, 0, T > CINE.run ? Math.min(1, dt * 6) : 0);
+
+  // 直升机跟着往上抬，绳索一起收
+  const h = game.heli;
+  if (h) {
+    h.t += dt;
+    const hv = heliHover();
+    const up = Math.max(0, T - CINE.jump) * 12;
+    h.x = hv.x + Math.sin(h.t * 0.7) * 3 + Math.max(0, T - CINE.pull) * 26;
+    h.y = hv.y + Math.sin(h.t * 1.7) * 2 - up;
+  }
+  SFX.setRotor(Math.max(0.2, 1 - Math.max(0, T - CINE.pull) * 0.25));
+
+  if (T > CINE.end && game.state !== 'end') {
+    game.state = 'end';
+    game.roofPhase = 'done';
+    stopStorm();
+    UI.showEnding();
+    UI.showCursor(false);
+    game.curShown = false;
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -1215,8 +1775,25 @@ function drawDoorDamage(g, cam) {
   resetTransform(g);
 }
 
+/**
+ * 世界层的基础变换。平时是单位阵；QTE 近景时整帧一起放大 —— 烘焙光贴图与
+ * 遮罩都在未缩放的 640×360 屏幕空间里合成，只有整帧一起缩放，几何和光照
+ * 才不会错开。屏幕空间的东西（雨、字幕遮罩）画之前要自己 setTransform 回单位阵。
+ */
+const viewXform = { s: 1, tx: 0, ty: 0 };
+
+function applyView(g) {
+  g.setTransform(viewXform.s, 0, 0, viewXform.s, viewXform.tx, viewXform.ty);
+}
+
+/** 世界层里那些临时改过变换的绘制收尾用 */
 function resetTransform(g) {
-  g.setTransform(1, 0, 0, 1, 0, 0);
+  applyView(g);
+}
+
+/** 未缩放的画布坐标 -> 实际屏幕像素（跟着当前变焦） */
+function viewPt(x, y) {
+  return { x: x * viewXform.s + viewXform.tx, y: y * viewXform.s + viewXform.ty };
 }
 
 /** 着火房间的火焰。门洞在远墙上，火焰画在门洞位置。 */
@@ -1241,8 +1818,8 @@ function drawFire(g, cam) {
 
 /** 区域里的自发光小物件：安全出口灯、对讲机指示灯 */
 function drawAreaGlow(g, cam) {
-  if (area.id === 'stair') {
-    const s = wallNorthPt(EXIT_SIGN.x * TILE_W, 20, cam.x, cam.y);
+  if (area.exitSign !== undefined) {
+    const s = wallNorthPt(area.exitSign * TILE_W, 20, cam.x, cam.y);
     const k = 0.8 + 0.2 * Math.sin(game.t * 1.4);
     g.fillStyle = `rgba(150,255,180,${0.8 * k})`;
     g.fillRect(s.x - 12, s.y - 4, 24, 8);
@@ -1269,8 +1846,14 @@ function drawAreaGlow(g, cam) {
     g.fillRect(sx - 3, sy - 6, 6, 2);
     g.fillStyle = '#15181a';
     g.fillRect(sx - 1, sy - 11, 1.6, 5);
-    const on = game.radioStep >= 0 && game.radioStep < RADIO_LINES.length;
-    const k = on ? 0.5 + 0.5 * Math.sin(game.t * 14) : 0.35 + 0.2 * Math.sin(game.t * 1.6);
+    // 呼叫/通话时急闪；剧情走完只留一下一下的慢闪
+    const ph = game.radio.phase;
+    const on = ph === 'call' || ph === 'talk';
+    const k = on
+      ? 0.5 + 0.5 * Math.sin(game.t * 14)
+      : game.radio.done
+        ? 0.1 + 0.16 * Math.sin(game.t * 0.9)
+        : 0.35 + 0.2 * Math.sin(game.t * 1.6);
     g.fillStyle = `rgba(120,240,160,${0.5 + 0.5 * k})`;
     g.fillRect(sx + 1, sy - 4, 1.6, 1.6);
     g.globalCompositeOperation = 'lighter';
@@ -1283,15 +1866,83 @@ function drawAreaGlow(g, cam) {
   }
 }
 
+/**
+ * 天空层：直升机、探照灯、垂下的绳索。
+ *
+ * 它们在天上，不参与等距深度排序，也不该被地面光照压黑，所以画在光照之后。
+ * 坐标是画布坐标（跟着 shx/shy 一起挪），但仍在世界变换里画 —— QTE 近景时
+ * 直升机要跟着一起放大，否则天上那架和脚下的天台会各走各的。
+ */
+function drawSky(g, cam, px, py, zOff) {
+  const h = game.heli;
+  if (!h || !area.roof) return;
+  const hx = h.x + (cam.x - area.cam.x);
+  const hy = h.y + (cam.y - area.cam.y);
+  const tx = cam.x + (px - py) * HW;
+  const ty = cam.y + (px + py) * HH - zOff;
+
+  // 探照灯：悬停到位之后才打开，照向玩家
+  if (h.k >= 0.5) {
+    const k = Math.min(1, (h.k - 0.5) / 0.5);
+    A.drawHeliBeam(g, hx - 4, hy + 8, tx, ty, 26, k * (0.75 + 0.25 * Math.sin(game.t * 1.3)));
+  }
+
+  // 绳索：舱门在机身右侧，绳子先垂到天台边缘的落点；抓住之后跟着人走
+  const rp = game.rope;
+  if (rp) {
+    const r = area.roof;
+    let ex;
+    let ey;
+    if (rp.hold) {
+      ex = tx;
+      ey = ty - 4;
+    } else {
+      const gx = cam.x + (r.rope.x - r.rope.y) * HW;
+      const gy = cam.y + (r.rope.x + r.rope.y) * HH;
+      const drop = rp.down ? 1 : smoothstep(clamp(rp.t / 1.3, 0, 1));
+      ex = lerp(hx + 6, gx, drop);
+      ey = lerp(hy + 12, gy, drop);
+    }
+    A.drawRope(g, hx + 6, hy + 10, ex, ey, game.t, rp.hold ? 0.25 : 1);
+  }
+
+  A.drawHeli(g, hx, hy, game.t, { scale: 1, dir: -1 });
+}
+
 function render() {
-  const shx = game.shake > 0.05 ? (Math.random() - 0.5) * game.shake : 0;
-  const shy = game.shake > 0.05 ? (Math.random() - 0.5) * game.shake : 0;
+  /* 镜头抖动对**所有层**用同一套已取整的偏移。以前 shx/shy 是浮点，静态层与
+     道具各自 Math.round，烘焙光贴图又按浮点画，几层各进各的整数格，相对错开
+     1px —— 那就是"换场景后有些物件在抖"的真正原因。 */
+  const amp = game.shake > 0.05 ? game.shake : 0;
+  const shx = amp ? Math.round((Math.random() - 0.5) * amp) : 0;
+  const shy = amp ? Math.round((Math.random() - 0.5) * amp) : 0;
   const cam = { x: area.cam.x + shx, y: area.cam.y + shy };
   const p = game.player;
+
+  // 整帧变焦：QTE 近景时把世界层整体放大，光照与几何才不会错位
+  const zm = game.zoom || 1;
+  if (zm > 1.001) {
+    const f = game.zoomAt
+      ? { x: area.cam.x + (game.zoomAt.x - game.zoomAt.y) * HW, y: area.cam.y + (game.zoomAt.x + game.zoomAt.y) * HH - 14 }
+      : { x: VIEW_W / 2, y: VIEW_H / 2 };
+    // 夹住焦点：视窗跑到 640×360 之外的话，那块没有光照贴图会变成一片死白
+    const hw = VIEW_W / (2 * zm);
+    const hh = VIEW_H / (2 * zm);
+    const fxp = clamp(f.x, hw, VIEW_W - hw);
+    const fyp = clamp(f.y, hh, VIEW_H - hh);
+    viewXform.s = zm;
+    viewXform.tx = VIEW_W / 2 - fxp * zm;
+    viewXform.ty = VIEW_H / 2 - fyp * zm;
+  } else {
+    viewXform.s = 1;
+    viewXform.tx = 0;
+    viewXform.ty = 0;
+  }
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  applyView(ctx);
 
   // 静态图层
   ctx.drawImage(area.statics.img, Math.round(cam.x - area.statics.ox), Math.round(cam.y - area.statics.oy));
@@ -1374,6 +2025,8 @@ function render() {
   const litY = py;
   const pvis = computeVisibility(litX, litY, area.segments);
 
+  // 区域可以自带更暗的环境光（天台的雨夜）
+  lighting.ambient = area.ambient || AMBIENT_DEFAULT;
   lighting.begin();
 
   let buzzLevel = 0;
@@ -1420,6 +2073,22 @@ function render() {
     lighting.add({ x: s.x, y: s.y, r: 2.2, color: [180, 214, 255], power: 0.5 * s.k, vis: pvis, cam, blur: 2 });
   }
 
+  /* 闪电：整帧加亮一次，然后拖一段余辉。走 addFlat 而不是再加一盏点光，
+     省掉一次可见性计算，也不会在地面上留下奇怪的圆形亮斑。 */
+  if (game.storm && game.storm.flash > 0.01) {
+    const k = game.storm.flash;
+    const s = k > 0.78 ? 1 : k / 0.78; // 起手瞬间最亮
+    lighting.addFlat([172, 198, 226], 0.6 * s * s);
+  }
+
+  // 直升机探照灯扫在天台上：只在它悬停之后给
+  if (game.heli && game.heli.k >= 0.55) {
+    const k = (game.heli.k - 0.55) / 0.45;
+    lighting.add({
+      x: px, y: py, r: 5.6, color: [210, 226, 236], power: 0.5 * Math.min(1, k), vis: pvis, cam, blur: 2.4,
+    });
+  }
+
   // losOcclusion 打开时用玩家可见多边形裁剪光照（看不见视野外的东西）；
   // 关闭时只用房间轮廓做裁剪，光线遮挡（阴影）依然保留。
   if (!game.noLight) {
@@ -1428,7 +2097,7 @@ function render() {
       : game.noBake
         ? area.roomVis
         : { tex: area.mask, dx: shx, dy: shy };
-    lighting.finish(ctx, mask, cam);
+    lighting.finish(ctx, mask, cam, area.dark);
   }
 
   /* --- 灯具：外壳 + 亮着的灯管 --- */
@@ -1441,6 +2110,7 @@ function render() {
   drawHighlight(ctx, cam);
   if (area.id === 'lab') drawEmissive(ctx, cam);
   drawAreaGlow(ctx, cam);
+  drawSky(ctx, cam, px, py, zOff);
 
   // 火花闪光的额外辉光
   if (area.id === 'lab' && game.sparkPower > 0.02) {
@@ -1455,6 +2125,19 @@ function render() {
     ctx.fillStyle = grd;
     ctx.fillRect(sp.x - 26, sp.y - 26, 52, 52);
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /* --- 以下是屏幕空间层：不跟着近景变焦缩放 --- */
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // 雨：画在光照之后，所以不会被压黑；两次 stroke，不做 filter: blur()
+  if (game.storm) {
+    rain.draw(ctx, 1 + game.storm.flash * 1.6);
+    // 闪电的那一下在雨幕上也要能看见
+    if (game.storm.flash > 0.02) {
+      ctx.fillStyle = `rgba(196,214,236,${0.14 * game.storm.flash * game.storm.flash})`;
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    }
   }
 
   // 受伤红闪 / 死亡黑幕
@@ -1495,6 +2178,7 @@ function render() {
   // 有枪没枪是同一套形态，只是没枪时更小更淡，避免出现两套不同的准星。
   const armedNow = !!handOf('pistol');
   if (pad.enabled && game.state === 'play' && !game.bagOpen) {
+    applyView(ctx);
     const armed = armedNow;
     const d = armed ? 2.9 : 2.0;
     const rx = px + Math.cos(p.aim) * d;
@@ -1521,15 +2205,16 @@ function render() {
     ctx.fillStyle = '#ded8c8';
     ctx.fillRect(sx - 0.6, sy - 0.6, 1.4 * k, 1.4 * k);
     ctx.restore();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
-  // 互动提示跟随物体：世界坐标 -> 画布坐标 -> 舞台 CSS 像素
+  // 互动提示跟随物体：世界坐标 -> 画布坐标 -> 舞台 CSS 像素。
+  // 画布坐标要先过一遍当前变焦，否则近景时提示会飘在物体外面。
   const it = game.interact;
   if (!pad.enabled && it && it.anchor && !game.bagOpen && game.state === 'play') {
     const an = it.anchor;
-    const ax = cam.x + (an.x - an.y) * HW;
-    const ay = cam.y + (an.x + an.y) * HH - an.z * TILE_Z;
-    UI.setPromptAt(ax * view.scale, ay * view.scale, VIEW_W * view.scale, VIEW_H * view.scale);
+    const a0 = viewPt(cam.x + (an.x - an.y) * HW, cam.y + (an.x + an.y) * HH - an.z * TILE_Z);
+    UI.setPromptAt(a0.x * view.scale, a0.y * view.scale, VIEW_W * view.scale, VIEW_H * view.scale);
   }
 
   // 准星
@@ -1559,7 +2244,6 @@ if (pad.enabled) {
 }
 syncHUD();
 UI.setLosState(game.losOcclusion);
-UI.setObjective('离开这个房间');
 
 let last = performance.now();
 function frame(now) {
@@ -1591,4 +2275,44 @@ window.__skipIntro = () => {
   game.player.y = PLAYER_START.y;
   SFX.initAudio();
   setPadVisible(true);
+};
+
+/* ---- 序章后半段的快进钩子 ----
+ *
+ *   __skipIntro()                 跳过标题与起床
+ *   __goto('dorm312', 'enter')    直接进 312，自动触发对讲机呼叫
+ *   __goto('corr3', 'fromDorm')   312 门口的三层走廊（东端就是天台门）
+ *   __goto('stairRoof', 'fromCorr3')  天台楼梯间，往上走即上天台
+ *   __goto('roof', 'fromStair')   直接上天台（雨、帐篷、直升机都在这里）
+ *
+ * 天台门在对讲机剧情走完前是锁着的。想跳过剧情直接上去，用 __arm() 先把
+ * 装备和 radio.done 一起补齐，或者直接 __toRoof()。
+ */
+
+/** 补齐手电筒 / 手枪 / 弹匣，并把对讲机剧情标记成已完成 */
+window.__arm = () => {
+  if (!INV.has('flashlight')) INV.addItem('flashlight');
+  if (!INV.has('pistol')) INV.addItem('pistol');
+  if (INV.countItem('mag') < START_SPARE_MAGS) INV.addItem('mag', START_SPARE_MAGS);
+  INV.quickEquip('flashlight');
+  INV.quickEquip('pistol');
+  game.door.tried = true;
+  game.door.broken = true;
+  game.radio = { phase: 'done', step: 0, t: 0, done: true };
+  syncHUD();
+};
+
+/** 一步到天台：跳过场 + 补装备 + 跳过对讲机 */
+window.__toRoof = () => {
+  window.__skipIntro();
+  window.__arm();
+  enterArea('roof', 'fromStair');
+};
+
+/** 一步到 312 听对讲机 */
+window.__toRadio = () => {
+  window.__skipIntro();
+  window.__arm();
+  game.radio = { phase: 'idle', step: 0, t: 0, done: false };
+  enterArea('dorm312', 'enter');
 };
