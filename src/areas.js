@@ -959,13 +959,17 @@ function buildRoof() {
      房间那块由 main.js 的 ensureAreaLights 用房间遮罩抠掉。 */
   a.noMask = true;
   a.skyPaint = (sg) => {
+    /* 亮度集中在地平线那一条：往上是夜空，往下迅速掉进楼下的黑。
+       下半段压得狠一点 —— 天台之所以看起来"很高"，靠的就是边缘之外那一片
+       什么都看不清的深黑，而不是一层均匀的蓝雾。 */
     const gr = sg.createLinearGradient(0, 0, 0, VIEW_H);
-    gr.addColorStop(0, 'rgba(58,80,112,0.34)');
-    gr.addColorStop(horizon / VIEW_H - 0.06, 'rgba(92,120,158,0.62)');
-    gr.addColorStop(horizon / VIEW_H + 0.04, 'rgba(78,102,134,0.7)');
-    gr.addColorStop(0.55, 'rgba(44,62,88,0.34)');
-    gr.addColorStop(0.8, 'rgba(24,36,54,0.18)');
-    gr.addColorStop(1, 'rgba(10,16,26,0.1)');
+    gr.addColorStop(0, 'rgba(52,74,106,0.24)');
+    gr.addColorStop(horizon / VIEW_H - 0.07, 'rgba(92,120,158,0.56)');
+    gr.addColorStop(horizon / VIEW_H + 0.04, 'rgba(78,102,134,0.62)');
+    gr.addColorStop(0.42, 'rgba(44,62,88,0.3)');
+    gr.addColorStop(0.6, 'rgba(28,42,62,0.13)');
+    gr.addColorStop(0.8, 'rgba(16,26,40,0.05)');
+    gr.addColorStop(1, 'rgba(8,12,20,0.025)');
     sg.fillStyle = gr;
     sg.fillRect(0, 0, VIEW_W, VIEW_H);
   };

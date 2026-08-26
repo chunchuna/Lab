@@ -1371,7 +1371,7 @@ function heliHover() {
   const r = area.roof;
   return {
     x: area.cam.x + (r.rope.x - r.rope.y) * HW + 26,
-    y: area.cam.y + (r.rope.x + r.rope.y) * HH - 176,
+    y: area.cam.y + (r.rope.x + r.rope.y) * HH - 144,
   };
 }
 

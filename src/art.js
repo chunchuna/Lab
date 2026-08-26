@@ -1281,7 +1281,7 @@ export function makeRoofVent(seed = 711) {
 /** 机体整体缩放。改这个数字，挂点/探照灯/绳索粗细会一起跟着走 */
 export const HELI_S = 1.95;
 
-/** 舱门绞盘的挂绳点（机身中心 -> 画布坐标）。dir=-1 时舱门在机身左侧 */
+/** 舱门绞盘的挂绳点（机身中心 -> 画布坐标）。dir=-1 时舱门朝画面左侧 */
 export function heliAnchor(x, y, dir = -1) {
   return { x: x + 11 * HELI_S * dir, y: y + 9.5 * HELI_S };
 }
@@ -1292,7 +1292,8 @@ export function heliLampAt(x, y, dir = -1) {
 }
 
 /**
- * t 用来转桨与闪航行灯，dir=-1 机头朝左（天台段落用的朝向）。
+ * t 用来转桨与闪航行灯。基础朝向是机头在 -x、尾梁在 +x，所以
+ * dir=-1 画出来是**机头朝右**（天台段落用的朝向），dir=1 机头朝左。
  */
 export function drawHeli(g, x, y, t, o = {}) {
   const s = (o.scale === undefined ? 1 : o.scale) * HELI_S;
