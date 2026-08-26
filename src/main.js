@@ -1,5 +1,5 @@
 import {
-  VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, WALL_H, RS,
+  VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, WALL_H, pixelScale,
   PLAYER_R, PLAYER_SPEED, MAG_SIZE, START_SPARE_MAGS, RELOAD_TIME, FIRE_COOLDOWN,
 } from './config.js';
 import { toWorld, wallNorthPt, wallNorthTransform } from './iso.js';
@@ -24,16 +24,35 @@ import {
 } from './controls.js';
 import { clamp, flicker, lerp, makeCanvas, smoothstep, setBase, blit } from './util.js';
 
-/* 画布的**真实**像素是逻辑视口的 RS 倍（见 config.js 的 pickRenderScale）。
-   世界仍然按 640×360 这套逻辑坐标画，倍率折进基础变换里，所以下面所有绘制
-   代码都不用改坐标。以前是 640×360 直接靠 CSS 放大 + image-rendering:pixelated，
-   窗口不是整数倍时就是一片糊掉的像素块。 */
-const canvas = document.getElementById('game');
-canvas.width = VIEW_W * RS;
-canvas.height = VIEW_H * RS;
-const ctx = canvas.getContext('2d', { alpha: false });
-ctx.imageSmoothingEnabled = true;
-ctx.imageSmoothingQuality = 'high';
+/* 两级画布：世界画在 640×360 的像素网格上，再整数倍放大到屏幕画布。
+   放大用最近邻，一个逻辑像素就变成整齐的 N×N 色块（4K 时 N=6，3840×2160）。
+
+   放大倍率不参与任何绘制坐标，所以精灵、静态层、光照贴图全都是分辨率无关的 ——
+   改窗口大小只要换屏幕画布的尺寸，不用重新烘焙。 */
+const frameBuf = document.createElement('canvas');
+frameBuf.width = VIEW_W;
+frameBuf.height = VIEW_H;
+const ctx = frameBuf.getContext('2d', { alpha: false });
+ctx.imageSmoothingEnabled = false;
+
+const screen = document.getElementById('game');
+const screenCtx = screen.getContext('2d', { alpha: false });
+
+function sizeScreen() {
+  const s = pixelScale();
+  if (screen.width === VIEW_W * s && screen.height === VIEW_H * s) return;
+  screen.width = VIEW_W * s;
+  screen.height = VIEW_H * s;
+  // 改尺寸会把上下文状态清回默认值，平滑插值得重新关掉
+  screenCtx.imageSmoothingEnabled = false;
+}
+sizeScreen();
+window.addEventListener('resize', sizeScreen);
+
+/** 把这一帧的 640×360 整数倍放大到屏幕画布 */
+function present() {
+  screenCtx.drawImage(frameBuf, 0, 0, screen.width, screen.height);
+}
 
 const stage = document.getElementById('stage');
 
@@ -116,7 +135,6 @@ function ensureAreaLights(a) {
      没有它的话，屋面以外一律被 area.dark 压成纯黑，远景层等于白画。
      跟静态灯一样是烘焙的，每帧只做一次 drawImage。 */
   if (a.skyPaint) {
-    // 光照相关的缓冲一律留在 1× —— 光是软的，放大也不会糊，却省下几倍填充率
     const t = makeCanvas(VIEW_W, VIEW_H);
     a.skyPaint(t.g);
     t.g.globalCompositeOperation = 'destination-out';
@@ -2901,15 +2919,15 @@ function drawDoorDamage(g, cam) {
  */
 const viewXform = { s: 1, tx: 0, ty: 0 };
 
-/** 世界层：逻辑坐标 -> 变焦 -> 超采样倍率 */
+/** 世界层：逻辑坐标 -> 变焦 */
 function applyView(g) {
-  const s = viewXform.s * RS;
-  setBase(g, s, 0, 0, s, viewXform.tx * RS, viewXform.ty * RS);
+  const s = viewXform.s;
+  setBase(g, s, 0, 0, s, viewXform.tx, viewXform.ty);
 }
 
-/** 屏幕空间层（雨、黑幕、闪光）：不吃变焦，但仍要吃超采样倍率 */
+/** 屏幕空间层（雨、黑幕、闪光）：不吃变焦 */
 function applyScreen(g) {
-  setBase(g, RS, 0, 0, RS, 0, 0);
+  setBase(g, 1, 0, 0, 1, 0, 0);
 }
 
 /** 世界层里那些临时改过变换的绘制收尾用 */
@@ -3474,6 +3492,7 @@ function frame(now) {
   game.timescale += (game.tsTarget - game.timescale) * Math.min(1, rdt * 7);
   update(rdt * game.timescale);
   render();
+  present();
   endFrame();
   endFrameControls();
   requestAnimationFrame(frame);

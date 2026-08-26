@@ -160,7 +160,7 @@ export function initInventory() {
   el.portrait.width = 240;
   el.portrait.height = 400;
   el.pctx = el.portrait.getContext('2d');
-  el.pctx.imageSmoothingEnabled = true;
+  el.pctx.imageSmoothingEnabled = false;
 
   // 依据立绘中手部的高度对齐左右手格子
   // 格子高 6.6em、立绘高 21em -> 半个格子约占立绘高度的 15.7%

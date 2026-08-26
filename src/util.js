@@ -36,31 +36,27 @@ export function shade(hex, amt) {
 }
 
 /**
- * 离屏画布。
+ * 离屏画布。一律画在逻辑像素网格上（1 逻辑像素 = 1 真实像素），放大留到最后
+ * 一步整数倍呈现时做，中间任何一层都不许出现半像素的平滑插值 —— 那正是把
+ * 像素块边缘抹成油画的来源。
  *
- * ss 是超采样倍率：画布的**真实**像素是 w×h 的 ss 倍，但基础变换里已经乘好了 ss，
- * 所以画的时候照旧写逻辑坐标。逻辑尺寸记在 `c.lw / c.lh` 上，画到别处时要用它们
- * 当目标宽高，否则会按真实像素画出 ss 倍大。
+ * 逻辑尺寸记在 `c.lw / c.lh` 上，`blit` 按它们画。
  */
-export function makeCanvas(w, h, ss = 1) {
+export function makeCanvas(w, h) {
   const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.ceil(w * ss));
-  c.height = Math.max(1, Math.ceil(h * ss));
-  c.lw = Math.max(1, Math.ceil(w));
-  c.lh = Math.max(1, Math.ceil(h));
+  c.width = c.lw = Math.max(1, Math.ceil(w));
+  c.height = c.lh = Math.max(1, Math.ceil(h));
   const g = c.getContext('2d');
-  // 超采样之后不再走"像素风放大"，交给默认的平滑缩放
-  g.imageSmoothingEnabled = ss > 1;
-  if (g.imageSmoothingEnabled) g.imageSmoothingQuality = 'high';
-  setBase(g, ss, 0, 0, ss, 0, 0);
-  return { c, g, lw: c.lw, lh: c.lh, ss };
+  g.imageSmoothingEnabled = false;
+  setBase(g, 1, 0, 0, 1, 0, 0);
+  return { c, g, lw: c.lw, lh: c.lh };
 }
 
 /**
  * 记住并应用一个上下文的**基础变换**。
  *
  * 地板/墙面那几套绘制空间原本是直接 setTransform 的绝对变换，一旦基础变换不再是
- * 单位阵（超采样倍率、近景变焦），绝对 setTransform 就会把它抹掉。所以统一改成
+ * 单位阵（近景变焦），绝对 setTransform 就会把它抹掉。所以统一改成
  * 「先回到基础变换，再 transform 叠上去」。
  */
 export function setBase(g, a, b, c, d, e, f) {

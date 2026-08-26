@@ -1,4 +1,4 @@
-import { VIEW_W, VIEW_H } from './config.js';
+import { VIEW_W, VIEW_H, pixelScale } from './config.js';
 import { isTouchDevice } from './controls.js';
 
 let touchMode = false;
@@ -14,11 +14,27 @@ export function layout() {
   if (!stageEl) return;
   const ww = window.innerWidth;
   const wh = window.innerHeight;
-  const scale = Math.min(ww / VIEW_W, wh / VIEW_H);
-  const w = Math.round(VIEW_W * scale);
-  const h = Math.round(VIEW_H * scale);
-  stageEl.style.width = w + 'px';
-  stageEl.style.height = h + 'px';
+  const dpr = window.devicePixelRatio || 1;
+
+  /* 舞台只取整数倍尺寸：640×360 的每个逻辑像素在屏幕上正好占 N×N 个设备像素，
+     浏览器那一层不做任何缩放。窗口不是 16:9 的整数倍时，多出来的地方留黑边 ——
+     宁可四周黑一点，也不要把像素块拉成非整数倍。 */
+  const pix = pixelScale();
+  let w = (VIEW_W * pix) / dpr;
+  let h = (VIEW_H * pix) / dpr;
+  if (w > ww + 0.01 || h > wh + 0.01) {
+    // 窗口比一个逻辑视口还小，只剩等比缩一条路，这时谈不上整数倍
+    const s = Math.min(ww / VIEW_W, wh / VIEW_H);
+    w = VIEW_W * s;
+    h = VIEW_H * s;
+  }
+  const scale = w / VIEW_W;
+  stageEl.style.width = w.toFixed(3) + 'px';
+  stageEl.style.height = h.toFixed(3) + 'px';
+  /* 居中位置也要落在设备像素的整格上。舞台停在半个设备像素上的话，浏览器会把
+     整张画布重采样一次，辛苦对齐的像素块边缘照样糊掉。 */
+  stageEl.style.left = (Math.round(((ww - w) / 2) * dpr) / dpr).toFixed(3) + 'px';
+  stageEl.style.top = (Math.round(((wh - h) / 2) * dpr) / dpr).toFixed(3) + 'px';
   // 手机屏幕物理尺寸小，UI 需要相对更大才点得中
   stageEl.style.fontSize = (scale * (touchMode ? 9.0 : 7.6)).toFixed(2) + 'px';
   // 竖屏时画面会被压到很小，引导用户转横屏（浏览器里无法强制）

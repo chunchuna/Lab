@@ -1,4 +1,4 @@
-import { HW, HH, TILE_W, TILE_Z, ROOM_W, ROOM_H, WALL_H, RS } from './config.js';
+import { HW, HH, TILE_W, TILE_Z, ROOM_W, ROOM_H, WALL_H } from './config.js';
 import {
   BOUNDS, boundsFor, camFor, floorTransform, wallNorthTransform, wallWestTransform, wallNorthPt,
 } from './iso.js';
@@ -725,7 +725,7 @@ export function buildStatic() {
   const rand = mulberry32(20260824);
   const sox = -BOUNDS.x0 + PAD;
   const soy = -BOUNDS.y0 + PAD;
-  const { c, g } = makeCanvas(BOUNDS.w + PAD * 2, BOUNDS.h + PAD * 2, RS);
+  const { c, g } = makeCanvas(BOUNDS.w + PAD * 2, BOUNDS.h + PAD * 2);
   paintFloor(g, sox, soy, rand);
   paintNorthWall(g, sox, soy, rand);
   paintWestWall(g, sox, soy, rand);

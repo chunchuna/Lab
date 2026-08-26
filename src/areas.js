@@ -1,4 +1,4 @@
-import { TILE_W, TILE_Z, WALL_H, VIEW_W, VIEW_H, RS } from './config.js';
+import { TILE_W, TILE_Z, WALL_H, VIEW_W, VIEW_H } from './config.js';
 import { buildLevel } from './level.js';
 import * as A from './art.js';
 import {
@@ -101,7 +101,7 @@ function parapetFace(g, len, hTiles, v0, th, rand) {
 /** 近侧矮护墙 + 门框，画在道具之后（前景层） */
 function corridorParapet(a, rand, th, doors, opts = {}) {
   const ph = 0.82; // 高度（瓦片）：够读出"这边也是一排门"，又不挡住走廊地面
-  const { c, g } = makeCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2, RS);
+  const { c, g } = makeCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
   g.save();
   southT(g, a.sox, a.soy, a.h);
   const H = ph * TILE_Z;
@@ -855,7 +855,7 @@ const ROOF_PH = 1.15;
 
 /** 天台近侧（x=w / y=h）的女儿墙，放前景层，压在角色之上 */
 function roofParapetFg(a, rand, th) {
-  const { c, g } = makeCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2, RS);
+  const { c, g } = makeCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
   const ph = 0.98;
   g.save();
   eastT(g, a.sox, a.soy, a.w, a.wallH);
@@ -949,7 +949,7 @@ function buildRoof() {
 
   /* --- 露天：远景背景层 + 天空光 --- */
   const horizon = 84;
-  const bd = makeCanvas(VIEW_W, VIEW_H, RS);
+  const bd = makeCanvas(VIEW_W, VIEW_H);
   paintRoofBackdrop(bd.g, horizon, mulberry32(0x51c1));
   a.backdrop = bd.c;
 

@@ -1,4 +1,4 @@
-import { HW, HH, TILE_W, TILE_Z, RS } from './config.js';
+import { HW, HH, TILE_W, TILE_Z } from './config.js';
 import { makeCanvas, mulberry32, shade, baseT, localT, blit } from './util.js';
 
 export const PAL = {
@@ -116,17 +116,16 @@ export function outlineRing(img, color = '#ded8c8', r = 1) {
   let cached = ringCache.get(key);
   if (cached) return cached;
 
-  // 精灵是按 RS 烘焙的，描边的偏移量要按逻辑像素给，才和以前一样粗
   const lw = img.lw || img.width;
   const lh = img.lh || img.height;
-  const sil = makeCanvas(lw, lh, RS);
+  const sil = makeCanvas(lw, lh);
   blit(sil.g, img, 0, 0);
   sil.g.globalCompositeOperation = 'source-in';
   sil.g.fillStyle = color;
   sil.g.fillRect(0, 0, lw, lh);
 
   const pad = r + 1;
-  const { c, g } = makeCanvas(lw + pad * 2, lh + pad * 2, RS);
+  const { c, g } = makeCanvas(lw + pad * 2, lh + pad * 2);
   for (const [dx, dy] of [
     [-r, 0], [r, 0], [0, -r], [0, r],
     [-r, -r], [r, -r], [-r, r], [r, r],
@@ -149,7 +148,7 @@ export function makeProp(w, d, h, draw, pad = 6) {
   const ch = Math.ceil(2 * s * HH + h * TILE_Z) + pad * 2;
   const ox = pad + s * HW;
   const oy = pad + s * HH + h * TILE_Z;
-  const { c, g } = makeCanvas(cw, ch, RS);
+  const { c, g } = makeCanvas(cw, ch);
   draw(g, ox, oy);
   resetT(g);
   return { img: c, ox, oy, w, d, h };
