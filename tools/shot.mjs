@@ -31,7 +31,7 @@ const at = (x, y) => page.evaluate((p) => { window.__game.player.x = p.x; window
 const aim = (x, y) => page.mouse.move(x, y);
 
 await wait(900);
-await shot('title');
+await shot('menu');
 
 // 开始 -> 醒来
 await page.keyboard.press('Space');
