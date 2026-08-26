@@ -64,18 +64,6 @@ html, body {
   );
 }
 
-/* ---------- 目标 ---------- */
-#objective {
-  position: absolute;
-  top: 1.4em;
-  left: 1.4em;
-  background: var(--surface);
-  padding: 0.35em 0.9em;
-  font-size: 1.35em;
-  letter-spacing: 0.08em;
-}
-#objective .tag { margin-right: 1.2em; }
-
 /* ---------- 字幕 ---------- */
 #messages {
   position: absolute;
@@ -194,6 +182,60 @@ html, body {
 }
 #help span { margin-left: 1.4em; }
 #help span:first-child { margin-left: 0; }
+
+/* ---------- QTE ---------- */
+/* 键盘专用：一排按键提示 + 限时条。不给触屏加按钮。 */
+#qte {
+  position: absolute;
+  left: 50%;
+  bottom: 2.4em;
+  transform: translateX(-50%);
+  background: var(--surface);
+  padding: 0.8em 1.6em 0.9em;
+  text-align: center;
+  min-width: 26em;
+}
+.qte-title { font-size: 1.5em; letter-spacing: 0.3em; }
+/* 字号设在容器上，键帽自己只写 em 尺寸，避免同一元素上字号与宽度各放大一轮 */
+.qte-keys {
+  font-size: 1.7em;
+  display: flex;
+  justify-content: center;
+  gap: 0.4em;
+  margin: 0.5em 0 0.45em;
+}
+.qte-keys .qk {
+  min-width: 1.7em;
+  padding: 0.16em 0.4em;
+  background: rgba(222, 216, 200, 0.16);
+  letter-spacing: 0.04em;
+}
+/* 当前该按的那一个用反色，跟菜单选中同一套语言 */
+.qte-keys .qk.now { background: var(--text); color: var(--surface); }
+.qte-keys .qk.done { opacity: 0.3; }
+.qte-bar { height: 0.4em; background: rgba(222, 216, 200, 0.22); }
+.qte-bar i { display: block; height: 100%; width: 100%; background: var(--text); }
+.qte-hint { margin-top: 0.55em; font-size: 1.05em; opacity: 0.68; letter-spacing: 0.1em; }
+#qte.fail .qte-title { background: var(--text); color: var(--surface); padding: 0 0.5em; }
+
+/* ---------- 序章结束 ---------- */
+/* 放在 #hud 里用 absolute：#stage 有 transform，position:fixed 会被裁掉 */
+#ending {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 1.8s ease-in;
+}
+#ending.on { opacity: 1; }
+#ending .e-sub { font-size: 1.2em; letter-spacing: 0.5em; opacity: 0.45; margin-left: 0.5em; }
+#ending h2 { font-size: 4.6em; margin: 0.18em 0 0; letter-spacing: 0.3em; font-weight: 400; }
+#ending .e-line { font-size: 1.35em; letter-spacing: 0.16em; opacity: 0.72; margin: 2.4em 0 0; }
+#ending .e-next { font-size: 1.15em; letter-spacing: 0.42em; opacity: 0.4; margin: 3.2em 0 0; }
 
 /* ---------- 人脸识别终端 ---------- */
 #scan {

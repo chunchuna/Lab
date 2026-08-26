@@ -10,7 +10,6 @@ let scanCtx = null;
 export const ITEM_NAMES = { pistol: '手枪 M1911', flashlight: '手电筒' };
 
 export function initUI() {
-  el.objective = $('#objective-text');
   el.messages = $('#messages');
   el.prompt = $('#prompt');
   el.promptText = $('#prompt-text');
@@ -35,6 +34,13 @@ export function initUI() {
   el.scanMarks = $('#scan-marks');
   el.scanMatch = $('#scan-match');
   el.scanDb = $('#scan-db');
+  el.qte = $('#qte');
+  el.qteTitle = $('#qte-title');
+  el.qteKeys = $('#qte-keys');
+  el.qteBar = $('#qte-bar-fill');
+  el.qteHint = $('#qte-hint');
+  el.ending = $('#ending');
+  el.endingLine = $('#ending-line');
 
   const sc = $('#scan-canvas');
   sc.width = 880;
@@ -48,10 +54,7 @@ export function initUI() {
 
 /* ---------------- 基本 HUD ---------------- */
 
-export function setObjective(t) {
-  el.objective.textContent = t;
-  el.objective.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 500 });
-}
+/* 目标 HUD 已删除：目标信息一律由字幕（msg）与对讲机台词承担。 */
 
 export function msg(text, type = '') {
   const d = document.createElement('div');
@@ -148,6 +151,60 @@ export function updateAmmo(w, show) {
   const rl = w.reload > 0;
   el.reloadBar.classList.toggle('on', rl);
   if (rl) el.reloadFill.style.width = (w.reloadProgress * 100).toFixed(1) + '%';
+}
+
+/* ---------------- QTE ---------------- */
+
+const KEY_LABEL = { ' ': 'SPACE', space: 'SPACE' };
+const keyLabel = (k) => KEY_LABEL[k] || k.toUpperCase();
+
+/** 显示 QTE 面板。seq 是按键数组，idx 是当前该按的那一个 */
+export function showQTE(title, seq, hint) {
+  el.qte.classList.remove('hidden', 'fail');
+  el.qteTitle.textContent = title;
+  el.qteHint.textContent = hint || '按下亮起的键';
+  el.qteKeys.innerHTML = '';
+  for (const k of seq) {
+    const d = document.createElement('div');
+    d.className = 'qk';
+    d.textContent = keyLabel(k);
+    el.qteKeys.appendChild(d);
+  }
+  updateQTE(0, 1);
+}
+
+export function updateQTE(idx, timeLeft) {
+  const n = el.qteKeys.children.length;
+  for (let i = 0; i < n; i++) {
+    const c = el.qteKeys.children[i];
+    c.className = 'qk' + (i < idx ? ' done' : i === idx ? ' now' : '');
+  }
+  el.qteBar.style.width = (Math.max(0, Math.min(1, timeLeft)) * 100).toFixed(1) + '%';
+}
+
+export function qteFailed(title) {
+  el.qte.classList.add('fail');
+  el.qteTitle.textContent = title;
+  el.qteBar.style.width = '0%';
+}
+
+export function hideQTE() {
+  el.qte.classList.add('hidden');
+  el.qte.classList.remove('fail');
+}
+
+/* ---------------- 序章结束 ---------------- */
+
+export function showEnding(line) {
+  if (line) el.endingLine.textContent = line;
+  el.ending.classList.remove('hidden');
+  // 先上屏再加 .on，transition 才会真的跑一遍
+  requestAnimationFrame(() => el.ending.classList.add('on'));
+}
+
+export function hideEnding() {
+  el.ending.classList.remove('on');
+  el.ending.classList.add('hidden');
 }
 
 /* ---------------- 准星 ---------------- */
