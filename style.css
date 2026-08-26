@@ -184,39 +184,116 @@ html, body {
 #help span:first-child { margin-left: 0; }
 
 /* ---------- QTE ---------- */
-/* 键盘专用：一排按键提示 + 限时条。不给触屏加按钮。 */
+/* 键盘专用，一次只显示一个键。不给触屏加按钮。
+   面板不带底板：底板会把近景运镜挡掉一整条，电影感全没了。 */
 #qte {
   position: absolute;
   left: 50%;
-  bottom: 2.4em;
+  top: 56%;
   transform: translateX(-50%);
-  background: var(--surface);
-  padding: 0.8em 1.6em 0.9em;
   text-align: center;
-  min-width: 26em;
+  pointer-events: none;
+  text-shadow: 0 0.08em 0.3em rgba(0, 0, 0, 0.85);
 }
-.qte-title { font-size: 1.5em; letter-spacing: 0.3em; }
-/* 字号设在容器上，键帽自己只写 em 尺寸，避免同一元素上字号与宽度各放大一轮 */
-.qte-keys {
-  font-size: 1.7em;
+.q-title {
+  font-size: 1.2em;
+  letter-spacing: 0.42em;
+  opacity: 0.5;
+  margin-left: 0.42em;
+}
+/* 节拍点：这一段一共几拍、现在第几拍 */
+.q-beats {
   display: flex;
   justify-content: center;
-  gap: 0.4em;
-  margin: 0.5em 0 0.45em;
+  gap: 0.5em;
+  margin: 0.55em 0 0.2em;
 }
-.qte-keys .qk {
-  min-width: 1.7em;
-  padding: 0.16em 0.4em;
-  background: rgba(222, 216, 200, 0.16);
-  letter-spacing: 0.04em;
+.q-beats i {
+  display: block;
+  width: 1.5em;
+  height: 0.22em;
+  background: rgba(222, 216, 200, 0.22);
 }
-/* 当前该按的那一个用反色，跟菜单选中同一套语言 */
-.qte-keys .qk.now { background: var(--text); color: var(--surface); }
-.qte-keys .qk.done { opacity: 0.3; }
-.qte-bar { height: 0.4em; background: rgba(222, 216, 200, 0.22); }
-.qte-bar i { display: block; height: 100%; width: 100%; background: var(--text); }
-.qte-hint { margin-top: 0.55em; font-size: 1.05em; opacity: 0.68; letter-spacing: 0.1em; }
-#qte.fail .qte-title { background: var(--text); color: var(--surface); padding: 0 0.5em; }
+.q-beats i.done { background: rgba(222, 216, 200, 0.5); }
+.q-beats i.now { background: var(--text); }
+
+/* 键帽舞台：键帽居中，限时环绕着它往里收 */
+.q-stage {
+  position: relative;
+  width: 7em;
+  height: 7em;
+  margin: 0.1em auto 0;
+}
+.q-key {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(1.7);
+}
+.q-key span {
+  display: block;
+  /* 字号只设在内层 span 上：外层同时写 em 尺寸的话会被放大两轮 */
+  font-size: 2.6em;
+  line-height: 1;
+  min-width: 1.5em;
+  padding: 0.24em 0.3em 0.3em;
+  letter-spacing: 0.06em;
+  background: var(--text);
+  color: var(--surface);
+  box-shadow: 0 0.1em 0 rgba(0, 0, 0, 0.55);
+}
+/* 键弹出来的那一下：从大缩到正好，眼睛会自动跟过去 */
+#qte.on .q-key {
+  opacity: 1;
+  transform: scale(1);
+  transition: transform 0.16s cubic-bezier(0.2, 1.5, 0.4, 1), opacity 0.1s linear;
+}
+/* 按对了：键帽炸开一下再消失 */
+#qte.hit .q-key {
+  opacity: 0;
+  transform: scale(1.55);
+  transition: transform 0.22s ease-out, opacity 0.22s ease-out;
+}
+#qte.hit .q-key span { background: var(--surface); color: var(--text); box-shadow: none; }
+
+/* 限时环：一个方框，时间走完就贴到键帽上 */
+.q-ring {
+  position: absolute;
+  inset: 0;
+  border: 0.22em solid var(--text);
+  opacity: 0;
+  transform: scale(2.6);
+}
+#qte.on .q-ring { opacity: 0.9; }
+#qte.hit .q-ring { opacity: 0; transition: opacity 0.18s linear; }
+#qte.mash .q-ring { display: none; }
+
+.q-caption {
+  font-size: 1.35em;
+  letter-spacing: 0.16em;
+  margin-top: 0.5em;
+  opacity: 0.9;
+}
+/* 连按段落的进度条：只有 mash 那一拍出现 */
+.q-mash {
+  display: none;
+  width: 16em;
+  height: 0.42em;
+  margin: 0.7em auto 0;
+  background: rgba(222, 216, 200, 0.2);
+}
+#qte.mash .q-mash { display: block; }
+.q-mash i { display: block; height: 100%; width: 0%; background: var(--text); }
+/* 连按时键帽随每一下轻微弹一下，手上有反馈 */
+#qte.mash .q-key { opacity: 1; transform: scale(1); transition: transform 0.09s ease-out; }
+#qte.mash.punch .q-key { transform: scale(1.14); }
+
+#qte.fail .q-title { background: var(--text); color: var(--surface); padding: 0 0.5em; opacity: 1; }
+#qte.fail .q-key { opacity: 0; transform: scale(0.7); transition: all 0.25s ease-out; }
+#qte.fail .q-ring { opacity: 0; }
 
 /* ---------- 序章结束 ---------- */
 /* 放在 #hud 里用 absolute：#stage 有 transform，position:fixed 会被裁掉 */

@@ -36,9 +36,11 @@ export function initUI() {
   el.scanDb = $('#scan-db');
   el.qte = $('#qte');
   el.qteTitle = $('#qte-title');
-  el.qteKeys = $('#qte-keys');
-  el.qteBar = $('#qte-bar-fill');
-  el.qteHint = $('#qte-hint');
+  el.qteBeats = $('#qte-beats');
+  el.qteRing = $('#qte-ring');
+  el.qteKeyLabel = $('#qte-key-label');
+  el.qteCaption = $('#qte-caption');
+  el.qteMash = $('#qte-mash-fill');
   el.ending = $('#ending');
   el.endingLine = $('#ending-line');
 
@@ -153,44 +155,76 @@ export function updateAmmo(w, show) {
   if (rl) el.reloadFill.style.width = (w.reloadProgress * 100).toFixed(1) + '%';
 }
 
-/* ---------------- QTE ---------------- */
+/* ---------------- QTE ---------------- *
+ *
+ * 电影化 QTE 的 DOM 侧：一次只显示**一个**键。
+ * 每一拍分两段 —— 先是运镜引子（只更新节拍点与动作名，键还不出现），
+ * 到关键瞬间才 qteShowKey() 把那一个大键帽弹出来，外面套一圈往内收的
+ * 限时环。收缩环本身就是倒计时，玩家不用去读进度条。
+ */
 
-const KEY_LABEL = { ' ': 'SPACE', space: 'SPACE' };
-const keyLabel = (k) => KEY_LABEL[k] || k.toUpperCase();
+const KEY_LABEL = { ' ': '空格', space: '空格' };
+export const keyLabel = (k) => KEY_LABEL[k] || k.toUpperCase();
 
-/** 显示 QTE 面板。seq 是按键数组，idx 是当前该按的那一个 */
-export function showQTE(title, seq, hint) {
-  el.qte.classList.remove('hidden', 'fail');
+/** 开一段 QTE：只搭外壳（标题 + n 个节拍点），键还不出 */
+export function qteBegin(title, n) {
+  el.qte.className = '';
   el.qteTitle.textContent = title;
-  el.qteHint.textContent = hint || '按下亮起的键';
-  el.qteKeys.innerHTML = '';
-  for (const k of seq) {
-    const d = document.createElement('div');
-    d.className = 'qk';
-    d.textContent = keyLabel(k);
-    el.qteKeys.appendChild(d);
-  }
-  updateQTE(0, 1);
+  el.qteCaption.textContent = '';
+  el.qteMash.style.width = '0%';
+  el.qteBeats.innerHTML = '';
+  for (let i = 0; i < n; i++) el.qteBeats.appendChild(document.createElement('i'));
 }
 
-export function updateQTE(idx, timeLeft) {
-  const n = el.qteKeys.children.length;
-  for (let i = 0; i < n; i++) {
-    const c = el.qteKeys.children[i];
-    c.className = 'qk' + (i < idx ? ' done' : i === idx ? ' now' : '');
+/** 进入第 i 拍的运镜引子：更新节拍点与动作名，键仍然不出现 */
+export function qteBeat(i, caption) {
+  el.qte.classList.remove('on', 'hit', 'mash', 'punch');
+  el.qteCaption.textContent = caption || '';
+  const n = el.qteBeats.children.length;
+  for (let k = 0; k < n; k++) {
+    el.qteBeats.children[k].className = k < i ? 'done' : k === i ? 'now' : '';
   }
-  el.qteBar.style.width = (Math.max(0, Math.min(1, timeLeft)) * 100).toFixed(1) + '%';
+}
+
+/** 关键瞬间：把这一拍唯一的那个键弹出来。mash=true 时是连按段落 */
+export function qteShowKey(key, mash) {
+  el.qteKeyLabel.textContent = keyLabel(key);
+  el.qte.classList.remove('hit');
+  el.qte.classList.toggle('mash', !!mash);
+  el.qte.classList.add('on');
+  qteTime(1);
+}
+
+/** 限时：k 从 1 收到 0，环跟着往键帽上贴 */
+export function qteTime(k) {
+  const t = Math.max(0, Math.min(1, k));
+  el.qteRing.style.transform = `scale(${(1 + t * 1.6).toFixed(3)})`;
+  el.qteRing.style.opacity = (0.35 + 0.55 * (1 - t)).toFixed(2);
+}
+
+/** 按对了：键帽炸开一下 */
+export function qteHit() {
+  el.qte.classList.remove('on');
+  el.qte.classList.add('hit');
+}
+
+/** 连按进度（0..1），并给键帽一下弹动 */
+export function qteMash(k, punch) {
+  el.qteMash.style.width = (Math.max(0, Math.min(1, k)) * 100).toFixed(1) + '%';
+  if (punch) {
+    el.qte.classList.add('punch');
+    setTimeout(() => el.qte.classList.remove('punch'), 80);
+  }
 }
 
 export function qteFailed(title) {
   el.qte.classList.add('fail');
+  el.qte.classList.remove('on', 'mash');
   el.qteTitle.textContent = title;
-  el.qteBar.style.width = '0%';
 }
 
 export function hideQTE() {
-  el.qte.classList.add('hidden');
-  el.qte.classList.remove('fail');
+  el.qte.className = 'hidden';
 }
 
 /* ---------------- 序章结束 ---------------- */

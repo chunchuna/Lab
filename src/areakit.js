@@ -605,8 +605,15 @@ export function newArea(id, name, w, h, wallH = WALL_H) {
   };
 }
 
-/** 房间四壁的遮挡线段 + 关闭视线遮挡时用的房间轮廓 */
-export function closeArea(a) {
+/**
+ * 房间四壁的遮挡线段 + 关闭视线遮挡时用的房间轮廓。
+ *
+ * opts.edgeH：边界遮挡体的高度（默认就是 a.wallH，即室内的满高墙）。
+ * 露天场景（天台）四周只有矮女儿墙，传护墙高度进来 —— 否则光照会把边界
+ * 当成一圈满高实墙向上拉伸，天台就被裁成一个封闭的室内盒子。
+ */
+export function closeArea(a, opts = {}) {
+  const edgeH = opts.edgeH === undefined ? a.wallH : opts.edgeH;
   const addRect = (x0, y0, x1, y1, hh, id) => {
     a.segments.push(
       { x1: x0, y1: y0, x2: x1, y2: y0, h: hh, id },
@@ -616,7 +623,7 @@ export function closeArea(a) {
     );
   };
   const base = a.segments.length;
-  addRect(0, 0, a.w, a.h, a.wallH, 'wall');
+  addRect(0, 0, a.w, a.h, edgeH, 'wall');
   const S = {
     n: a.segments[base],
     e: a.segments[base + 1],

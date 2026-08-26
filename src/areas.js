@@ -1,4 +1,4 @@
-import { TILE_W, TILE_Z, WALL_H } from './config.js';
+import { TILE_W, TILE_Z, WALL_H, VIEW_W, VIEW_H } from './config.js';
 import { buildLevel } from './level.js';
 import * as A from './art.js';
 import {
@@ -688,28 +688,170 @@ export const ROOF = {
   rope: { x: 11.0, y: 0.7 }, // 绳索落点
 };
 
-/** 远处的城市剪影：画在墙面平面里，位于矮女儿墙之后 */
-function skyline(g, len, topV, rand) {
-  let u = -24;
-  while (u < len + 24) {
-    const w = 13 + rand() * 42;
-    const h = 10 + rand() * 44;
-    g.fillStyle = ['#0c1216', '#101820', '#090e11'][(rand() * 3) | 0];
-    g.fillRect(u, topV - h, w, h + 6);
-    // 楼顶的红色障碍灯
-    if (rand() > 0.5) {
-      g.fillStyle = 'rgba(255,90,70,0.45)';
-      g.fillRect(u + w / 2 - 1, topV - h - 3, 2, 2);
+/* ------------------------------------------------------------------ *
+ * 天台的远景背景层
+ *
+ * 这一层是**屏幕空间**的独立图层（640×360），跟室内那套"墙面平面 + 烘焙
+ * 遮罩"完全无关。之前天际线是用 northT/westT 画进墙面平面的，等距下那就
+ * 是一张贴在竖直墙上的纸，而且会被墙面光照打亮 —— 所以四个方向看过去都像
+ * 室内。现在：城市画在世界之外的背景层，天台四周只留矮女儿墙。
+ *
+ * 纵深靠三件事做出来：远层更矮更淡更贴地平线、近层更高更黑更靠画面下缘、
+ * 每层之间压一道雨雾。
+ * ------------------------------------------------------------------ */
+
+/** 一层城市剪影。base 是这一层楼脚所在的画布 y，越大表示离得越近 */
+function cityBand(g, rand, o) {
+  const { base, hMin, hMax, wMin, wMax, cols, winA, winP, beaconP, gap } = o;
+  let u = -30;
+  while (u < VIEW_W + 30) {
+    const w = wMin + rand() * (wMax - wMin);
+    const h = hMin + rand() * (hMax - hMin);
+    const top = base - h;
+    g.fillStyle = cols[(rand() * cols.length) | 0];
+    g.fillRect(u, top, w, base - top + 4);
+    // 楼顶的机房 / 水箱，剪影才不是一排光秃秃的方块
+    if (rand() > 0.45) {
+      const cw = w * (0.18 + rand() * 0.3);
+      g.fillRect(u + rand() * (w - cw), top - 3 - rand() * 5, cw, 6);
     }
-    // 还亮着的窗：整座城市并没有全黑
-    const win = (rand() * 6) | 0;
-    for (let i = 0; i < win; i++) {
-      g.fillStyle = rand() > 0.5 ? 'rgba(224,196,120,0.28)' : 'rgba(150,178,196,0.18)';
-      g.fillRect(u + 3 + rand() * Math.max(1, w - 6), topV - h + 4 + rand() * Math.max(1, h - 8), 2, 2.4);
+    // 楼顶障碍灯
+    if (rand() < beaconP) {
+      g.fillStyle = 'rgba(255,96,74,0.5)';
+      g.fillRect(u + w / 2 - 1, top - 4, 2, 2.4);
     }
-    u += w + 2 + rand() * 12;
+    // 还亮着的窗：这座城市并没有全黑，但也剩不下几户
+    if (rand() < winP) {
+      const rows = Math.max(1, (h / 7) | 0);
+      const colsN = Math.max(1, (w / 6) | 0);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < colsN; c++) {
+          if (rand() > 0.12) continue;
+          g.fillStyle = rand() > 0.45
+            ? `rgba(226,196,124,${winA})`
+            : `rgba(150,178,200,${winA * 0.7})`;
+          g.fillRect(u + 2 + c * 6, top + 3 + r * 7, 2, 2.6);
+        }
+      }
+    }
+    u += w + gap * (0.4 + rand());
   }
 }
+
+/**
+ * 烘焙天台的远景。horizon 是地平线所在的画布 y。
+ * 只在建区时跑一次，运行期每帧只是一次 drawImage。
+ */
+function paintRoofBackdrop(g, horizon, rand) {
+  // 夜空：顶上近黑，越靠地平线越被城市的光污染染亮一点
+  const sky = g.createLinearGradient(0, 0, 0, horizon + 14);
+  sky.addColorStop(0, '#03050a');
+  sky.addColorStop(0.42, '#070c14');
+  sky.addColorStop(0.78, '#0e1824');
+  sky.addColorStop(1, '#17242f');
+  g.fillStyle = sky;
+  g.fillRect(0, 0, VIEW_W, horizon + 14);
+
+  // 云：被下方城市照亮的低云底，压得很低，暴雨夜的那种"天花板"
+  for (let i = 0; i < 11; i++) {
+    const cx = rand() * VIEW_W;
+    const cy = 8 + rand() * (horizon - 24);
+    const rx = 60 + rand() * 130;
+    const ry = 10 + rand() * 22;
+    const k = 0.05 + rand() * 0.08;
+    const grd = g.createRadialGradient(cx, cy, 0, cx, cy, rx);
+    grd.addColorStop(0, `rgba(74,96,126,${k})`);
+    grd.addColorStop(0.6, `rgba(50,66,90,${k * 0.5})`);
+    grd.addColorStop(1, 'rgba(30,40,56,0)');
+    g.fillStyle = grd;
+    g.save();
+    g.translate(cx, cy);
+    g.scale(1, ry / rx);
+    g.beginPath();
+    g.arc(0, 0, rx, 0, 6.3);
+    g.fill();
+    g.restore();
+  }
+
+  // 楼下：街区的深渊。天台之所以是天台，是因为下面什么都看不到底
+  const gnd = g.createLinearGradient(0, horizon, 0, VIEW_H);
+  gnd.addColorStop(0, '#0a1017');
+  gnd.addColorStop(0.35, '#05080d');
+  gnd.addColorStop(1, '#010203');
+  g.fillStyle = gnd;
+  g.fillRect(0, horizon, VIEW_W, VIEW_H - horizon);
+
+  /* --- 三层城市剪影：越远越矮、越淡、越贴地平线 --- */
+  cityBand(g, rand, {
+    base: horizon + 2, hMin: 6, hMax: 26, wMin: 8, wMax: 26, gap: 5,
+    cols: ['#121b25', '#0f1822', '#141d27'], winA: 0.1, winP: 0.5, beaconP: 0.12,
+  });
+  // 远层之间压一道雨雾，这是纵深真正的来源
+  g.fillStyle = 'rgba(96,120,150,0.075)';
+  g.fillRect(0, horizon - 46, VIEW_W, 70);
+
+  cityBand(g, rand, {
+    base: horizon + 16, hMin: 16, hMax: 58, wMin: 12, wMax: 38, gap: 7,
+    cols: ['#0b131b', '#091019', '#0d151d'], winA: 0.17, winP: 0.7, beaconP: 0.3,
+  });
+  g.fillStyle = 'rgba(84,108,138,0.055)';
+  g.fillRect(0, horizon - 70, VIEW_W, 110);
+
+  cityBand(g, rand, {
+    base: horizon + 52, hMin: 34, hMax: 96, wMin: 20, wMax: 46, gap: 12,
+    cols: ['#050a0f', '#040810', '#060b11'], winA: 0.24, winP: 0.8, beaconP: 0.45,
+  });
+
+  /* --- 贴着画面两侧的近邻高楼：把镜头框起来，纵深一下就出来了 --- */
+  for (const [bx, bw] of [[-26, 96], [VIEW_W - 74, 104]]) {
+    g.fillStyle = '#020507';
+    g.fillRect(bx, horizon + 4, bw, VIEW_H);
+    g.fillStyle = '#04080c';
+    g.fillRect(bx + bw - 14, horizon + 4, 14, VIEW_H);
+    // 女儿墙压顶
+    g.fillStyle = '#0a1016';
+    g.fillRect(bx - 3, horizon + 1, bw + 6, 5);
+    // 竖向的窗带，只剩零星几户还亮着
+    for (let r = 0; r < 26; r++) {
+      for (let c = 0; c < 5; c++) {
+        if (rand() > 0.1) continue;
+        g.fillStyle = rand() > 0.5 ? 'rgba(226,190,116,0.22)' : 'rgba(140,170,196,0.14)';
+        g.fillRect(bx + 8 + c * 17, horizon + 14 + r * 12, 6, 4);
+      }
+    }
+  }
+
+  /* --- 城里几处还在烧的火：暖色的一点，也说明外面出了什么事 --- */
+  for (const [fx0, fy0, fr] of [[128, horizon + 30, 46], [392, horizon + 12, 34], [534, horizon + 58, 30]]) {
+    const grd = g.createRadialGradient(fx0, fy0, 0, fx0, fy0, fr);
+    grd.addColorStop(0, 'rgba(226,124,52,0.2)');
+    grd.addColorStop(0.45, 'rgba(180,84,36,0.09)');
+    grd.addColorStop(1, 'rgba(120,50,20,0)');
+    g.fillStyle = grd;
+    g.fillRect(fx0 - fr, fy0 - fr, fr * 2, fr * 2);
+  }
+
+  // 街面上残存的路灯：小到只是一点点，但让"下面很深"变得可信
+  for (let i = 0; i < 42; i++) {
+    const px = rand() * VIEW_W;
+    const py = horizon + 40 + rand() * (VIEW_H - horizon - 40);
+    const k = 0.05 + rand() * 0.1;
+    g.fillStyle = `rgba(232,186,110,${k})`;
+    g.fillRect(px, py, 1.4, 1.4);
+  }
+
+  // 整层再压一道雨幕：远景该是被雨糊住的，不能像贴纸一样锐
+  const veil = g.createLinearGradient(0, 0, 0, VIEW_H);
+  veil.addColorStop(0, 'rgba(70,92,120,0.03)');
+  veil.addColorStop(0.3, 'rgba(88,112,142,0.07)');
+  veil.addColorStop(0.62, 'rgba(52,70,94,0.05)');
+  veil.addColorStop(1, 'rgba(10,16,24,0.1)');
+  g.fillStyle = veil;
+  g.fillRect(0, 0, VIEW_W, VIEW_H);
+}
+
+/** 天台女儿墙高度（瓦片）。四周都是这个高度，露天场景不画满高室内墙 */
+const ROOF_PH = 1.15;
 
 /** 天台近侧（x=w / y=h）的女儿墙，放前景层，压在角色之上 */
 function roofParapetFg(a, rand, th) {
@@ -727,8 +869,29 @@ function roofParapetFg(a, rand, th) {
   return { img: c, ox: a.sox, oy: a.soy };
 }
 
+/** 女儿墙压顶：屋面这一侧能看见压顶板的顶面，一条亮边把"墙很矮"说清楚 */
+function parapetCoping(g, sox, soy, w, h) {
+  const cap = (x0, y0, x1, y1) => {
+    const a0 = pt(sox, soy, x0, y0, ROOF_PH);
+    const a1 = pt(sox, soy, x1, y1, ROOF_PH);
+    const b1 = pt(sox, soy, x1, y1, ROOF_PH + 0.06);
+    const b0 = pt(sox, soy, x0, y0, ROOF_PH + 0.06);
+    g.fillStyle = 'rgba(126,142,140,0.35)';
+    g.beginPath();
+    g.moveTo(a0.x, a0.y);
+    g.lineTo(a1.x, a1.y);
+    g.lineTo(b1.x, b1.y);
+    g.lineTo(b0.x, b0.y);
+    g.closePath();
+    g.fill();
+  };
+  cap(0, 0, w, 0);
+  cap(0, 0, 0, h);
+}
+
 function buildRoof() {
-  // 墙高给得比室内高：露天场景要留出画天际线的空间
+  /* wallH 在这里不再代表"墙有多高"——天台四周只有 ROOF_PH 高的女儿墙。
+     它只用来把相机往下压，在画面顶上让出一整条天空给远景层。 */
   const a = newArea('roof', '天台', 16, 10, 4.6);
   const rand = mulberry32(0x40f0);
   const th = THEMES.roof;
@@ -736,41 +899,28 @@ function buildRoof() {
 
   paintFloor(g, a.sox, a.soy, a.w, a.h, rand, th, { puddles: 13 });
 
-  const PH = 1.15; // 女儿墙高度（瓦片）
-  const topV = (a.wallH - PH) * TILE_Z;
+  const topV = (a.wallH - ROOF_PH) * TILE_Z;
 
-  // 远侧（y=0）：天际线 + 矮女儿墙。这一侧不封高墙，直升机从这边进画。
+  /* 远侧的两道边：只有矮女儿墙，墙上不再画任何"远景"。
+     天际线搬去了 a.backdrop（屏幕空间背景层）。 */
   g.save();
   northT(g, a.sox, a.soy, a.wallH);
-  skyline(g, a.w * TILE_W, topV, rand);
-  parapetFace(g, a.w * TILE_W, PH, topV, th, rand);
+  parapetFace(g, a.w * TILE_W, ROOF_PH, topV, th, rand);
   g.restore();
-
-  // 左侧（x=0）：楼梯出口房（满高）+ 其余段落矮女儿墙
   g.save();
   westT(g, a.sox, a.soy, a.wallH);
-  skyline(g, a.h * TILE_W, topV, rand);
-  parapetFace(g, a.h * TILE_W, PH, topV, th, rand);
-  g.save();
-  g.translate(0.9 * TILE_W, 0);
-  wallBase(g, 3.4 * TILE_W, rand, th, a.wallH);
-  doorBay(g, 0.5 * TILE_W, 2.9 * TILE_W, rand, th, { state: 'closed', kind: 'office', label: 'R' }, a.wallH);
-  // 门头的应急灯壳（灯光本身由烘焙光源给）
-  g.fillStyle = '#232a2b';
-  g.fillRect(1.4 * TILE_W, a.wallH * TILE_Z - 50, 22, 9);
-  g.fillStyle = '#39423f';
-  g.fillRect(1.4 * TILE_W, a.wallH * TILE_Z - 50, 22, 3);
-  g.fillStyle = 'rgba(198,224,238,0.5)';
-  g.fillRect(1.4 * TILE_W + 2, a.wallH * TILE_Z - 47, 18, 4);
-  g.restore();
+  parapetFace(g, a.h * TILE_W, ROOF_PH, topV, th, rand);
   g.restore();
   resetT(g);
+  parapetCoping(g, a.sox, a.soy, a.w, a.h);
 
   const props = [
+    // 楼梯出口小屋：立在屋面上的独立体块，不是一面墙
+    ['bulk', A.makeRoofBulkhead(731), 0.62, 2.5, [1.2, 3.9], [1.2, 3.9, 2.55]],
     ['tent', A.makeTent(701), ROOF.tent.x, ROOF.tent.y, [1.9, 1.5], [1.9, 1.5, 1.1]],
     ['vent1', A.makeRoofVent(711), 4.4, 7.6, [0.95, 0.95], [0.95, 0.95, 0.9]],
     ['vent2', A.makeRoofVent(712), 13.6, 3.4, [0.95, 0.95], [0.95, 0.95, 0.9]],
-    ['mast', A.makePipeStack(715), 2.4, 6.2, [0.6, 1.4], [0.6, 1.4, 2.6]],
+    ['mast', A.makePipeStack(715), 2.6, 6.6, [0.6, 1.4], [0.6, 1.4, 2.6]],
     ['crate', A.makeCrate(0.9, 713), 6.2, 8.7, [0.9, 0.9], [0.9, 0.9, 0.86]],
     ['barrel', A.makeBarrel(714), 12.8, 7.4, [0.88, 0.88], [0.88, 0.88, 1.12]],
     ['chair', A.makeChair(718), 8.0, 7.8, null, null],
@@ -780,25 +930,61 @@ function buildRoof() {
   ];
   for (const [id, s, x, y, col, occ] of props) a.props.push({ id, s, x, y, col, occ });
 
-  /* 静态光：少而冷。全部走烘焙（ensureAreaLights），别每帧 add()。 */
-  a.lights.push({ id: 'plamp', x: 1.1, y: ROOF.door.y, z: 2.3, r: 5.8, color: [156, 190, 214], power: 0.52, seed: 1.2, mode: 5 });
-  a.lights.push({ id: 'obst', x: 2.4, y: 6.2, z: 2.7, r: 3.8, color: [255, 92, 70], power: 0.5, seed: 3.1, mode: 5 });
+  /* 静态光：少而冷。全部走烘焙（ensureAreaLights），别每帧 add()。
+     注意灯位都压在地面附近 —— 露天场景不该出现"某一面竖墙被打亮"的纸片感，
+     光只落在屋面、女儿墙压顶和小屋的门脸上。 */
+  a.lights.push({ id: 'plamp', x: 1.45, y: ROOF.door.y, z: 2.1, r: 5.2, color: [156, 190, 214], power: 0.5, seed: 1.2, mode: 5 });
+  a.lights.push({ id: 'obst', x: 2.6, y: 6.6, z: 2.7, r: 3.6, color: [255, 92, 70], power: 0.46, seed: 3.1, mode: 5 });
   // 城市余光：把天台压到"看得清脚下但看不清远处"的程度
   a.lights.push({ id: 'city1', x: 7.5, y: 1.2, z: 0, r: 11, color: [86, 112, 142], power: 0.17, seed: 5.2, mode: 5 });
   a.lights.push({ id: 'city2', x: 12.5, y: 8.0, z: 0, r: 10, color: [70, 94, 122], power: 0.14, seed: 6.4, mode: 5 });
 
-  a.spawns.fromStair = { x: 1.9, y: ROOF.door.y };
+  a.spawns.fromStair = { x: 2.2, y: ROOF.door.y };
   /* 这里**故意不放 link**：楼道门上的互动只有"锁死"一个动作（见 main.js 的
      roofInteract）。同一个位置既能锁门又能下楼的话，E 会变成两义的 —— 而且
      对讲机刚交代过"上去以后先把楼道门锁死"，天台本来就是单向的。 */
 
   a.fg = roofParapetFg(a, rand, th);
   a.storm = true;
+
+  /* --- 露天：远景背景层 + 天空光 --- */
+  const horizon = 84;
+  const bd = makeCanvas(VIEW_W, VIEW_H);
+  paintRoofBackdrop(bd.g, horizon, mulberry32(0x51c1));
+  a.backdrop = bd.c;
+
+  /* 天空不能被"房间遮罩"裁掉，否则屋面以外一律是纯黑，远景等于没画。
+     天台改成不裁剪（noMask），改用一张只覆盖屋面之外的天空光贴图，
+     让背景层按高度露出不同亮度：地平线最亮，越往上越暗。
+     房间那块由 main.js 的 ensureAreaLights 用房间遮罩抠掉。 */
+  a.noMask = true;
+  a.skyPaint = (sg) => {
+    const gr = sg.createLinearGradient(0, 0, 0, VIEW_H);
+    gr.addColorStop(0, 'rgba(58,80,112,0.34)');
+    gr.addColorStop(horizon / VIEW_H - 0.06, 'rgba(92,120,158,0.62)');
+    gr.addColorStop(horizon / VIEW_H + 0.04, 'rgba(78,102,134,0.7)');
+    gr.addColorStop(0.55, 'rgba(44,62,88,0.34)');
+    gr.addColorStop(0.8, 'rgba(24,36,54,0.18)');
+    gr.addColorStop(1, 'rgba(10,16,26,0.1)');
+    sg.fillStyle = gr;
+    sg.fillRect(0, 0, VIEW_W, VIEW_H);
+  };
+  /* 远处楼顶的障碍灯：每帧几个小加色点，比整张背景重画便宜得多。
+     坐标是画布坐标，跟背景层同一套空间。 */
+  a.beacons = [
+    { x: 62, y: horizon - 41, s: 1.7, p: 0.0, c: '255,96,74' },
+    { x: 196, y: horizon - 26, s: 1.1, p: 2.1, c: '255,96,74' },
+    { x: 318, y: horizon - 52, s: 1.9, p: 4.0, c: '255,96,74' },
+    { x: 452, y: horizon - 18, s: 1.35, p: 1.2, c: '255,120,80' },
+    { x: 588, y: horizon - 36, s: 0.9, p: 3.4, c: '255,96,74' },
+  ];
+
   // 露天但没有月亮：比室内更冷、更暗，又不能暗到找不到帐篷（玩家有手电）
   a.ambient = 'rgba(34,52,72,0.07)';
   a.dark = 'rgba(2,4,7,1)';
   a.roof = ROOF;
-  return closeArea(a);
+  // 四周只有女儿墙：边界遮挡体按护墙高度给，不要按满高墙
+  return closeArea(a, { edgeH: ROOF_PH });
 }
 
 /* ------------------------------------------------------------------ *

@@ -52,12 +52,17 @@
         <span><i class="kbd">I</i>背包</span><span><i class="kbd">F</i>手电</span><span><i class="kbd">R</i>换弹</span><span><i class="kbd">V</i>视线 <b id="los-state">关</b></span><span><i class="kbd">H</i>隐藏</span>
       </div>
 
-      <!-- QTE：只走键盘，按键提示与限时条都在 DOM 上 -->
+      <!-- QTE：只走键盘。一次只出一个键，键帽外面套一圈往内收的限时环。
+           节拍点在上面，动作名在下面，连按段落多一条进度条。 -->
       <div id="qte" class="hidden">
-        <div class="qte-title" id="qte-title">挣脱</div>
-        <div class="qte-keys" id="qte-keys"></div>
-        <div class="qte-bar"><i id="qte-bar-fill"></i></div>
-        <div class="qte-hint" id="qte-hint">按下亮起的键</div>
+        <div class="q-title" id="qte-title">挣脱</div>
+        <div class="q-beats" id="qte-beats"></div>
+        <div class="q-stage">
+          <i class="q-ring" id="qte-ring"></i>
+          <div class="q-key" id="qte-key"><span id="qte-key-label">E</span></div>
+        </div>
+        <div class="q-caption" id="qte-caption"></div>
+        <div class="q-mash" id="qte-mash"><i id="qte-mash-fill"></i></div>
       </div>
 
       <!-- 序章结束 -->
