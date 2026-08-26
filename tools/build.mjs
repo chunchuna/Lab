@@ -31,8 +31,11 @@ await esbuild.build({
 
 // index.html：把 module 脚本换成普通脚本，并去掉开发用的东西
 let html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+/* 入口与样式都带 ?v=<版本> 的缓存串，替换时要把它一起吃掉，
+   否则产物里会留下指向 src/main.js 的引用 —— dist 里根本没有 src/。 */
 html = html
-  .replace('<script type="module" src="src/main.js"></script>', '<script src="game.js"></script>')
+  .replace(/<script type="module" src="src\/main\.js(\?[^"]*)?"><\/script>/, '<script src="game.js"></script>')
+  .replace(/href="style\.css(\?[^"]*)?"/, 'href="style.css"')
   .replace(/\n\s*<!--[^]*?-->/g, '');
 fs.writeFileSync(path.join(DIST, 'index.html'), html);
 
