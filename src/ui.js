@@ -10,6 +10,7 @@ let scanCtx = null;
 export const ITEM_NAMES = { pistol: '手枪 M1911', flashlight: '手电筒' };
 
 export function initUI() {
+  el.hud = $('#hud');
   el.messages = $('#messages');
   el.prompt = $('#prompt');
   el.promptText = $('#prompt-text');
@@ -169,6 +170,7 @@ export const keyLabel = (k) => KEY_LABEL[k] || k.toUpperCase();
 /** 开一段 QTE：只搭外壳（标题 + n 个节拍点），键还不出 */
 export function qteBegin(title, n) {
   el.qte.className = '';
+  el.hud.classList.add('qte-on'); // 字幕让位，别压在动作名上
   el.qteTitle.textContent = title;
   el.qteCaption.textContent = '';
   el.qteMash.style.width = '0%';
@@ -225,6 +227,7 @@ export function qteFailed(title) {
 
 export function hideQTE() {
   el.qte.className = 'hidden';
+  el.hud.classList.remove('qte-on');
 }
 
 /* ---------------- 序章结束 ---------------- */

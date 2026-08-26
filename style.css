@@ -198,7 +198,7 @@ html, body {
 .q-title {
   font-size: 1.2em;
   letter-spacing: 0.42em;
-  opacity: 0.5;
+  opacity: 0.72;
   margin-left: 0.42em;
 }
 /* 节拍点：这一段一共几拍、现在第几拍 */
@@ -210,11 +210,11 @@ html, body {
 }
 .q-beats i {
   display: block;
-  width: 1.5em;
-  height: 0.22em;
-  background: rgba(222, 216, 200, 0.22);
+  width: 1.9em;
+  height: 0.3em;
+  background: rgba(222, 216, 200, 0.3);
 }
-.q-beats i.done { background: rgba(222, 216, 200, 0.5); }
+.q-beats i.done { background: rgba(222, 216, 200, 0.62); }
 .q-beats i.now { background: var(--text); }
 
 /* 键帽舞台：键帽居中，限时环绕着它往里收 */
@@ -294,6 +294,11 @@ html, body {
 #qte.fail .q-title { background: var(--text); color: var(--surface); padding: 0 0.5em; opacity: 1; }
 #qte.fail .q-key { opacity: 0; transform: scale(0.7); transition: all 0.25s ease-out; }
 #qte.fail .q-ring { opacity: 0; }
+
+/* QTE 期间字幕让位：默认字幕就压在动作名那一行上，两段文字叠在一起没法读。
+   由 ui.js 在 #hud 上开关 .qte-on（#messages 是 #qte 的前一个兄弟，
+   CSS 选不到，只能从父节点下手）。 */
+#hud.qte-on #messages { bottom: 23em; }
 
 /* ---------- 序章结束 ---------- */
 /* 放在 #hud 里用 absolute：#stage 有 transform，position:fixed 会被裁掉 */
