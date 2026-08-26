@@ -654,6 +654,34 @@ function blocked(x, y, r = PLAYER_R) {
   return false;
 }
 
+/**
+ * 从 (x, y) 起向外找最近的可站点。`blocked()` 是绝对判定，一旦角色被摆进
+ * 碰撞体内部，任何方向的试探都会被拒绝，玩家就再也走不动了 —— 所以需要一条
+ * 单向的"出去"通道。
+ */
+function nudgeFree(x, y) {
+  if (!blocked(x, y)) return { x, y };
+  for (let step = 0.1; step <= 3; step += 0.1) {
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const nx = x + Math.cos(a) * step;
+      const ny = y + Math.sin(a) * step;
+      if (!blocked(nx, ny)) return { x: nx, y: ny };
+    }
+  }
+  return { x, y };
+}
+
+/** 沿 (dx, dy) 从 (x, y) 出发，最远能走多少而不撞上东西（上限 want） */
+function freeRun(x, y, dx, dy, want) {
+  let d = 0;
+  for (let t = 0.08; t <= want + 1e-6; t += 0.08) {
+    if (blocked(x + dx * t, y + dy * t)) return d;
+    d = t;
+  }
+  return want;
+}
+
 /** 统一移动意图：摇杆给屏幕方向，键盘给世界轴向 */
 function moveIntent() {
   if (pad.enabled && pad.move.mag > 0.1) {
@@ -712,6 +740,14 @@ function checkTriggers() {
 
 function movePlayer(dt) {
   const p = game.player;
+  /* 兜底解卡：QTE / 过场的动画器是直接赋值坐标的，不走碰撞。只要有一帧把人
+     落在碰撞体里，下面的每一次试探都会返回 blocked，WASD 就彻底失效。发现
+     嵌在几何体里就先推出去，再照常处理这一帧的移动。 */
+  if (blocked(p.x, p.y)) {
+    const free = nudgeFree(p.x, p.y);
+    p.x = free.x;
+    p.y = free.y;
+  }
   const mv = moveIntent();
   p.moving = mv.mag > 0.02;
   // 高度与触发区每帧都要更新：只在移动时更新的话，站在楼梯上不动
@@ -1425,7 +1461,7 @@ const FIGHT_BEATS = [
       game.shake = 3.4;
     },
     onHit: () => {
-      game.fight.side0 = 0.66; // 玩家往侧面滑开，丧尸从原来那条线上扑空
+      game.fight.side0 = game.fight.dodge; // 玩家往侧面滑开，丧尸从原来那条线上扑空
       game.fight.kick = 0.5;
       fx.dust(game.player.x, game.player.y, 0.04, 7);
       SFX.sfxStep();
@@ -1485,7 +1521,20 @@ function startFightQTE() {
   const l = Math.hypot(ux, uy) || 1;
   ux /= l;
   uy /= l;
-  game.fight = { px: p.x, py: p.y, ux, uy, d: Math.min(2.2, l), side: 0, side0: 0, zside: 0, kick: 0, armed: false };
+  /* 闪避那一拍会把玩家沿扭打轴的垂线整个平移过去，而这一段是直接赋值坐标、
+     不走碰撞的。玩家多半是从楼梯间那侧（西北）走过来掀的帐篷，站位就在帐篷
+     北边一点，往那个方向滑 0.66 格正好滑进帐篷的碰撞盒 —— QTE 结束后就再也
+     走不出来。所以在这里先量一量两侧各有多少空地，挑宽的那边，滑不满就少滑。 */
+  const nx = -uy;
+  const ny = ux;
+  const room = 0.66;
+  const rp = freeRun(p.x, p.y, nx, ny, room);
+  const rm = freeRun(p.x, p.y, -nx, -ny, room);
+  const dodge = rp >= rm ? rp : -rm;
+  game.fight = {
+    px: p.x, py: p.y, ux, uy, d: Math.min(2.2, l),
+    side: 0, side0: 0, zside: 0, kick: 0, armed: false, dodge,
+  };
   startQTE({
     id: 'fight',
     title: '挣脱',
