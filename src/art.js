@@ -41,6 +41,53 @@ export const PAL = {
 };
 
 /* ------------------------------------------------------------------ *
+ * 服装与外貌（第一章起玩家可自定义）
+ *
+ * outfit 描述"穿什么"：上衣三档 + 内衬 + 裤 + 鞋，drawCharacter /
+ * drawPortrait 都吃同一份。look 描述"长什么样"：肤色 + 发型 + 发色。
+ * 序章的白大褂就是 OUTFITS.lab，不传 outfit 时行为与旧版完全一致。
+ * ------------------------------------------------------------------ */
+
+export const OUTFITS = {
+  // 研究员白大褂（序章默认）
+  lab: {
+    coat: '#cdd6d9', shade: '#98a4a9', dark: '#6f7a80', lining: '#4d565c',
+    pants: '#3f474e', pantsD: '#2b3238', shoe: '#20262b',
+  },
+  // 营地统一配发的工装：土黄帆布夹克
+  camp: {
+    coat: '#93835f', shade: '#6f6248', dark: '#4e4534', lining: '#3b382c',
+    pants: '#4a4a3e', pantsD: '#34342c', shoe: '#2a2620',
+  },
+  // 士兵作战服（配头盔 + 防弹背心）
+  soldier: {
+    coat: '#4f5742', shade: '#3b4232', dark: '#262b1d', lining: '#414936',
+    pants: '#3b4232', pantsD: '#2d3327', shoe: '#1d211a', vest: true, helmet: true,
+  },
+  // 登记官：更深一号的军装，不穿背心
+  officer: {
+    coat: '#44503f', shade: '#333d30', dark: '#232b21', lining: '#2c3527',
+    pants: '#333a2e', pantsD: '#252a21', shoe: '#1d211a',
+  },
+};
+
+/** 难民的旧衣服：一组低饱和的杂色，按索引循环分配 */
+export const REFUGEE_OUTFITS = [
+  { coat: '#6e5f4c', shade: '#544936', dark: '#3a3226', lining: '#332d22', pants: '#41403a', pantsD: '#2d2c28', shoe: '#26221d' },
+  { coat: '#5c6068', shade: '#45484f', dark: '#303237', lining: '#2a2c30', pants: '#3d3a34', pantsD: '#2b2925', shoe: '#22201c' },
+  { coat: '#725548', shade: '#574036', dark: '#3c2c25', lining: '#332620', pants: '#3a3e38', pantsD: '#292c27', shoe: '#211f1a' },
+  { coat: '#57634f', shade: '#424c3c', dark: '#2d3429', lining: '#272d24', pants: '#44403c', pantsD: '#302d2a', shoe: '#26221e' },
+  { coat: '#7a705d', shade: '#5d5546', dark: '#413b30', lining: '#38332a', pants: '#3c4245', pantsD: '#2a2f31', shoe: '#22262a' },
+];
+
+export const HAIR_STYLES = ['messy', 'short', 'buzz', 'long', 'bald'];
+export const HAIR_NAMES = { messy: '乱发', short: '短发', buzz: '寸头', long: '长发', bald: '光头' };
+export const HAIR_COLORS = ['#4a3728', '#23201c', '#6e4a2a', '#93836c', '#5c2e22'];
+export const SKIN_TONES = ['#c79a76', '#d9b08e', '#b08662', '#8f6a4e'];
+
+export const DEFAULT_LOOK = { skin: SKIN_TONES[0], hair: 'messy', hairCol: HAIR_COLORS[0] };
+
+/* ------------------------------------------------------------------ *
  * 基础绘制助手
  * ------------------------------------------------------------------ */
 
@@ -666,7 +713,8 @@ const NO_POSE = {};
 /**
  * 绘制研究员角色。
  * sx, sy = 脚底屏幕坐标
- * o = { aim:{x,y}(屏幕方向单位向量), walk, moving, leftItem, rightItem, flashOn, pose }
+ * o = { aim:{x,y}(屏幕方向单位向量), walk, moving, leftItem, rightItem, flashOn, pose,
+ *       outfit(OUTFITS 里的一套), look({skin,hair,hairCol}), slung(胸前挎枪) }
  *
  * 返回两只手与枪口的屏幕坐标（已经过 scale），QTE 要靠枪口位置发弹道。
  */
@@ -701,6 +749,14 @@ function drawCharacterBody(g, sx, sy, o) {
   const x = Math.round(sx);
   const y = Math.round(sy);
 
+  // 服装与外貌：不传就是序章的白大褂研究员，旧调用零改动
+  const fit = o.outfit || OUTFITS.lab;
+  const lk = o.look || DEFAULT_LOOK;
+  const skin = lk.skin || PAL.skin;
+  const skinD = shade(skin, -0.24);
+  const hairCol = lk.hairCol || PAL.hair;
+  const hairStyle = lk.hair || 'messy';
+
   /* 姿势量取整/量化：屈身与下沉落在整像素上，上身旋转量化到 7.5° 一档 ——
      过场里的动作从平滑补间变成一格一格的定格步进 */
   const crouch = Math.round(po.crouch || 0);
@@ -726,13 +782,13 @@ function drawCharacterBody(g, sx, sy, o) {
   const lb = Math.round(legs && legs.lb ? legs.lb : 0);
   const legTop = baseY - 9 + crouch;
   const legH = Math.max(2, 8 - crouch);
-  g.fillStyle = PAL.pants;
+  g.fillStyle = fit.pants;
   g.fillRect(x - 4 + l1, legTop - la, 3, legH);
   g.fillRect(x + 1 + l2, legTop - lb, 3, legH);
-  g.fillStyle = PAL.pantsD;
+  g.fillStyle = fit.pantsD;
   g.fillRect(x - 4 + l1, legTop - la, 1, legH);
   g.fillRect(x + 1 + l2, legTop - lb, 1, legH);
-  g.fillStyle = PAL.shoe;
+  g.fillStyle = fit.shoe;
   g.fillRect(x - 4 + l1 - (dirRight > 0 ? 0 : 1), legTop + legH - 2 - la, 4, 2);
   g.fillRect(x + 1 + l2 - (dirRight > 0 ? 0 : 1), legTop + legH - 2 - lb, 4, 2);
 
@@ -746,31 +802,41 @@ function drawCharacterBody(g, sx, sy, o) {
   }
   const upY = crouch; // 上半身随屈身一起下沉
 
-  // 白大褂下摆
-  g.fillStyle = PAL.coatShade;
+  // 上衣下摆（白大褂/夹克同一块，颜色跟服装走）
+  g.fillStyle = fit.shade;
   g.fillRect(x - 5, baseY - 13 + upY, 10, 5);
-  g.fillStyle = PAL.coat;
+  g.fillStyle = fit.coat;
   g.fillRect(x - 5, baseY - 13 + upY, 10, 3);
 
   // 躯干
-  g.fillStyle = PAL.coat;
+  g.fillStyle = fit.coat;
   g.fillRect(x - 5, baseY - 21 + upY, 10, 9);
   // 阴影侧
-  g.fillStyle = PAL.coatShade;
+  g.fillStyle = fit.shade;
   g.fillRect(x + (dirRight > 0 ? 2 : -5), baseY - 21 + upY, 3, 9);
   // 内衬 / 前襟
-  g.fillStyle = '#4d565c';
+  g.fillStyle = fit.lining;
   if (!back) {
     g.fillRect(x - 1 + dirRight, baseY - 20 + upY, 2, 7);
-    g.fillStyle = PAL.coatDark;
+    g.fillStyle = fit.dark;
     g.fillRect(x - 2 + dirRight, baseY - 20 + upY, 1, 8);
   } else {
-    g.fillStyle = PAL.coatDark;
+    g.fillStyle = fit.dark;
     g.fillRect(x - 5, baseY - 17 + upY, 10, 1);
   }
   // 领子
-  g.fillStyle = PAL.coatDark;
+  g.fillStyle = fit.dark;
   g.fillRect(x - 4, baseY - 21 + upY, 8, 1);
+
+  // 防弹背心：压在躯干中段的一块深色板 + 一条肩带
+  if (fit.vest) {
+    g.fillStyle = '#33392a';
+    g.fillRect(x - 4, baseY - 20 + upY, 8, 6);
+    g.fillStyle = '#22271c';
+    g.fillRect(x + (dirRight > 0 ? 1 : -4), baseY - 20 + upY, 3, 6);
+    g.fillStyle = '#454d38';
+    g.fillRect(x - 4, baseY - 20 + upY, 8, 1);
+  }
 
   // 腰侧的枪套：拔枪那一拍之前枪在这里，"手去摸枪"才有东西可摸
   if (po.holster) {
@@ -786,17 +852,62 @@ function drawCharacterBody(g, sx, sy, o) {
   const hty = po.headTilt ? Math.round(po.headTilt.y) : 0;
   const hx = x - 3 + dirRight + htx;
   const hy = baseY - 28 + upY + hty;
-  g.fillStyle = PAL.skin;
+  g.fillStyle = skin;
   g.fillRect(hx, hy + 1, 6, 6);
-  g.fillStyle = PAL.skinD;
+  g.fillStyle = skinD;
   g.fillRect(hx + (dirRight > 0 ? 4 : 0), hy + 1, 2, 6);
-  // 头发
-  g.fillStyle = PAL.hair;
-  g.fillRect(hx - 1, hy, 8, 3);
-  g.fillRect(hx - 1, hy, 2, 5);
-  g.fillRect(hx + 6, hy, 1, 5);
+  // 头发：按发型堆方块。光头什么都不画，寸头只描一层贴皮短茬
+  g.fillStyle = hairCol;
+  if (fit.helmet) {
+    // 头盔盖住头发：台阶收顶 + 帽檐一条
+    g.fillStyle = '#3e4433';
+    g.fillRect(hx - 1, hy - 1, 8, 3);
+    g.fillRect(hx, hy - 2, 6, 1);
+    g.fillStyle = '#4c5340';
+    g.fillRect(hx, hy - 2, 4, 1);
+    g.fillStyle = '#2c3125';
+    g.fillRect(hx - 1, hy + 2, 8, 1);
+  } else if (hairStyle === 'bald') {
+    g.fillStyle = shade(skin, 0.08);
+    g.fillRect(hx, hy, 6, 1);
+  } else if (hairStyle === 'buzz') {
+    g.fillStyle = shade(hairCol, -0.28);
+    g.fillRect(hx - 1, hy, 8, 2);
+  } else if (hairStyle === 'short') {
+    g.fillRect(hx - 1, hy, 8, 2);
+    g.fillRect(hx - 1, hy, 1, 4);
+    g.fillRect(hx + 6, hy, 1, 3);
+  } else if (hairStyle === 'long') {
+    g.fillRect(hx - 1, hy, 8, 3);
+    g.fillRect(hx - 2, hy, 3, 8);
+    g.fillRect(hx + 6, hy, 2, 8);
+  } else {
+    // messy（默认，序章同款）
+    g.fillRect(hx - 1, hy, 8, 3);
+    g.fillRect(hx - 1, hy, 2, 5);
+    g.fillRect(hx + 6, hy, 1, 5);
+  }
   if (back) {
-    g.fillRect(hx - 1, hy, 8, 7);
+    if (fit.helmet) {
+      g.fillStyle = '#3e4433';
+      g.fillRect(hx - 1, hy - 1, 8, 8);
+      g.fillStyle = '#2c3125';
+      g.fillRect(hx - 1, hy + 4, 8, 1);
+    } else if (hairStyle === 'bald') {
+      g.fillStyle = skin;
+      g.fillRect(hx, hy + 1, 6, 6);
+      g.fillStyle = skinD;
+      g.fillRect(hx + (dirRight > 0 ? 4 : 0), hy + 1, 2, 6);
+    } else if (hairStyle === 'buzz') {
+      g.fillStyle = shade(hairCol, -0.28);
+      g.fillRect(hx - 1, hy, 8, 5);
+    } else if (hairStyle === 'long') {
+      g.fillStyle = hairCol;
+      g.fillRect(hx - 1, hy, 8, 9);
+    } else {
+      g.fillStyle = hairCol;
+      g.fillRect(hx - 1, hy, 8, 7);
+    }
   } else {
     g.fillStyle = '#1a1a1a';
     const ey = hy + 4;
@@ -842,9 +953,9 @@ function drawCharacterBody(g, sx, sy, o) {
     ax = Math.round(ax);
     ay = Math.round(ay);
     // 手臂：2px 像素直线 + 1px 底缘压暗，代替 round cap 的 stroke
-    pxLine(g, shx, shoulderY, ax, ay, PAL.coat, 2);
+    pxLine(g, shx, shoulderY, ax, ay, fit.coat, 2);
     pxLine(g, shx, shoulderY + 2, ax, ay + 2, 'rgba(0,0,0,0.18)', 1);
-    g.fillStyle = PAL.skin;
+    g.fillStyle = skin;
     g.fillRect(ax, ay, 2, 2);
     if (item) {
       const a = itemAng === null ? Math.atan2(aim.y, aim.x) : itemAng;
@@ -862,6 +973,16 @@ function drawCharacterBody(g, sx, sy, o) {
   const nearItem = hide ? null : nearSide < 0 ? o.leftItem : o.rightItem;
   const arms = po.arms || null;
   const farPos = drawArm(farSide, farItem, arms && arms.far);
+
+  // 挎枪：斜挂胸前的卡宾枪（画在远手之后、近手之前，被近臂自然压住一角）
+  if (o.slung) {
+    const gy = baseY - 17 + upY;
+    pxLine(g, x - dirRight * 5, gy - 2, x + dirRight * 5, gy + 3, '#1c211d', 2);
+    pxLine(g, x - dirRight * 5, gy - 3, x + dirRight * 5, gy + 2, '#333a34', 1);
+    g.fillStyle = '#15181a';
+    g.fillRect(x + dirRight * 2 - 1, gy + 2, 2, 3);
+  }
+
   const nearPos = drawArm(nearSide, nearItem, arms && arms.near);
   g.restore();
 
@@ -2072,6 +2193,15 @@ export function drawPortrait(g, W, H, o = {}) {
   g.translate((W - 120 * s) / 2, (H - 200 * s) / 2);
   g.scale(s, s);
 
+  // 服装与外貌：不传 = 序章白大褂 + 默认长相，跟旧版逐像素一致
+  const fit = o.outfit || OUTFITS.lab;
+  const lk = o.look || DEFAULT_LOOK;
+  const isLab = !o.outfit || o.outfit === OUTFITS.lab;
+  const skin = lk.skin || PAL.skin;
+  const skinD = shade(skin, -0.24);
+  const hairCol = lk.hairCol || PAL.hair;
+  const hairStyle = lk.hair || 'messy';
+
   // 背景：一块纯色，不加网格和光斑
   g.fillStyle = '#1b1b20';
   g.fillRect(0, 0, 120, 200);
@@ -2085,38 +2215,38 @@ export function drawPortrait(g, W, H, o = {}) {
   };
 
   // 腿
-  R(47, 130, 11, 54, PAL.pants);
-  R(62, 130, 11, 54, PAL.pants);
-  R(47, 130, 3, 54, PAL.pantsD);
-  R(62, 130, 3, 54, PAL.pantsD);
+  R(47, 130, 11, 54, fit.pants);
+  R(62, 130, 11, 54, fit.pants);
+  R(47, 130, 3, 54, fit.pantsD);
+  R(62, 130, 3, 54, fit.pantsD);
   R(55, 130, 3, 54, 'rgba(0,0,0,0.18)');
   R(70, 130, 3, 54, 'rgba(0,0,0,0.18)');
   // 鞋
-  R(44, 183, 15, 9, PAL.shoe);
-  R(61, 183, 15, 9, PAL.shoe);
-  R(44, 183, 15, 2, '#2f363b');
-  R(44, 190, 15, 2, '#12161a');
-  R(61, 190, 15, 2, '#12161a');
+  R(44, 183, 15, 9, fit.shoe);
+  R(61, 183, 15, 9, fit.shoe);
+  R(44, 183, 15, 2, shade(fit.shoe, 0.22));
+  R(44, 190, 15, 2, shade(fit.shoe, -0.4));
+  R(61, 190, 15, 2, shade(fit.shoe, -0.4));
 
-  // 白大褂主体
-  R(40, 62, 40, 80, PAL.coat);
+  // 上衣主体
+  R(40, 62, 40, 80, fit.coat);
   // 下摆（略微展开）：逐行扫描的斜边台阶
   pxPoly(g, [
     [40, 120],
     [80, 120],
     [83, 144],
     [37, 144],
-  ], PAL.coat);
+  ], fit.coat);
   // 侧面阴影
-  R(72, 62, 11, 82, PAL.coatShade);
+  R(72, 62, 11, 82, fit.shade);
   R(37, 62, 4, 82, 'rgba(0,0,0,0.12)');
 
-  // 内衬衬衫 + 领口
+  // 内衬 + 领口
   pxPoly(g, [
     [52, 60],
     [68, 60],
     [60, 86],
-  ], '#39464d');
+  ], isLab ? '#39464d' : fit.lining);
   // 衣襟
   pxPoly(g, [
     [40, 62],
@@ -2125,98 +2255,111 @@ export function drawPortrait(g, W, H, o = {}) {
     [58, 144],
     [37, 144],
     [40, 120],
-  ], PAL.coat);
+  ], fit.coat);
   pxPolyline(g, [
     [58, 62],
     [61, 90],
     [59, 144],
-  ], PAL.coatDark, 1);
-  // 领子
-  pxPoly(g, [
-    [50, 58],
-    [60, 74],
-    [56, 58],
-  ], '#e2e8ea');
-  pxPoly(g, [
-    [70, 58],
-    [60, 74],
-    [64, 58],
-  ], '#e2e8ea');
-  // 纽扣
-  g.fillStyle = PAL.coatDark;
-  for (let i = 0; i < 4; i++) g.fillRect(62, 96 + i * 11, 2, 2);
+  ], fit.dark, 1);
 
-  // 口袋 + 笔（1px 描边用四条 fillRect 拼）
-  R(43, 100, 13, 14, 'rgba(0,0,0,0.10)');
-  g.fillStyle = PAL.coatDark;
-  g.fillRect(43, 100, 13, 1);
-  g.fillRect(43, 113, 13, 1);
-  g.fillRect(43, 100, 1, 14);
-  g.fillRect(55, 100, 1, 14);
-  R(46, 96, 2, 9, '#3f6f8a');
-  R(50, 96, 2, 9, '#8a3f3f');
+  if (isLab) {
+    // 领子（白大褂翻领）
+    pxPoly(g, [
+      [50, 58],
+      [60, 74],
+      [56, 58],
+    ], '#e2e8ea');
+    pxPoly(g, [
+      [70, 58],
+      [60, 74],
+      [64, 58],
+    ], '#e2e8ea');
+    // 纽扣
+    g.fillStyle = fit.dark;
+    for (let i = 0; i < 4; i++) g.fillRect(62, 96 + i * 11, 2, 2);
 
-  // 工牌
-  R(66, 84, 12, 15, '#c8d0d3');
-  R(66, 84, 12, 4, '#8e989c');
-  R(68, 90, 4, 5, '#4c585e');
-  R(73, 90, 4, 1, '#7c868a');
-  R(73, 93, 4, 1, '#7c868a');
-  pxLine(g, 72, 84, 70, 78, '#6d7679', 1);
+    // 口袋 + 笔（1px 描边用四条 fillRect 拼）
+    R(43, 100, 13, 14, 'rgba(0,0,0,0.10)');
+    g.fillStyle = fit.dark;
+    g.fillRect(43, 100, 13, 1);
+    g.fillRect(43, 113, 13, 1);
+    g.fillRect(43, 100, 1, 14);
+    g.fillRect(55, 100, 1, 14);
+    R(46, 96, 2, 9, '#3f6f8a');
+    R(50, 96, 2, 9, '#8a3f3f');
 
-  // 污渍 / 血迹：像素摊
-  pxBlob(g, 50, 128, 7, 5, 'rgba(74,26,22,0.5)');
-  pxBlob(g, 45, 137, 4, 3, 'rgba(74,26,22,0.5)');
-  pxBlob(g, 70, 116, 9, 7, 'rgba(60,58,44,0.28)');
+    // 工牌
+    R(66, 84, 12, 15, '#c8d0d3');
+    R(66, 84, 12, 4, '#8e989c');
+    R(68, 90, 4, 5, '#4c585e');
+    R(73, 90, 4, 1, '#7c868a');
+    R(73, 93, 4, 1, '#7c868a');
+    pxLine(g, 72, 84, 70, 78, '#6d7679', 1);
+
+    // 污渍 / 血迹：像素摊
+    pxBlob(g, 50, 128, 7, 5, 'rgba(74,26,22,0.5)');
+    pxBlob(g, 45, 137, 4, 3, 'rgba(74,26,22,0.5)');
+    pxBlob(g, 70, 116, 9, 7, 'rgba(60,58,44,0.28)');
+  } else {
+    // 帆布工装：布翻领 + 按扣 + 两只带盖胸袋，没有工牌也没有血
+    pxPoly(g, [
+      [50, 58],
+      [60, 70],
+      [56, 58],
+    ], shade(fit.coat, 0.14));
+    pxPoly(g, [
+      [70, 58],
+      [60, 70],
+      [64, 58],
+    ], shade(fit.coat, 0.14));
+    g.fillStyle = fit.dark;
+    for (let i = 0; i < 4; i++) g.fillRect(62, 96 + i * 11, 2, 2);
+    for (const px of [43, 64]) {
+      R(px, 88, 13, 11, 'rgba(0,0,0,0.10)');
+      g.fillStyle = fit.dark;
+      g.fillRect(px, 88, 13, 1);
+      g.fillRect(px, 98, 13, 1);
+      g.fillRect(px, 88, 1, 11);
+      g.fillRect(px + 12, 88, 1, 11);
+      R(px + 5, 87, 3, 3, fit.dark);
+    }
+    // 下摆缝线
+    pxLine(g, 38, 138, 82, 138, 'rgba(0,0,0,0.16)', 1);
+  }
 
   // 手臂
   for (const side of [-1, 1]) {
     const ax = side < 0 ? 33 : 77;
-    R(ax, 64, 10, 66, PAL.coat);
-    R(ax + (side < 0 ? 0 : 7), 64, 3, 66, side < 0 ? 'rgba(0,0,0,0.14)' : PAL.coatShade);
+    R(ax, 64, 10, 66, fit.coat);
+    R(ax + (side < 0 ? 0 : 7), 64, 3, 66, side < 0 ? 'rgba(0,0,0,0.14)' : fit.shade);
     // 袖口
-    R(ax - 1, 124, 11, 5, '#b9c2c6');
+    R(ax - 1, 124, 11, 5, isLab ? '#b9c2c6' : shade(fit.coat, -0.2));
     // 手
-    R(ax + 1, 129, 9, 11, PAL.skin);
-    R(ax + (side < 0 ? 1 : 7), 129, 3, 11, PAL.skinD);
+    R(ax + 1, 129, 9, 11, skin);
+    R(ax + (side < 0 ? 1 : 7), 129, 3, 11, skinD);
     g.fillStyle = 'rgba(0,0,0,0.2)';
     g.fillRect(ax + 1, 138, 9, 1);
   }
 
   // 肩线
-  R(38, 60, 44, 4, '#e0e6e8');
-  R(38, 60, 44, 1, '#f0f4f5');
+  R(38, 60, 44, 4, shade(fit.coat, 0.16));
+  R(38, 60, 44, 1, shade(fit.coat, 0.3));
 
   // 脖子
-  R(55, 50, 10, 12, PAL.skin);
+  R(55, 50, 10, 12, skin);
   R(55, 50, 10, 12, 'rgba(0,0,0,0)');
   R(55, 56, 10, 6, 'rgba(0,0,0,0.22)');
 
   // 头
-  R(50, 26, 20, 28, PAL.skin);
-  R(64, 26, 6, 28, PAL.skinD);
-  R(48, 36, 2, 8, PAL.skin); // 耳
-  R(70, 36, 2, 8, PAL.skinD);
-  // 头发：横条堆出圆顶轮廓 + 两条鬓角，不用曲线
-  g.fillStyle = PAL.hair;
-  for (const [bx, by, bw, bh] of [
-    [54, 16, 12, 2],
-    [51, 18, 18, 2],
-    [49, 20, 22, 3],
-    [48, 23, 24, 8],
-    [48, 31, 3, 11],
-    [69, 30, 3, 10],
-  ])
-    g.fillRect(bx, by, bw, bh);
-  g.fillStyle = '#5c452f';
-  g.fillRect(52, 20, 12, 3);
-  // 乱发
-  g.fillStyle = PAL.hair;
-  g.fillRect(56, 16, 3, 3);
-  g.fillRect(64, 17, 2, 3);
+  R(50, 26, 20, 28, skin);
+  R(64, 26, 6, 28, skinD);
+  R(48, 36, 2, 8, skin); // 耳
+  R(70, 36, 2, 8, skinD);
+  // 头发：横条堆方块，按发型换轮廓，不用曲线
+  drawPortraitHair(g, hairStyle, hairCol, skin);
   // 眉
-  R(53, 37, 6, 2, '#3a2a1e');
-  R(62, 37, 6, 2, '#3a2a1e');
+  R(53, 37, 6, 2, shade(hairCol, -0.3));
+  R(62, 37, 6, 2, shade(hairCol, -0.3));
   // 眼
   R(53, 40, 6, 4, '#e6ecec');
   R(62, 40, 6, 4, '#cdd4d4');
@@ -2243,6 +2386,68 @@ export function drawPortrait(g, W, H, o = {}) {
   if (o.right) drawPortraitItem(g, 82, 141, o.right, o);
 
   g.restore();
+}
+
+/** 立绘头发：120x200 设计空间，头部矩形 (50,26)-(70,54)，全部横条方块堆 */
+function drawPortraitHair(g, style, col, skin) {
+  const R = (x, y, w, h, c) => {
+    g.fillStyle = c;
+    g.fillRect(x, y, w, h);
+  };
+  if (style === 'bald') {
+    R(52, 24, 16, 2, shade(skin, 0.1));
+    return;
+  }
+  if (style === 'buzz') {
+    const c = shade(col, -0.28);
+    for (const [bx, by, bw, bh] of [
+      [54, 20, 12, 2],
+      [51, 22, 18, 2],
+      [49, 24, 22, 4],
+    ]) R(bx, by, bw, bh, c);
+    R(48, 28, 2, 6, c);
+    R(70, 28, 2, 6, c);
+    return;
+  }
+  if (style === 'short') {
+    for (const [bx, by, bw, bh] of [
+      [54, 18, 12, 2],
+      [51, 20, 18, 2],
+      [49, 22, 22, 3],
+      [48, 25, 24, 6],
+    ]) R(bx, by, bw, bh, col);
+    R(48, 31, 3, 6, col);
+    R(69, 31, 3, 5, col);
+    R(52, 22, 12, 2, shade(col, 0.14));
+    return;
+  }
+  if (style === 'long') {
+    for (const [bx, by, bw, bh] of [
+      [54, 16, 12, 2],
+      [51, 18, 18, 2],
+      [49, 20, 22, 3],
+      [48, 23, 24, 8],
+    ]) R(bx, by, bw, bh, col);
+    // 两侧垂到肩
+    R(46, 30, 5, 34, col);
+    R(69, 30, 5, 34, col);
+    R(46, 60, 5, 4, shade(col, -0.2));
+    R(69, 60, 5, 4, shade(col, -0.2));
+    R(52, 20, 12, 3, shade(col, 0.14));
+    return;
+  }
+  // messy（默认，序章同款轮廓）
+  for (const [bx, by, bw, bh] of [
+    [54, 16, 12, 2],
+    [51, 18, 18, 2],
+    [49, 20, 22, 3],
+    [48, 23, 24, 8],
+    [48, 31, 3, 11],
+    [69, 30, 3, 10],
+  ]) R(bx, by, bw, bh, col);
+  R(52, 20, 12, 3, shade(col, 0.16));
+  R(56, 16, 3, 3, col);
+  R(64, 17, 2, 3, col);
 }
 
 function drawPortraitItem(g, x, y, id, o) {
@@ -3238,4 +3443,602 @@ export function drawFlashIcon(g, w, h, on) {
     }
   }
   g.restore();
+}
+
+/* ------------------------------------------------------------------ *
+ * 第一章 · 难民营地道具
+ *
+ * 清晨低角度阳光的约定（整章统一，别一个道具一个方向）：
+ *   太阳在屏幕右上（世界 -y 侧），顶面最亮偏暖，+x 面次亮，
+ *   +y 面背光偏冷暗，长影一律甩向世界 +y（屏幕左下）。
+ * 影子直接烘进精灵 —— 白天场景不跑 lighting.finish()，没有运行时
+ * 光照兜底，道具自己不带影子就会浮在地上。
+ * ------------------------------------------------------------------ */
+
+/** 清晨长影：足迹往世界 +y 拉出的斜四边形 + 抖动收边 */
+export function morningShadow(g, ox, oy, w, d, len = 1.4, a = 0.2) {
+  const p0 = P(ox, oy, -w / 2, -d / 2 + 0.15, 0);
+  const p1 = P(ox, oy, w / 2, -d / 2 + 0.15, 0);
+  const p2 = P(ox, oy, w / 2 - 0.3, d / 2 + len, 0);
+  const p3 = P(ox, oy, -w / 2 - 0.3, d / 2 + len, 0);
+  pxPoly(g, [p0, p1, p2, p3], `rgba(24,26,40,${a.toFixed(3)})`);
+  pxDitherLine(g, p3[0], p3[1], p2[0], p2[1], `rgba(24,26,40,${(a * 0.7).toFixed(3)})`);
+}
+
+/**
+ * 军用帐篷：干净的制式脊帐，入口在 +x 端。
+ * opts = { rx, ry, h, open(默认 true), sign(门口挂一块方牌的颜色) }
+ */
+export function makeArmyTent(seed = 801, opts = {}) {
+  const rand = mulberry32(seed);
+  const RX = opts.rx || 2.0;
+  const RY = opts.ry || 1.3;
+  const H = opts.h || 1.8;
+  const open = opts.open !== false;
+  return makeProp(RX * 2 + 1.0, RY * 2 + 1.4, H + 0.3, (g, ox, oy) => {
+    morningShadow(g, ox, oy, RX * 2, RY * 2, H * 1.2, 0.2);
+    aoShadow(g, ox, oy, RX * 2, RY * 2, 0.35);
+
+    const ridgeA = P(ox, oy, -RX, 0, H);
+    const ridgeB = P(ox, oy, RX, 0, H);
+    // 远侧坡面：只当轮廓
+    poly(g, [P(ox, oy, -RX, -RY, 0), P(ox, oy, RX, -RY, 0), ridgeB, ridgeA], '#39412f');
+    // 近侧坡面：三档受光分带，脊线亮 → 下摆暗
+    const hemA = P(ox, oy, -RX, RY, 0);
+    const hemB = P(ox, oy, RX, RY, 0);
+    const mixPt = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+    const bandCols = ['#7c8a5e', '#606d49', '#495439'];
+    const cuts = [0, 0.42, 0.74, 1];
+    for (let b = 0; b < 3; b++) {
+      poly(g, [
+        mixPt(ridgeA, hemA, cuts[b]), mixPt(ridgeB, hemB, cuts[b]),
+        mixPt(ridgeB, hemB, cuts[b + 1]), mixPt(ridgeA, hemA, cuts[b + 1]),
+      ], bandCols[b]);
+      if (b > 0) {
+        const u = mixPt(ridgeA, hemA, cuts[b]);
+        const v = mixPt(ridgeB, hemB, cuts[b]);
+        pxDitherLine(g, u[0], u[1], v[0], v[1], bandCols[b - 1]);
+      }
+    }
+    // 帆布接缝：沿脊线到下摆的直纹（制式帐篷，纹路等距不歪）
+    const seams = Math.max(4, Math.round(RX * 4));
+    for (let i = 1; i < seams; i++) {
+      const t = i / seams;
+      const a2 = P(ox, oy, -RX + t * RX * 2, 0.03, H - 0.04);
+      const b2 = P(ox, oy, -RX + t * RX * 2, RY, 0);
+      pxLine(g, a2[0], a2[1], b2[0], b2[1], 'rgba(0,0,0,0.16)', 1);
+    }
+    // 脊线
+    pxLine(g, ridgeA[0], ridgeA[1], ridgeB[0], ridgeB[1], '#95a476', 2);
+
+    // +x 端面
+    const e0 = P(ox, oy, RX, -RY, 0);
+    const e1 = P(ox, oy, RX, RY, 0);
+    poly(g, [e0, e1, ridgeB], '#55613f');
+    if (open) {
+      // 门洞：往里是暗的，两侧门帘卷起
+      const c0 = mixPt(e0, e1, 0.32);
+      const c1 = mixPt(e0, e1, 0.68);
+      poly(g, [
+        [c0[0], c0[1]],
+        [c1[0], c1[1]],
+        [ridgeB[0] + 1, ridgeB[1] + 4],
+      ], '#12160f');
+      pxLine(g, c0[0], c0[1], ridgeB[0], ridgeB[1] + 2, '#6d7b52', 2);
+      pxLine(g, c1[0], c1[1], ridgeB[0] + 2, ridgeB[1] + 3, '#3f4a30', 2);
+    } else {
+      // 系死的门缝
+      const cm = mixPt(e0, e1, 0.5);
+      pxLine(g, cm[0], cm[1], ridgeB[0], ridgeB[1], '#39412f', 1);
+      g.fillStyle = '#39412f';
+      for (let i = 1; i < 4; i++) {
+        const p = mixPt(cm, ridgeB, i / 4);
+        g.fillRect(Math.round(p[0]) - 1, Math.round(p[1]), 3, 1);
+      }
+    }
+    if (opts.sign) {
+      // 门口的方牌（内容不写字，交给 DOM 提示）
+      const sp = mixPt(e0, e1, 0.16);
+      g.fillStyle = '#20261f';
+      g.fillRect(sp[0] - 1, sp[1] - 14, 2, 14);
+      g.fillStyle = opts.sign;
+      g.fillRect(sp[0] - 5, sp[1] - 20, 11, 7);
+      g.fillStyle = 'rgba(0,0,0,0.3)';
+      g.fillRect(sp[0] - 5, sp[1] - 15, 11, 2);
+    }
+
+    // 地钉 + 拉绳（干净制式，左右对称）
+    for (const [gx, gy] of [
+      [-RX - 0.45, RY + 0.35], [RX + 0.4, RY + 0.38],
+      [-RX - 0.42, -RY - 0.3], [RX + 0.38, -RY - 0.32],
+    ]) {
+      const a3 = P(ox, oy, gx > 0 ? RX : -RX, 0, H - 0.05);
+      const b3 = P(ox, oy, gx, gy, 0);
+      pxLine(g, a3[0], a3[1], b3[0], b3[1], 'rgba(205,210,188,0.45)', 1);
+      g.fillStyle = '#5d645c';
+      g.fillRect(b3[0] - 1, b3[1] - 2, 2, 3);
+    }
+    // 布面一点旧渍
+    g.globalAlpha = 0.2;
+    for (let i = 0; i < 6; i++) {
+      const p = P(ox, oy, -RX + rand() * RX * 2, rand() * RY, (1 - rand()) * H * 0.5);
+      pxBlob(g, p[0], p[1], 1 + rand() * 3, 1 + rand() * 2, '#2c3122', rand);
+    }
+    g.globalAlpha = 1;
+  });
+}
+
+/** 难民的简易棚：塑料布/旧帆布 A 字棚，四种配色按 variant 轮换 */
+export function makeRefugeeTent(seed = 821, variant = 0) {
+  const rand = mulberry32(seed + variant * 131);
+  const RX = 0.9 + rand() * 0.3;
+  const RY = 0.62 + rand() * 0.2;
+  const H = 0.9 + rand() * 0.25;
+  const [lit, mid, dark] = [
+    ['#5b7186', '#46586a', '#354352'],
+    ['#827961', '#645d4a', '#4a4537'],
+    ['#77624c', '#5a4a39', '#41352a'],
+    ['#68755f', '#50594a', '#3b4237'],
+  ][variant % 4];
+  return makeProp(RX * 2 + 0.9, RY * 2 + 1.1, H + 0.25, (g, ox, oy) => {
+    morningShadow(g, ox, oy, RX * 2, RY * 2, H * 1.1, 0.18);
+    aoShadow(g, ox, oy, RX * 2, RY * 2, 0.4);
+
+    const ridgeA = P(ox, oy, -RX, 0, H);
+    const ridgeB = P(ox, oy, RX, 0, H);
+    poly(g, [P(ox, oy, -RX, -RY, 0), P(ox, oy, RX, -RY, 0), ridgeB, ridgeA], dark);
+    const hemA = P(ox, oy, -RX, RY, 0);
+    const hemB = P(ox, oy, RX, RY, 0);
+    const mixPt = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+    for (let b = 0; b < 2; b++) {
+      const cuts = [0, 0.55, 1];
+      poly(g, [
+        mixPt(ridgeA, hemA, cuts[b]), mixPt(ridgeB, hemB, cuts[b]),
+        mixPt(ridgeB, hemB, cuts[b + 1]), mixPt(ridgeA, hemA, cuts[b + 1]),
+      ], b ? mid : lit);
+      if (b) {
+        const u = mixPt(ridgeA, hemA, 0.55);
+        const v = mixPt(ridgeB, hemB, 0.55);
+        pxDitherLine(g, u[0], u[1], v[0], v[1], lit);
+      }
+    }
+    // 皱褶：歪歪扭扭的暗纹
+    for (let i = 1; i < 5; i++) {
+      const t = i / 5 + (rand() - 0.5) * 0.08;
+      const a2 = P(ox, oy, -RX + t * RX * 2, 0.02, H - 0.03);
+      const b2 = P(ox, oy, -RX + t * RX * 2 + (rand() - 0.5) * 0.2, RY, 0);
+      pxLine(g, a2[0], a2[1], b2[0], b2[1], 'rgba(0,0,0,0.24)', 1);
+    }
+    // 补丁：一两块异色方布
+    for (let i = 0; i < 2; i++) {
+      const p = P(ox, oy, -RX * 0.5 + rand() * RX, 0.2 + rand() * (RY * 0.6), H * 0.35);
+      g.fillStyle = i ? 'rgba(120,110,90,0.8)' : 'rgba(90,100,110,0.8)';
+      g.fillRect(Math.round(p[0]), Math.round(p[1]), 4 + (rand() * 3 | 0), 3 + (rand() * 2 | 0));
+    }
+    // 脊线（撑杆从两端露头）
+    pxLine(g, ridgeA[0] - 2, ridgeA[1] + 1, ridgeB[0] + 2, ridgeB[1] - 1, shade(lit, 0.2), 1);
+    // +x 端：洞开的口子
+    const e0 = P(ox, oy, RX, -RY, 0);
+    const e1 = P(ox, oy, RX, RY, 0);
+    poly(g, [e0, e1, ridgeB], mid);
+    poly(g, [
+      [(e0[0] + e1[0]) / 2 - 3, (e0[1] + e1[1]) / 2],
+      [(e0[0] + e1[0]) / 2 + 4, (e0[1] + e1[1]) / 2 + 3],
+      [ridgeB[0], ridgeB[1] + 4],
+    ], '#0d100e');
+    // 门口杂物：一只锅/一捆布
+    const m = P(ox, oy, RX + 0.45, RY * 0.4, 0);
+    g.fillStyle = '#4a4d4f';
+    g.fillRect(m[0] - 2, m[1] - 2, 5, 3);
+    g.fillStyle = '#6a6e70';
+    g.fillRect(m[0] - 2, m[1] - 2, 5, 1);
+    // 压边的石头
+    for (let i = 0; i < 3; i++) {
+      const p = P(ox, oy, -RX + rand() * RX * 2, RY + 0.12, 0);
+      g.fillStyle = ['#5d5d58', '#4c4c48'][i & 1];
+      g.fillRect(p[0], p[1] - 1, 2 + (rand() * 2 | 0), 2);
+    }
+  });
+}
+
+/** 沙袋墙：两层交错码放，axis='x' 沿 x 铺，'y' 沿 y 铺 */
+export function makeSandbags(seed = 831, len = 2, axis = 'x') {
+  const rand = mulberry32(seed);
+  const w = axis === 'x' ? len : 0.72;
+  const d = axis === 'x' ? 0.72 : len;
+  return makeProp(w + 0.4, d + 0.4, 0.75, (g, ox, oy) => {
+    morningShadow(g, ox, oy, w, d, 0.55, 0.18);
+    const n = Math.max(2, Math.round(len / 0.52));
+    const step = len / n;
+    for (let layer = 0; layer < 2; layer++) {
+      const z = layer * 0.24;
+      const off = layer ? step / 2 : 0;
+      const cnt = layer ? n - 1 : n;
+      for (let i = 0; i < cnt; i++) {
+        const t = -len / 2 + off + i * step;
+        const bx = axis === 'x' ? t : -0.32;
+        const by = axis === 'x' ? -0.32 : t;
+        const bw = axis === 'x' ? step * 0.94 : 0.64;
+        const bd = axis === 'x' ? 0.64 : step * 0.94;
+        const c = ['#8d7d5a', '#80714f', '#957f60'][(rand() * 3) | 0];
+        isoBox(g, ox, oy, bx, by, z, bw, bd, 0.24, shade(c, 0.16), shade(c, 0.02), shade(c, -0.26));
+        // 袋口束线
+        const p = P(ox, oy, bx + bw / 2, by + bd / 2, z + 0.24);
+        g.fillStyle = 'rgba(0,0,0,0.25)';
+        g.fillRect(p[0] - 2, p[1], 4, 1);
+      }
+    }
+  });
+}
+
+/** 瞭望塔：四腿木架 + 平台围栏 + 顶棚，营地制高点 */
+export function makeWatchtower(seed = 841) {
+  const rand = mulberry32(seed);
+  const S = 0.8; // 平台半宽
+  const H = 2.6; // 平台高度
+  return makeProp(2.8, 2.8, H + 1.9, (g, ox, oy) => {
+    morningShadow(g, ox, oy, 1.9, 1.9, 2.8, 0.2);
+    aoShadow(g, ox, oy, 1.7, 1.7, 0.4);
+    // 四条腿：先远后近
+    for (const [lx, ly] of [[-S, -S], [S, -S], [-S, S], [S, S]]) {
+      isoBox(g, ox, oy, lx - 0.09, ly - 0.09, 0, 0.18, 0.18, H, '#71603f', '#5c4d31', '#413723');
+    }
+    // 交叉斜撑
+    const c1 = P(ox, oy, -S, S, 0.15);
+    const c2 = P(ox, oy, S, S, H * 0.72);
+    const c3 = P(ox, oy, S, S, 0.15);
+    const c4 = P(ox, oy, -S, S, H * 0.72);
+    pxLine(g, c1[0], c1[1], c2[0], c2[1], '#5c4d31', 2);
+    pxLine(g, c3[0], c3[1], c4[0], c4[1], '#52462c', 2);
+    const d1 = P(ox, oy, S, -S, 0.15);
+    const d2 = P(ox, oy, S, S, H * 0.72);
+    pxLine(g, d1[0], d1[1], d2[0], d2[1], '#544831', 2);
+    // 平台
+    isoBox(g, ox, oy, -S - 0.2, -S - 0.2, H, (S + 0.2) * 2, (S + 0.2) * 2, 0.14, '#84714b', '#6b5a38', '#4e4128');
+    // 围栏：四角立柱 + 顶横杆
+    const rail = H + 0.14;
+    for (const [lx, ly] of [[-S, -S], [S, -S], [-S, S], [S, S]]) {
+      const b = P(ox, oy, lx, ly, rail);
+      const t = P(ox, oy, lx, ly, rail + 0.55);
+      pxLine(g, b[0], b[1], t[0], t[1], '#6b5a38', 1);
+    }
+    for (const [a, b] of [
+      [[-S, S], [S, S]], [[S, -S], [S, S]],
+    ]) {
+      const p = P(ox, oy, a[0], a[1], rail + 0.52);
+      const q = P(ox, oy, b[0], b[1], rail + 0.52);
+      pxLine(g, p[0], p[1], q[0], q[1], '#84714b', 1);
+    }
+    // 顶棚支柱 + 布顶
+    for (const [lx, ly] of [[-S + 0.1, -S + 0.1], [S - 0.1, -S + 0.1], [-S + 0.1, S - 0.1], [S - 0.1, S - 0.1]]) {
+      const b = P(ox, oy, lx, ly, rail);
+      const t = P(ox, oy, lx, ly, H + 1.35);
+      pxLine(g, b[0], b[1], t[0], t[1], '#57492f', 1);
+    }
+    isoBox(g, ox, oy, -S - 0.3, -S - 0.3, H + 1.35, (S + 0.3) * 2, (S + 0.3) * 2, 0.1, '#66744c', '#4d583a', '#3b452e');
+    // 顶棚布纹
+    faceTop(g, ox, oy, H + 1.45);
+    g.fillStyle = 'rgba(0,0,0,0.14)';
+    for (let i = 1; i < 4; i++) g.fillRect((-S - 0.3 + (i * (S + 0.3)) / 2) * TILE_W, (-S - 0.3) * TILE_W, 1, (S + 0.3) * 2 * TILE_W);
+    resetT(g);
+    // 平台上的探照灯（白天熄灭）
+    const lp = P(ox, oy, S * 0.4, -S * 0.4, rail + 0.4);
+    g.fillStyle = '#31383c';
+    g.fillRect(lp[0] - 3, lp[1] - 4, 6, 5);
+    g.fillStyle = '#565f64';
+    g.fillRect(lp[0] - 3, lp[1] - 4, 6, 1);
+    g.fillStyle = '#20262a';
+    g.fillRect(lp[0] - 1, lp[1] + 1, 2, 4);
+    // 木纹杂点
+    g.globalAlpha = 0.3;
+    for (let i = 0; i < 8; i++) {
+      const p = P(ox, oy, -S + rand() * S * 2, S, rand() * H);
+      g.fillStyle = '#3c3220';
+      g.fillRect(p[0], p[1], 1, 2);
+    }
+    g.globalAlpha = 1;
+  });
+}
+
+/** 铁丝网围栏：立柱 + 上下横管 + 抖动网面，axis='x'|'y' */
+export function makeFence(seed = 851, len = 3, axis = 'x') {
+  const H = 1.4;
+  const w = axis === 'x' ? len : 0.36;
+  const d = axis === 'x' ? 0.36 : len;
+  return makeProp(w + 0.4, d + 0.4, H + 0.3, (g, ox, oy) => {
+    const at = (t, z) => P(ox, oy, axis === 'x' ? t : 0, axis === 'x' ? 0 : t, z);
+    // 影：细长一条
+    morningShadow(g, ox, oy, axis === 'x' ? len : 0.2, axis === 'x' ? 0.2 : len, 0.9, 0.14);
+    // 网面：低透明底色 + 斜织纹两向
+    const q0 = at(-len / 2, 0.06);
+    const q1 = at(len / 2, 0.06);
+    const q2 = at(len / 2, H);
+    const q3 = at(-len / 2, H);
+    pxPoly(g, [q0, q1, q2, q3], 'rgba(150,160,158,0.14)');
+    const wires = Math.max(3, Math.round(len * 3));
+    for (let i = 0; i <= wires; i++) {
+      const t = -len / 2 + (i / wires) * len;
+      const a = at(t, 0.06);
+      const b = at(Math.min(len / 2, t + len / wires), H);
+      const b2 = at(Math.max(-len / 2, t - len / wires), H);
+      pxLine(g, a[0], a[1], b[0], b[1], 'rgba(168,178,175,0.3)', 1);
+      pxLine(g, a[0], a[1], b2[0], b2[1], 'rgba(140,150,148,0.26)', 1);
+    }
+    // 上下横管
+    const t0 = at(-len / 2, H);
+    const t1 = at(len / 2, H);
+    pxLine(g, t0[0], t0[1], t1[0], t1[1], '#7b8683', 2);
+    pxLine(g, q0[0], q0[1], q1[0], q1[1], '#5a6462', 1);
+    // 立柱：每 ~1.5 瓦一根
+    const posts = Math.max(2, Math.round(len / 1.5) + 1);
+    for (let i = 0; i < posts; i++) {
+      const t = -len / 2 + (i / (posts - 1)) * len;
+      const b = at(t, 0);
+      const tp = at(t, H + 0.12);
+      pxLine(g, b[0], b[1], tp[0], tp[1], '#4d5654', 2);
+      g.fillStyle = '#39413f';
+      g.fillRect(b[0] - 2, b[1] - 1, 4, 2);
+    }
+  });
+}
+
+/** 火塘：石圈 + 焦土 + 架柴。火苗每帧用 drawFlames 画在 CAMPFIRE_FLAME 锚点 */
+export const CAMPFIRE_FLAME = { dx: 0, dy: -3 };
+export function makeCampfire(seed = 861) {
+  const rand = mulberry32(seed);
+  return makeProp(1.7, 1.7, 0.5, (g, ox, oy) => {
+    // 焦土两档
+    pxEllipse(g, ox, oy, 15, 7.5, '#26211b');
+    pxEllipse(g, ox, oy, 10, 5, '#16120e');
+    // 石圈：一圈方石块，顶缘受光
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + 0.3;
+      const px = Math.round(ox + Math.cos(a) * 13);
+      const py = Math.round(oy + Math.sin(a) * 6.2);
+      const c = ['#6d6d66', '#5b5b54', '#63635c'][(rand() * 3) | 0];
+      g.fillStyle = shade(c, -0.25);
+      g.fillRect(px - 2, py - 1, 5, 3);
+      g.fillStyle = c;
+      g.fillRect(px - 2, py - 2, 5, 2);
+    }
+    // 架起的柴：交叉两根 + 焦黑一根
+    pxLine(g, ox - 7, oy - 1, ox + 6, oy - 4, '#4c3a24', 2);
+    pxLine(g, ox - 5, oy - 5, ox + 6, oy, '#3d2f1e', 2);
+    pxLine(g, ox - 2, oy + 2, ox + 8, oy - 2, '#221c15', 2);
+    // 灰烬
+    g.fillStyle = '#8d8578';
+    g.fillRect(ox - 2, oy - 1, 3, 1);
+    g.fillRect(ox + 1, oy, 2, 1);
+  });
+}
+
+/** 原木长凳：一截平顶木，坐人用（NPC 的 sit 锚点对齐顶面） */
+export function makeLogBench(seed = 871, axis = 'x') {
+  const rand = mulberry32(seed);
+  const L = 1.5;
+  const w = axis === 'x' ? L : 0.42;
+  const d = axis === 'x' ? 0.42 : L;
+  return makeProp(w + 0.3, d + 0.3, 0.5, (g, ox, oy) => {
+    morningShadow(g, ox, oy, w, d, 0.4, 0.16);
+    aoShadow(g, ox, oy, w, d, 0.3);
+    isoBox(g, ox, oy, -w / 2, -d / 2, 0.08, w, d, 0.26, '#8a7350', '#6e5a3c', '#4e4029');
+    // 端面年轮
+    const e = axis === 'x' ? P(ox, oy, w / 2, 0, 0.22) : P(ox, oy, 0, d / 2, 0.22);
+    pxEllipseRing(g, e[0], e[1], 3, 2, '#5a4930', 1);
+    // 顶面木纹
+    faceTop(g, ox, oy, 0.34);
+    g.fillStyle = 'rgba(0,0,0,0.16)';
+    for (let i = 0; i < 3; i++) {
+      if (axis === 'x') g.fillRect(-w / 2 * TILE_W + 2, (-d / 2 + 0.1 + i * 0.12) * TILE_W, w * TILE_W - 4, 1);
+      else g.fillRect((-w / 2 + 0.1 + i * 0.12) * TILE_W, -d / 2 * TILE_W + 2, 1, d * TILE_W - 4);
+    }
+    resetT(g);
+    void rand;
+  });
+}
+
+/** 高架水箱：四腿钢架 + 方箱 + 龙头，底下一摊湿渍 */
+export function makeWaterTank(seed = 881) {
+  const rand = mulberry32(seed);
+  const S = 0.55;
+  const H = 1.15; // 架高
+  const TH = 1.0; // 箱高
+  return makeProp(2.0, 2.0, H + TH + 0.4, (g, ox, oy) => {
+    morningShadow(g, ox, oy, 1.3, 1.3, 1.6, 0.2);
+    aoShadow(g, ox, oy, 1.2, 1.2, 0.4);
+    // 湿渍
+    pxEllipse(g, ox + 6, oy + 5, 7, 3, 'rgba(40,52,58,0.4)');
+    // 钢架
+    for (const [lx, ly] of [[-S, -S], [S, -S], [-S, S], [S, S]]) {
+      isoBox(g, ox, oy, lx - 0.06, ly - 0.06, 0, 0.12, 0.12, H, '#565f64', '#454d52', '#33393d');
+    }
+    const b1 = P(ox, oy, -S, S, 0.1);
+    const b2 = P(ox, oy, S, S, H * 0.8);
+    pxLine(g, b1[0], b1[1], b2[0], b2[1], '#454d52', 1);
+    // 水箱
+    isoBox(g, ox, oy, -S - 0.14, -S - 0.14, H, (S + 0.14) * 2, (S + 0.14) * 2, TH, '#7f8a8c', '#677274', '#4b5456');
+    // 箱体水位线锈痕
+    faceRight(g, ox, oy, S + 0.14);
+    g.fillStyle = 'rgba(109,74,48,0.4)';
+    g.fillRect(-(S + 0.14) * TILE_W, -(H + TH * 0.35) * TILE_Z, (S + 0.14) * 2 * TILE_W, 2);
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.fillRect(-(S + 0.14) * TILE_W, -(H + TH) * TILE_Z + 2, (S + 0.14) * 2 * TILE_W, 2);
+    resetT(g);
+    // 盖板
+    isoBox(g, ox, oy, -0.2, -0.2, H + TH, 0.4, 0.4, 0.08, '#98a3a6', '#7b8689', '#5c6568');
+    // 龙头：伸向 +x
+    const tap = P(ox, oy, S + 0.34, 0.15, H * 0.6);
+    pxLine(g, tap[0] - 6, tap[1] - 2, tap[0], tap[1], '#454d52', 2);
+    g.fillStyle = '#6a7477';
+    g.fillRect(tap[0] - 1, tap[1] - 1, 3, 4);
+    // 底下接水的桶
+    const bk = P(ox, oy, S + 0.42, 0.2, 0);
+    g.fillStyle = '#4c565c';
+    g.fillRect(bk[0] - 3, bk[1] - 5, 7, 6);
+    g.fillStyle = '#39434a';
+    g.fillRect(bk[0] - 3, bk[1] - 5, 2, 6);
+    g.fillStyle = '#2b3d44';
+    g.fillRect(bk[0] - 2, bk[1] - 4, 5, 1);
+    void rand;
+  });
+}
+
+/** 营地照明杆：配重底座 + 高杆 + 双灯头（白天熄灭，夜章再点亮） */
+export function makeFloodlight(seed = 891) {
+  const H = 3.1;
+  return makeProp(1.4, 1.4, H + 0.5, (g, ox, oy) => {
+    morningShadow(g, ox, oy, 0.5, 0.5, 2.4, 0.16);
+    aoShadow(g, ox, oy, 0.8, 0.8, 0.35);
+    // 配重
+    isoBox(g, ox, oy, -0.3, -0.3, 0, 0.6, 0.6, 0.18, '#4d5457', '#3d4346', '#2d3235');
+    // 杆
+    const b = P(ox, oy, 0, 0, 0.18);
+    const t = P(ox, oy, 0, 0, H);
+    pxLine(g, b[0], b[1], t[0], t[1], '#5a6266', 2);
+    pxLine(g, b[0] - 1, b[1], t[0] - 1, t[1], '#454d50', 1);
+    // 横臂 + 两个灯头（朝 +x / +y 两边）
+    pxLine(g, t[0] - 7, t[1] + 1, t[0] + 7, t[1] - 1, '#4d5457', 2);
+    for (const dx of [-7, 7]) {
+      g.fillStyle = '#31383c';
+      g.fillRect(t[0] + dx - 2, t[1] - (dx > 0 ? 5 : 2), 5, 4);
+      g.fillStyle = '#6e6f66';
+      g.fillRect(t[0] + dx - 1, t[1] - (dx > 0 ? 4 : 1), 3, 2);
+    }
+    // 拉线
+    pxLine(g, t[0], t[1] + 2, b[0] + 9, b[1] + 2, 'rgba(120,128,126,0.4)', 1);
+  });
+}
+
+/** 旗杆：底座 + 细杆 + 一面向 +x 飘的旗（台阶锯齿边） */
+export function makeFlagpole(seed = 895, col = '#9c5b34') {
+  const H = 3.4;
+  return makeProp(1.2, 1.2, H + 0.4, (g, ox, oy) => {
+    morningShadow(g, ox, oy, 0.4, 0.4, 2.6, 0.14);
+    aoShadow(g, ox, oy, 0.6, 0.6, 0.3);
+    isoBox(g, ox, oy, -0.22, -0.22, 0, 0.44, 0.44, 0.14, '#6a716e', '#565e5c', '#414846');
+    const b = P(ox, oy, 0, 0, 0.14);
+    const t = P(ox, oy, 0, 0, H);
+    pxLine(g, b[0], b[1], t[0], t[1], '#8a9295', 1);
+    pxLine(g, b[0] + 1, b[1], t[0] + 1, t[1], '#5c6467', 1);
+    // 旗面：三段台阶模拟飘动
+    g.fillStyle = col;
+    g.fillRect(t[0] + 1, t[1], 7, 6);
+    g.fillRect(t[0] + 8, t[1] + 1, 6, 5);
+    g.fillRect(t[0] + 14, t[1] + 2, 4, 3);
+    g.fillStyle = shade(col, -0.25);
+    g.fillRect(t[0] + 8, t[1] + 4, 6, 2);
+    g.fillRect(t[0] + 14, t[1] + 4, 4, 1);
+    g.fillStyle = shade(col, 0.15);
+    g.fillRect(t[0] + 1, t[1], 7, 1);
+    void seed;
+  });
+}
+
+/** 行军床：帆布面 + X 型折叠腿（登记帐篷 / 医疗棚里用） */
+export function makeCot(seed = 899) {
+  const rand = mulberry32(seed);
+  const W = 0.75, D = 1.7, H = 0.42;
+  return makeProp(W + 0.4, D + 0.4, H + 0.2, (g, ox, oy) => {
+    aoShadow(g, ox, oy, W, D, 0.35);
+    // X 腿：两端各一组
+    for (const yy of [-D / 2 + 0.12, D / 2 - 0.12]) {
+      const a1 = P(ox, oy, -W / 2, yy, 0);
+      const a2 = P(ox, oy, W / 2, yy, H);
+      const a3 = P(ox, oy, W / 2, yy, 0);
+      const a4 = P(ox, oy, -W / 2, yy, H);
+      pxLine(g, a1[0], a1[1], a2[0], a2[1], '#4a4438', 1);
+      pxLine(g, a3[0], a3[1], a4[0], a4[1], '#3c372d', 1);
+    }
+    // 帆布面
+    isoBox(g, ox, oy, -W / 2, -D / 2, H, W, D, 0.06, '#7a7360', '#5f594a', '#454136');
+    // 布面横褶
+    faceTop(g, ox, oy, H + 0.06);
+    g.fillStyle = 'rgba(0,0,0,0.14)';
+    for (let i = 1; i < 5; i++) g.fillRect(-W / 2 * TILE_W + 1, (-D / 2 + (i * D) / 5) * TILE_W, W * TILE_W - 2, 1);
+    resetT(g);
+    // 枕头位置一卷毯子
+    const p = P(ox, oy, 0, -D / 2 + 0.22, H + 0.06);
+    g.fillStyle = '#5d6b5e';
+    g.fillRect(p[0] - 4, p[1] - 3, 9, 4);
+    g.fillStyle = '#49564b';
+    g.fillRect(p[0] - 4, p[1] - 1, 9, 2);
+    void rand;
+  });
+}
+
+/** 登记官的折叠桌：木板面 + 金属腿 + 纸堆台灯（+x 是玩家那侧） */
+export function makeFieldDesk(seed = 903) {
+  const rand = mulberry32(seed);
+  const W = 1.7, D = 0.8, H = 0.78;
+  return makeProp(W + 0.4, D + 0.4, H + 0.5, (g, ox, oy) => {
+    aoShadow(g, ox, oy, W, D, 0.4);
+    // 金属腿
+    for (const [lx, ly] of [[-W / 2 + 0.1, -D / 2 + 0.08], [W / 2 - 0.1, -D / 2 + 0.08], [-W / 2 + 0.1, D / 2 - 0.08], [W / 2 - 0.1, D / 2 - 0.08]]) {
+      isoBox(g, ox, oy, lx - 0.04, ly - 0.04, 0, 0.08, 0.08, H - 0.08, '#4a5154', '#3b4144', '#2c3134');
+    }
+    // 桌面
+    isoBox(g, ox, oy, -W / 2, -D / 2, H - 0.08, W, D, 0.08, '#8a7550', '#6e5c3d', '#4e4229');
+    // 桌面物件（顶面空间）
+    faceTop(g, ox, oy, H);
+    const u = (x) => x * TILE_W;
+    // 纸堆
+    g.fillStyle = '#c9c6b4';
+    g.fillRect(u(-0.55), u(-0.22), 12, 9);
+    g.fillStyle = '#b5b2a0';
+    g.fillRect(u(-0.55), u(-0.22) + 8, 12, 2);
+    g.fillStyle = 'rgba(0,0,0,0.3)';
+    for (let i = 0; i < 3; i++) g.fillRect(u(-0.55) + 2, u(-0.22) + 2 + i * 2, 8, 1);
+    // 第二叠歪的
+    g.fillStyle = '#bdbaa8';
+    g.fillRect(u(-0.2), u(0.02), 10, 7);
+    // 墨水瓶 / 印章
+    g.fillStyle = '#28313a';
+    g.fillRect(u(0.28), u(-0.15), 4, 4);
+    g.fillStyle = '#6c4a32';
+    g.fillRect(u(0.42), u(0.1), 3, 5);
+    resetT(g);
+    // 台灯：绿罩老式
+    const lp = P(ox, oy, W * 0.32, -D * 0.2, H);
+    pxLine(g, lp[0], lp[1], lp[0] + 2, lp[1] - 8, '#3d4346', 1);
+    g.fillStyle = '#3f5a44';
+    g.fillRect(lp[0] - 2, lp[1] - 11, 9, 4);
+    g.fillStyle = '#57785d';
+    g.fillRect(lp[0] - 2, lp[1] - 11, 9, 1);
+    g.fillStyle = '#efe6bb';
+    g.fillRect(lp[0] - 1, lp[1] - 7, 7, 1);
+    void rand;
+  });
+}
+
+/** 物资堆：码起来的板条箱 + 盖布 + 几只桶，营地里反复摆 */
+export function makeSupplyPile(seed = 907) {
+  const rand = mulberry32(seed);
+  return makeProp(2.6, 2.2, 1.6, (g, ox, oy) => {
+    morningShadow(g, ox, oy, 1.8, 1.5, 1.0, 0.18);
+    aoShadow(g, ox, oy, 1.8, 1.5, 0.4);
+    // 底层三箱
+    const woods = ['#7a6a48', '#6e5f40', '#816f4c'];
+    for (const [bx, by, s] of [[-0.85, -0.5, 0.62], [-0.1, -0.55, 0.58], [-0.5, 0.1, 0.6]]) {
+      const c = woods[(rand() * 3) | 0];
+      isoBox(g, ox, oy, bx, by, 0, s, s, s * 0.72, shade(c, 0.14), c, shade(c, -0.26));
+      // 箱板条
+      const p = P(ox, oy, bx + s, by + s / 2, s * 0.36);
+      g.fillStyle = 'rgba(0,0,0,0.2)';
+      g.fillRect(p[0] - 3, p[1], 6, 1);
+    }
+    // 上层一箱 + 盖布
+    isoBox(g, ox, oy, -0.55, -0.4, 0.45, 0.6, 0.6, 0.44, '#6a7455', '#525c42', '#3c4531');
+    const t = P(ox, oy, -0.25, -0.1, 0.89);
+    pxPoly(g, [
+      [t[0] - 9, t[1] + 2], [t[0] + 8, t[1] - 3], [t[0] + 12, t[1] + 6], [t[0] - 5, t[1] + 10],
+    ], '#5d684a');
+    pxDitherLine(g, t[0] - 9, t[1] + 2, t[0] + 8, t[1] - 3, '#75825d');
+    // 桶两只
+    for (const [bx, by] of [[0.6, -0.2], [0.75, 0.35]]) {
+      const c = rand() > 0.5 ? '#5a6a72' : '#6d5a3a';
+      isoBox(g, ox, oy, bx - 0.2, by - 0.2, 0, 0.4, 0.4, 0.55, shade(c, 0.12), c, shade(c, -0.24));
+      const p = P(ox, oy, bx, by, 0.55);
+      pxEllipseRing(g, p[0], p[1], 4, 2, shade(c, -0.35), 1);
+    }
+  });
 }
