@@ -342,27 +342,42 @@ export class Rain {
 
   draw(g, bright = 1) {
     if (!this.on) return;
-    /* 像素雨丝：每滴 2~3 段错位的 1px 竖条，代替斜线 stroke。
-       段数固定、偏移由雨滴斜率决定，远近两层靠长度和透明度区分。 */
+    /* 像素雨丝：每滴一条**连续**的斜向像素线（逐行落点、同列并笔），
+       硬边 1px、无抗锯齿，但首尾相连 —— 一滴就是一道斜着砸下来的雨。
+       v1.9.0 曾把它拆成 2~3 段互不相连的竖条，低透明度下眼睛串不起来，
+       整屏读成"到处都在滴落"的散点，这里是那次回归的修复。 */
     for (const L of this.layers) {
       const vx = (L.slant + this.gust) * L.len;
       g.fillStyle = `rgba(186,206,220,${(L.a * bright).toFixed(3)})`;
-      const segs = L.len > 12 ? 3 : 2;
       for (const d of L.drops) {
-        const len = L.len * d.k;
-        const segH = Math.max(2, Math.round(len / segs));
-        for (let s = 0; s < segs; s++) {
-          const t = s / segs;
-          g.fillRect(Math.round(d.x + vx * d.k * t), Math.round(d.y + len * t), 1, segH);
+        const len = Math.max(2, Math.round(L.len * d.k));
+        const dx = vx * d.k;
+        const y0 = Math.round(d.y);
+        let sx = Math.round(d.x);
+        let sy = y0;
+        for (let yy = 1; yy <= len; yy++) {
+          const x = yy === len ? null : Math.round(d.x + (dx * yy) / len);
+          if (x !== sx) {
+            g.fillRect(sx, sy, 1, y0 + yy - sy);
+            sx = x;
+            sy = y0 + yy;
+          }
         }
       }
     }
-    // 水花：迅速摊开的像素椭圆环，半径按 1px 步进
+    /* 水花：迅速摊开的像素椭圆环。硬边 1px 环的每像素覆盖率比旧版
+       亚像素 stroke 高一倍多，透明度要相应打折，起手太小的帧只点一格，
+       否则黑暗处满屏都是突然蹦出来的白环。 */
+    const sa = `rgba(190,210,220,${(0.12 * bright).toFixed(3)})`;
     for (const s of this.splashes) {
       const k = s.t / 0.34;
-      const rx = Math.max(1, Math.round(4 * k));
-      const ry = Math.max(1, Math.round(1.6 * k));
-      pxEllipseRing(g, s.x, s.y, rx, ry, `rgba(190,210,220,${(0.22 * bright).toFixed(3)})`);
+      const rx = Math.round(4 * k);
+      if (rx < 2) {
+        g.fillStyle = sa;
+        g.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
+      } else {
+        pxEllipseRing(g, s.x, s.y, rx, Math.max(1, Math.round(1.6 * k)), sa);
+      }
     }
   }
 }
