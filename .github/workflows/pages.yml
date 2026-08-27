@@ -1,9 +1,9 @@
 name: Deploy Pages
 
 on:
-  # 临时：Pages 部署像素尝试分支供测试（测完改回 cursor/rooftop-prologue-7a6f）。
+  # Pages 跟随 rooftop 主线：推送即部署。
   push:
-    branches: [cursor/pixel-trial-1489]
+    branches: [cursor/rooftop-prologue-7a6f]
   workflow_dispatch:
 
 permissions:
