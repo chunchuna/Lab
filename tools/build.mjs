@@ -11,9 +11,21 @@ const DIST = path.join(ROOT, 'dist');
 fs.rmSync(DIST, { recursive: true, force: true });
 fs.mkdirSync(DIST, { recursive: true });
 
+/* src 里的 import 可能带 ?v= 缓存串（浏览器端要靠它刷新子模块缓存），
+   esbuild 解析不了带查询串的相对路径，这里剥掉再落盘解析。 */
+const stripQuery = {
+  name: 'strip-query',
+  setup(build) {
+    build.onResolve({ filter: /^\.\.?\/.*\?/ }, (args) => ({
+      path: path.resolve(args.resolveDir, args.path.replace(/\?.*$/, '')),
+    }));
+  },
+};
+
 const res = await esbuild.build({
   entryPoints: [path.join(ROOT, 'src/main.js')],
   bundle: true,
+  plugins: [stripQuery],
   format: 'iife', // 不用 module，file:// 下也能跑
   target: ['es2020'],
   minify: true,

@@ -1371,11 +1371,14 @@ export function makeRoofVent(seed = 711) {
 /* ------------------------------------------------------------------ *
  * 直升机
  *
- * 屏幕空间绘制（它在天上，不参与等距深度排序）。机体尺寸由 HELI_S 统一
- * 控制：原来那架只有 32px 宽，在 640×360 里连舱门都读不出来，现在整体
- * 放大到接近两倍并补齐结构细节（发动机舱、绞盘吊臂、机组人员、滑橇支柱、
- * 尾桨护环、机腹探照灯）。绳索挂点与探照灯位置一并由这里导出，
- * main.js 直接用，避免两边各写一套偏移量。
+ * 屏幕空间绘制（它在天上，不参与等距深度排序）。整段是**像素画**的画法：
+ * 所有几何直接落在 640×360 的整数像素网格上（fillRect + 整数坐标），
+ * 轮廓由逐行扫描的台阶构成，明暗是分带平涂 + 交界行棋盘抖动，
+ * 没有任何 stroke 曲线 / 椭圆 / 渐变 —— 跟 drawCharacter、丧尸同一套语言。
+ *
+ * 挂点（heliAnchor 等）沿用 HELI_S 单位导出，main.js 的爬绳标定
+ * （GRAB_UP / SILL_UP）依赖它们，**数值不能动**；机体绘制内部
+ * 已换成把这些单位预先乘好的像素常量。
  * ------------------------------------------------------------------ */
 
 /** 机体整体缩放。改这个数字，挂点/探照灯/绳索粗细会一起跟着走 */
@@ -1414,25 +1417,89 @@ const CABIN = { x0: 1.5, x1: 13.0, y0: -5.5, y1: 5.5 };
 const qz = (v, step) => Math.round(v / step) * step;
 const tick = (t, hz) => Math.floor(t * hz) / hz;
 
-/** 八边形顶点：像素画里代替圆的标准做法（硬边、直线段） */
-function octPts(cx, cy, rx, ry = rx) {
-  const p = [];
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-    p.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]);
+/** 像素直线：逐格取整落点画 th×th 的方块，代替 stroke（硬边台阶，无抗锯齿） */
+function pxLine(g, x0, y0, x1, y1, c, th = 1) {
+  const n = Math.max(Math.abs(Math.round(x1) - Math.round(x0)), Math.abs(Math.round(y1) - Math.round(y0)), 1);
+  g.fillStyle = c;
+  let lx = null;
+  let ly = null;
+  for (let i = 0; i <= n; i++) {
+    const xx = Math.round(x0 + ((x1 - x0) * i) / n);
+    const yy = Math.round(y0 + ((y1 - y0) * i) / n);
+    if (xx === lx && yy === ly) continue;
+    g.fillRect(xx, yy, th, th);
+    lx = xx;
+    ly = yy;
   }
-  return p;
 }
+
+/** 棋盘抖动行：两个色带的交界处隔格点上一层，像素画的渐变过渡 */
+function pxDither(g, x0, x1, y, c) {
+  g.fillStyle = c;
+  for (let x = x0 + ((x0 + y) & 1); x < x1; x += 2) g.fillRect(x, y, 1, 1);
+}
+
+/** 沿多段线在 y 处取 x（pts = [[y, x], ...]，y 升序，越界取端点） */
+function edgeAt(pts, y) {
+  if (y <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    if (y <= pts[i][0]) {
+      const [ya, xa] = pts[i - 1];
+      const [yb, xb] = pts[i];
+      return xa + ((xb - xa) * (y - ya)) / (yb - ya);
+    }
+  }
+  return pts[pts.length - 1][1];
+}
+
+/** 逐行扫描两条边，取整成每行 [xl, xr] —— 像素轮廓的台阶就是这么来的 */
+function rowScan(L, R, y0, y1) {
+  const rows = [];
+  for (let y = y0; y <= y1; y++) rows.push([Math.round(edgeAt(L, y)), Math.round(edgeAt(R, y))]);
+  return rows;
+}
+
+/* 机体调色板：硬分档，不做半透明叠色 */
+const HP = {
+  out: '#10141a', // 轮廓
+  hi: '#5c665f', // 机背受光
+  mid: '#454f49', // 上侧
+  low: '#333b36', // 下侧
+  belly: '#252b27', // 机腹
+  chin: '#191e1b', // 机头下颌
+  seam: '#2a322d', // 蒙皮拼缝
+  steel: '#7f8a84', // 金属亮件
+  steelD: '#3a423e',
+};
+
+/* 机身侧影（像素坐标，机头在 -x）：逐行 [xl, xr]，行号从 HULL_Y0 起 */
+const HULL_Y0 = -18;
+const HULL_ROWS = rowScan(
+  [[-18, -17], [-13, -28], [-6, -34], [3, -36], [9, -33], [14, -29], [17, -22], [19, -13]],
+  [[-18, 16], [-12, 30], [-8, 34], [0, 36], [7, 35], [13, 28], [17, 20], [19, 7]],
+  HULL_Y0, 19
+);
+
+/* 风挡玻璃区（含上下帽的框行） */
+const GLASS_Y0 = -17;
+const GLASS_ROWS = rowScan(
+  [[-16, -19], [-12, -29], [-5, -34], [3, -32], [8, -21]],
+  [[-16, -19], [-14, -5], [-2, -3], [8, -8]],
+  GLASS_Y0, 9
+);
+
+/* 垂尾 */
+const FIN_Y0 = -31;
+const FIN_ROWS = rowScan([[-31, 88], [-1, 67]], [[-29, 97], [-1, 84]], FIN_Y0, -1);
 
 /* ------------------------------------------------------------------ *
  * 机组人员
  *
- * 画在直升机的**局部单位**里（1 单位 ≈ HELI_S 逻辑像素），所以跟着机体一起
- * 缩放、镜像，不用在外面再算一遍偏移。
- *
- * 以前舱门口只有一团黑椭圆，夜里跟舱内的黑完全糊在一起 —— 现在按跟玩家同一
- * 套等距人物的做法拆件：靴子 / 作战裤 / 战术背心（含弹匣袋与肩带）/ 袖子与
- * 手套 / 露出来的脸 / 头盔（盔沿、夜视仪座、耳机、下巴带）/ 卡宾枪剪影。
+ * 画在直升机的**局部像素**里（1 单位 = 1 屏幕像素，跟着机体一起镜像），
+ * 整个人是 fillRect 方块拼的，跟 drawCharacter 同一套读法：
+ * 靴子 / 作战裤 / 战术背心（弹匣袋、肩带）/ 台阶斜置的卡宾枪 /
+ * 方块脸 + 台阶收顶的头盔（盔沿、夜视仪座、耳罩）。
+ * 只有伸出去抓人的那条手臂是 pxLine 的像素折线 —— 它要跟着目标走。
  * ------------------------------------------------------------------ */
 
 const CREW = {
@@ -1456,13 +1523,13 @@ const CREW = {
 const c01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /**
- * 一名机组人员。(x, y) 是髋部，+x 是机尾/舱门更外的那一侧。
+ * 一名机组人员。(x, y) 是髋部（局部像素），+x 是机尾/舱门更外的那一侧。
  *
  * o = {
- *   t,                      // 秒，用来做呼吸与机身颠簸
+ *   t,                      // 秒，用来做机身颠簸
  *   pose: 'sit' | 'stand',  // 坐在舱门槛上（腿垂在外面）/ 站在舱内
  *   reach: 0..1,            // 近侧那条手臂往 aim 伸出去多少
- *   aim: {x, y},            // 伸手的目标（局部单位）
+ *   aim: {x, y},            // 伸手的目标（局部像素）
  *   gun: true,              // 挎着卡宾枪
  *   seed,
  * }
@@ -1472,164 +1539,127 @@ export function drawCrew(g, x, y, o = {}) {
   const seed = o.seed || 0;
   const sit = o.pose === 'sit';
   const reach = c01(o.reach || 0);
-  /* 悬停中的机身一直在抖，人跟着抖 —— 但抖动量化成 0.3 单位一格的跳变。
+  /* 悬停中的机身一直在抖，人跟着抖 —— 抖动量化到**整像素**的跳变。
      亚像素的平滑浮动是"贴图在飘"，一格一格地颠才是机身在震。 */
-  const bob = qz(Math.sin(t * 2.1 + seed) * 0.45 + Math.sin(t * 9.7 + seed * 2) * 0.15, 0.3);
-  const lean = reach * 1.9; // 伸手时整个人往舱外探
+  const bob = qz(Math.sin(t * 2.1 + seed) * 0.9 + Math.sin(t * 9.7 + seed * 2) * 0.3, 1);
+  const lean = Math.round(reach * 4); // 伸手时整个人往舱外探
 
   g.save();
   g.translate(x + lean, y + bob);
-  g.lineJoin = 'miter';
-  g.lineCap = 'butt';
 
   /* --- 远侧手臂：先画，会被躯干压住一半 --- */
-  g.strokeStyle = CREW.pantD;
-  g.lineWidth = 1.5;
-  g.beginPath();
-  g.moveTo(-1.9, -6.2);
-  g.lineTo(-3.0 - reach * 0.6, -3.4);
-  g.lineTo(-2.4, -0.8 + reach * 0.6);
-  g.stroke();
+  g.fillStyle = CREW.pantD;
+  g.fillRect(-6, -12, 2, 6);
+  g.fillRect(-7, -7, 2, 5);
 
   /* --- 腿 --- */
   if (sit) {
     // 坐在门槛上：大腿朝舱外伸，小腿垂在机外
-    poly(g, [[-1.9, -1.4], [2.6, -1.0], [2.9, 1.4], [-1.9, 1.3]], CREW.pant);
-    poly(g, [[-1.9, -1.4], [2.6, -1.0], [2.6, -0.3], [-1.9, -0.6]], '#464e3b');
-    poly(g, [[1.1, 0.7], [2.3, 0.8], [2.7, 5.0], [1.5, 5.1]], CREW.pantD);
-    poly(g, [[1.9, 0.9], [3.2, 1.0], [3.7, 5.4], [2.4, 5.5]], CREW.pant);
+    g.fillStyle = CREW.pant;
+    g.fillRect(-4, -3, 10, 5);
+    g.fillStyle = '#464e3b';
+    g.fillRect(-4, -3, 10, 2);
+    g.fillStyle = CREW.pantD;
+    g.fillRect(2, 2, 3, 8);
+    g.fillStyle = CREW.pant;
+    g.fillRect(4, 3, 3, 9);
     g.fillStyle = CREW.boot;
-    poly(g, [[1.4, 4.8], [2.7, 4.9], [2.9, 6.2], [1.2, 6.1]], CREW.boot);
-    poly(g, [[2.3, 5.2], [3.7, 5.3], [4.2, 6.7], [2.1, 6.6]], CREW.boot);
-    poly(g, [[2.3, 6.1], [4.2, 6.2], [4.2, 6.7], [2.1, 6.6]], '#0f120d');
+    g.fillRect(2, 9, 4, 3);
+    g.fillRect(4, 11, 5, 3);
+    g.fillStyle = '#0f120d';
+    g.fillRect(4, 13, 5, 1);
   } else {
-    poly(g, [[-2.1, -1.2], [-0.4, -1.2], [-0.3, 4.3], [-2.0, 4.3]], CREW.pantD);
-    poly(g, [[0.3, -1.2], [2.1, -1.2], [2.2, 4.3], [0.4, 4.3]], CREW.pant);
-    poly(g, [[-2.2, 4.1], [-0.1, 4.1], [0.1, 5.5], [-2.4, 5.5]], CREW.boot);
-    poly(g, [[0.3, 4.1], [2.3, 4.1], [2.6, 5.5], [0.2, 5.5]], CREW.boot);
+    g.fillStyle = CREW.pantD;
+    g.fillRect(-4, -3, 3, 11);
+    g.fillStyle = CREW.pant;
+    g.fillRect(1, -3, 3, 11);
+    g.fillStyle = CREW.boot;
+    g.fillRect(-5, 8, 5, 3);
+    g.fillRect(0, 8, 5, 3);
   }
 
   /* --- 躯干：作战服在里，战术背心叠在外 --- */
-  poly(g, [[-2.5, -7.0], [2.5, -7.0], [2.9, -0.7], [-2.7, -0.7]], CREW.sleeve);
-  poly(g, [[-2.2, -6.5], [2.2, -6.5], [2.5, -1.2], [-2.4, -1.2]], CREW.vest);
-  poly(g, [[-2.2, -6.5], [2.2, -6.5], [2.2, -5.6], [-2.2, -5.6]], CREW.vestHi);
-  // 弹匣袋：三个方块，一眼能读出"这是战术背心"而不是一件外套
+  g.fillStyle = CREW.sleeve;
+  g.fillRect(-5, -14, 11, 13);
+  g.fillStyle = CREW.vest;
+  g.fillRect(-4, -13, 9, 11);
+  g.fillStyle = CREW.vestHi;
+  g.fillRect(-4, -13, 9, 2);
+  // 弹匣袋：三个方块 + 1px 受光行，一眼能读出"这是战术背心"
   for (let i = 0; i < 3; i++) {
-    const px = -1.9 + i * 1.4;
     g.fillStyle = CREW.vestDark;
-    g.fillRect(px, -4.6, 1.1, 2.1);
-    g.fillStyle = 'rgba(214,224,204,0.16)';
-    g.fillRect(px, -4.6, 1.1, 0.38);
+    g.fillRect(-4 + i * 3, -9, 2, 4);
+    g.fillStyle = '#7b846c';
+    g.fillRect(-4 + i * 3, -9, 2, 1);
   }
-  // 肩带
-  g.strokeStyle = CREW.vestDark;
-  g.lineWidth = 0.5;
-  g.beginPath();
-  g.moveTo(-1.5, -6.6);
-  g.lineTo(-0.9, -1.6);
-  g.moveTo(1.5, -6.6);
-  g.lineTo(0.9, -1.6);
-  g.stroke();
+  // 肩带：两条 1px 竖列
+  g.fillStyle = CREW.vestDark;
+  g.fillRect(-3, -13, 1, 11);
+  g.fillRect(2, -13, 1, 11);
 
-  /* --- 挎在胸前的卡宾枪 --- */
+  /* --- 挎在胸前的卡宾枪：台阶斜置（2px 一步），不做旋转 --- */
   if (o.gun) {
-    g.save();
-    g.translate(0.9, -3.1);
-    g.rotate(-0.46);
     g.fillStyle = CREW.gun;
-    g.fillRect(-3.6, -0.42, 7.2, 0.9);
+    for (let i = 0; i < 6; i++) g.fillRect(-6 + i * 2, -4 - i, 2, 2);
+    g.fillRect(-7, -4, 3, 3); // 枪托
+    g.fillRect(-1, -5, 2, 4); // 弹匣
     g.fillStyle = CREW.gunHi;
-    g.fillRect(-3.6, -0.42, 7.2, 0.26);
-    g.fillStyle = CREW.gun;
-    g.fillRect(-0.7, 0.35, 1.0, 2.0); // 弹匣
-    g.fillRect(-3.5, -0.15, 1.6, 1.3); // 枪托
-    g.fillStyle = CREW.gunHi;
-    g.fillRect(2.5, -0.95, 0.42, 0.6); // 准星
-    g.restore();
+    for (let i = 0; i < 6; i++) g.fillRect(-6 + i * 2, -4 - i, 2, 1);
+    g.fillRect(5, -10, 1, 1); // 准星
   }
 
-  /* --- 头：先脸后盔，脸要露出来才不是一团黑。
-     全部用方块拼（跟 drawCharacter 的头一个做法），不再用椭圆。 --- */
-  const hy = -8.5;
+  /* --- 头：方块脸 + 台阶收顶的头盔（跟 drawCharacter 的头一个做法） --- */
   g.fillStyle = CREW.skinD;
-  g.fillRect(-0.7, -7.7, 1.5, 1.1);
-  // 脸：亮面一块、暗面一块
+  g.fillRect(-1, -15, 3, 2); // 脖子
   g.fillStyle = CREW.skin;
-  g.fillRect(-0.5, hy - 0.7, 2.2, 2.4);
+  g.fillRect(-1, -19, 4, 5); // 脸
   g.fillStyle = CREW.skinD;
-  g.fillRect(-1.3, hy - 0.5, 0.9, 2.1);
-  // 眼睛那一道阴影，脸才有方向
-  g.fillStyle = 'rgba(24,26,20,0.75)';
-  g.fillRect(-0.2, hy - 0.35, 1.9, 0.5);
-  // 头盔：盔顶用两级台阶收窄，代替半椭圆的圆顶
+  g.fillRect(-2, -18, 1, 4); // 背光那一列
+  g.fillStyle = '#181a14';
+  g.fillRect(0, -17, 3, 1); // 眼睛那一道阴影
   g.fillStyle = CREW.helm;
-  g.fillRect(-2.15, hy - 1.5, 4.3, 2.05);
-  g.fillRect(-1.7, hy - 2.1, 3.4, 0.7);
-  g.fillRect(-1.0, hy - 2.5, 2.1, 0.5);
+  g.fillRect(-4, -22, 9, 4); // 盔体
+  g.fillRect(-3, -23, 7, 1); // 台阶收顶
+  g.fillRect(-2, -24, 5, 1);
   g.fillStyle = CREW.helmHi;
-  g.fillRect(-1.6, hy - 1.95, 2.0, 0.55);
-  g.fillRect(-0.9, hy - 2.4, 1.2, 0.5);
+  g.fillRect(-2, -23, 4, 1);
+  g.fillRect(-1, -24, 3, 1);
   g.fillStyle = CREW.helmDark;
-  g.fillRect(-2.15, hy + 0.28, 4.3, 0.44); // 盔沿
-  // 夜视仪座
-  g.fillStyle = CREW.helmDark;
-  g.fillRect(0.7, hy - 2.7, 0.95, 1.4);
+  g.fillRect(-4, -19, 9, 1); // 盔沿
+  g.fillRect(1, -25, 2, 3); // 夜视仪座
   g.fillStyle = CREW.helmHi;
-  g.fillRect(0.7, hy - 2.7, 0.95, 0.36);
-  // 耳机 + 送话器 + 下巴带：方块耳罩、直线段带子
+  g.fillRect(1, -25, 2, 1);
   g.fillStyle = CREW.helmDark;
-  g.fillRect(-2.25, hy - 0.65, 1.4, 1.65);
-  g.strokeStyle = CREW.helmDark;
-  g.lineWidth = 0.3;
-  g.beginPath();
-  g.moveTo(-1.3, hy + 0.5);
-  g.lineTo(-0.2, hy + 1.5);
-  g.lineTo(0.85, hy + 1.15);
-  g.moveTo(-1.6, hy + 0.7);
-  g.lineTo(0.1, hy + 1.7);
-  g.lineTo(1.7, hy + 0.6);
-  g.stroke();
+  g.fillRect(-5, -20, 3, 4); // 耳罩
+  g.fillRect(-2, -15, 3, 1); // 下巴带
+  g.fillRect(0, -14, 2, 1);
 
   /* --- 近侧手臂：伸手抓人的就是这一条，画在最上面 --- *
    * aim 是**相对 (x, y) 原点**的目标，而整个人已经被 lean/bob 挪过了，
    * 所以这里要把那两个偏移减掉，reach=1 时手套才正好落在目标上（拉人那段
    * 靠这个跟玩家的手腕对齐；身体照样跟着机身抖，只有手是钉住的）。 */
-  const aim = o.aim || { x: 3.6, y: 1.4 };
-  const rx = 2.4 + (aim.x - lean - 2.4) * reach;
-  const ry = -1.8 + (aim.y - bob + 1.8) * reach;
-  const ex = 1.0 + (rx - 1.0) * 0.55 + (1 - reach) * 0.9;
-  const ey = -6.2 + (ry + 6.2) * 0.45 + (1 - reach) * 1.6;
-  g.strokeStyle = CREW.sleeve;
-  g.lineWidth = 1.75;
-  g.beginPath();
-  g.moveTo(1.9, -6.2);
-  g.lineTo(ex, ey);
-  g.stroke();
+  const aim = o.aim || { x: 7, y: 3 };
+  const rx = 5 + (aim.x - lean - 5) * reach;
+  const ry = -4 + (aim.y - bob + 4) * reach;
+  const ex = Math.round(2 + (rx - 2) * 0.55 + (1 - reach) * 2);
+  const ey = Math.round(-12 + (ry + 12) * 0.45 + (1 - reach) * 3);
+  const hx2 = Math.round(rx);
+  const hy2 = Math.round(ry);
+  pxLine(g, 4, -12, ex, ey, CREW.sleeve, 2); // 上臂（袖）
   /* 小臂用肤色（袖子挽起来）。整条都画成橄榄绿的话，它跟垂在门外的小腿
      一模一样，"伸手去抓"就读成了"又一条腿"。 */
-  g.strokeStyle = CREW.skinD;
-  g.lineWidth = 1.5;
-  g.beginPath();
-  g.moveTo(ex, ey);
-  g.lineTo(rx, ry);
-  g.stroke();
-  g.strokeStyle = CREW.skin;
-  g.lineWidth = 0.9;
-  g.beginPath();
-  g.moveTo(ex, ey - 0.2);
-  g.lineTo(rx, ry - 0.2);
-  g.stroke();
-  // 手套：一个方块 + 一道受光边，不再是圆点
+  pxLine(g, ex, ey, hx2, hy2, CREW.skinD, 2);
+  pxLine(g, ex, ey - 1, hx2, hy2 - 1, CREW.skin, 1);
+  // 手套：方块 + 1px 受光行
   g.fillStyle = CREW.glove;
-  g.fillRect(rx - 1.05, ry - 1.05, 2.1, 2.1);
-  g.fillStyle = 'rgba(214,224,204,0.2)';
-  g.fillRect(rx - 1.05, ry - 1.05, 2.1, 0.5);
+  g.fillRect(hx2 - 2, hy2 - 2, 4, 4);
+  g.fillStyle = '#707c68';
+  g.fillRect(hx2 - 2, hy2 - 2, 4, 1);
 
   // 肩上的红色识别灯：一闪一闪，暗处能看出舱里确实有人
-  const bl = Math.sin(t * 3.4 + seed * 3) > 0.55;
-  if (bl) {
-    g.fillStyle = 'rgba(255,90,70,0.9)';
-    g.fillRect(-2.3, -6.5, 0.7, 0.7);
+  if (Math.sin(t * 3.4 + seed * 3) > 0.55) {
+    g.fillStyle = '#ff5a46';
+    g.fillRect(-5, -13, 2, 2);
   }
 
   g.restore();
@@ -1650,168 +1680,241 @@ export function drawCrew(g, x, y, o = {}) {
  *                  回调里已经把机体的缩放/镜像还原掉了，用画布坐标画即可。
  */
 export function drawHeli(g, x, y, t, o = {}) {
-  const s = (o.scale === undefined ? 1 : o.scale) * HELI_S;
+  const sc = o.scale === undefined ? 1 : o.scale;
   const dir = o.dir === undefined ? -1 : o.dir;
+  const X = Math.round(x);
+  const Y = Math.round(y);
   g.save();
-  g.translate(x, y);
-  g.scale(s * dir, s);
-  g.lineJoin = 'miter';
-  g.lineCap = 'butt';
+  g.translate(X, Y);
+  if (sc !== 1) g.scale(sc, sc);
+  g.scale(dir, 1); // 只镜像，不缩放 —— 整数矩形镜像后还在像素格上
 
-  /* --- 尾段 --- */
-  // 尾梁：上缘亮、下缘暗，做出圆管的体积
-  poly(g, [[7, -4.2], [42, -3.2], [42, 1.2], [7, 5]], '#2f3739');
-  poly(g, [[7, -4.2], [42, -3.2], [42, -1.6], [7, -1.8]], '#414b4c');
-  poly(g, [[7, 3.4], [42, 0.4], [42, 1.2], [7, 5]], '#1b2123');
-  // 尾梁上的加强环
-  g.fillStyle = 'rgba(0,0,0,0.32)';
-  for (let i = 0; i < 5; i++) g.fillRect(13 + i * 6, -3.9 + i * 0.16, 1.1, 8 - i * 0.7);
-  // 平尾
-  poly(g, [[30, -1.4], [38, -3.6], [40, -2.6], [32, 0.2]], '#333c3d');
-  // 垂尾 + 尾桨护环：护环用八边形，不再走圆弧
-  poly(g, [[36, -2.6], [45, -16], [49.5, -15], [43.5, -0.6]], '#262e30');
-  poly(g, [[38, -3], [45, -14.4], [46.6, -14], [40.6, -3.6]], '#3a4445');
-  poly(g, octPts(45, -9.5, 8.4), null, '#39433f', 1.6);
-  /* 尾桨：桨位量化到 1/8 圈 —— 桨叶在格点间跳，加一份上一格的残影，
-     旋转的暗示靠"跳变 + 分档残影"，不再画整圈的半透明模糊圆。 */
+  /* --- 尾梁：逐列扫描的锥管，上缘 2px 受光、下缘 2px 压暗 --- */
+  for (let bx = 14; bx <= 82; bx++) {
+    const f = (bx - 14) / 68;
+    const yT = Math.round(-9 + 3 * f);
+    const yB = Math.round(11 - 8 * f);
+    g.fillStyle = HP.out;
+    g.fillRect(bx, yT - 1, 1, yB - yT + 2);
+    g.fillStyle = HP.low;
+    g.fillRect(bx, yT, 1, yB - yT);
+    g.fillStyle = HP.hi;
+    g.fillRect(bx, yT, 1, 2);
+    g.fillStyle = HP.belly;
+    g.fillRect(bx, yB - 2, 1, 2);
+  }
+  // 尾梁加强环：整数格上的暗色竖条
+  g.fillStyle = HP.seam;
+  for (let i = 0; i < 5; i++) {
+    const bx = 30 + i * 10;
+    const f = (bx - 14) / 68;
+    const yT = Math.round(-9 + 3 * f);
+    const yB = Math.round(11 - 8 * f);
+    g.fillRect(bx, yT, 2, yB - yT);
+  }
+  // 平尾：台阶斜置的薄板
+  for (let i = 0; i < 5; i++) {
+    g.fillStyle = HP.out;
+    g.fillRect(57 + i * 4, -3 - i, 6, 4);
+  }
+  for (let i = 0; i < 5; i++) {
+    g.fillStyle = HP.low;
+    g.fillRect(58 + i * 4, -2 - i, 5, 2);
+    g.fillStyle = HP.hi;
+    g.fillRect(58 + i * 4, -3 - i, 5, 1);
+  }
+  // 垂尾：逐行扫描 + 前缘 2px 亮带
+  for (let i = 0; i < FIN_ROWS.length; i++) {
+    const yy = FIN_Y0 + i;
+    const [xl, xr] = FIN_ROWS[i];
+    if (xr <= xl) continue;
+    g.fillStyle = HP.out;
+    g.fillRect(xl - 1, yy, xr - xl + 2, 1);
+    g.fillStyle = HP.low;
+    g.fillRect(xl, yy, xr - xl, 1);
+    g.fillStyle = HP.mid;
+    g.fillRect(xl, yy, Math.min(2, xr - xl), 1);
+  }
+  /* 尾桨：桨位量化到 1/8 圈，像素直线在格点间跳；残影是上一格的半透明像素线 */
   const TSTEP = Math.PI / 4;
   const ta = Math.floor((t * 40) / TSTEP) * TSTEP;
-  g.lineWidth = 1.4;
   for (let i = 0; i < 2; i++) {
     for (let gh = 1; gh >= 0; gh--) {
       const a = ta + i * 1.57 - gh * TSTEP;
-      g.strokeStyle = gh ? 'rgba(190,200,205,0.22)' : 'rgba(214,224,228,0.6)';
-      g.beginPath();
-      g.moveTo(45 - Math.cos(a) * 7.2, -9.5 - Math.sin(a) * 7.2);
-      g.lineTo(45 + Math.cos(a) * 7.2, -9.5 + Math.sin(a) * 7.2);
-      g.stroke();
+      const bc = Math.cos(a) * 13;
+      const bs = Math.sin(a) * 13;
+      pxLine(g, 88 - bc, -18 - bs, 88 + bc, -18 + bs, gh ? 'rgba(198,208,212,0.25)' : '#cdd8da', 1);
     }
   }
-
-  /* --- 机身 ---
-     壳体不再用椭圆叠：一个带台阶的直线段侧影打底，再压两条平涂色带
-     （机背亮带 / 机腹暗带 / 机头下颌最暗），体积全靠色带的硬边界。 */
-  poly(g, [
-    [-18.5, 2.5], [-17.6, -3.2], [-14.5, -6.6], [-8.5, -9.2], [8, -9.4],
-    [13.8, -7.4], [17.2, -4.2], [18.5, -0.8], [18.1, 3.6], [15.2, 6.6],
-    [10, 8.7], [-1, 9.6], [-9, 9.0], [-15, 7.2], [-17.8, 4.8],
-  ], '#3e4844');
-  // 机腹暗带
-  poly(g, [
-    [-17.9, 2.2], [18.3, 1.6], [18.1, 3.6], [15.2, 6.6], [10, 8.7],
-    [-1, 9.6], [-9, 9.0], [-15, 7.2], [-17.8, 4.8],
-  ], '#2c3431');
-  // 机头下颌：最暗的一块
-  poly(g, [
-    [-17.9, 2.4], [-3.4, 2.8], [-2.8, 7.4], [-9, 9.0], [-15, 7.2], [-17.8, 4.8],
-  ], '#232a28');
-  // 机背高光：两段跟着轮廓走的窄条，一条平涂，没有过渡
-  poly(g, [[-8.5, -9.2], [8, -9.4], [8, -8.2], [-8.4, -8.0]], 'rgba(190,206,204,0.18)');
-  poly(g, [[-14.5, -6.6], [-8.5, -9.2], [-8.4, -8.0], [-13.6, -5.6]], 'rgba(190,206,204,0.12)');
-  // 蒙皮分块线与铆钉
-  g.strokeStyle = 'rgba(0,0,0,0.3)';
-  g.lineWidth = 0.8;
-  for (const px of [-6, 2, 8]) {
-    g.beginPath();
-    g.moveTo(px, -8.4);
-    g.lineTo(px + 1.4, 7.6);
-    g.stroke();
+  // 尾桨毂
+  g.fillStyle = HP.out;
+  g.fillRect(85, -21, 6, 6);
+  g.fillStyle = HP.steel;
+  g.fillRect(86, -20, 4, 4);
+  // 尾桨护环：行扫 + 列扫的像素圆（两遍才不会在圆顶/圆底漏格）
+  for (let yy = -16; yy <= 16; yy++) {
+    const xw = Math.round(Math.sqrt(16 * 16 - yy * yy));
+    g.fillStyle = HP.out;
+    g.fillRect(88 - xw - 1, -18 + yy, 3, 1);
+    g.fillRect(88 + xw - 1, -18 + yy, 3, 1);
+    g.fillStyle = yy < -8 ? HP.steel : HP.steelD;
+    g.fillRect(88 - xw, -18 + yy, 1, 1);
+    g.fillRect(88 + xw, -18 + yy, 1, 1);
   }
-  g.fillStyle = 'rgba(0,0,0,0.22)';
-  for (let i = 0; i < 12; i++) g.fillRect(-16 + i * 2.8, -7.6 + Math.abs(i - 6) * 0.25, 0.8, 0.8);
+  for (let xx = -16; xx <= 16; xx++) {
+    const yw = Math.round(Math.sqrt(16 * 16 - xx * xx));
+    g.fillStyle = HP.out;
+    g.fillRect(88 + xx, -18 - yw - 1, 1, 3);
+    g.fillRect(88 + xx, -18 + yw - 1, 1, 3);
+  }
+
+  /* --- 机身：逐行扫描的像素侧影 ---
+     每行 [xl, xr] 来自 HULL_ROWS 的台阶轮廓；先铺 1px 轮廓，再按高度分带
+     平涂（机背亮 / 上侧 / 下侧 / 机腹），交界行用棋盘抖动咬合。 */
+  const hulln = HULL_ROWS.length;
+  g.fillStyle = HP.out;
+  for (let i = 0; i < hulln; i++) {
+    const [xl, xr] = HULL_ROWS[i];
+    g.fillRect(xl - 1, HULL_Y0 + i, xr - xl + 2, 1);
+  }
+  g.fillRect(HULL_ROWS[0][0], HULL_Y0 - 1, HULL_ROWS[0][1] - HULL_ROWS[0][0], 1);
+  g.fillRect(HULL_ROWS[hulln - 1][0], HULL_Y0 + hulln, HULL_ROWS[hulln - 1][1] - HULL_ROWS[hulln - 1][0], 1);
+  for (let i = 0; i < hulln; i++) {
+    const yy = HULL_Y0 + i;
+    const [xl, xr] = HULL_ROWS[i];
+    g.fillStyle = yy < -13 ? HP.hi : yy < -4 ? HP.mid : yy < 7 ? HP.low : HP.belly;
+    g.fillRect(xl, yy, xr - xl, 1);
+  }
+  for (const [yy, c] of [[-13, HP.hi], [-4, HP.mid], [7, HP.low]]) {
+    const [xl, xr] = HULL_ROWS[yy - HULL_Y0];
+    pxDither(g, xl, xr, yy, c);
+  }
+  // 机背最亮的一道脊线
+  g.fillStyle = '#68726a';
+  g.fillRect(-15, -17, 30, 1);
+  // 机头下颌：最暗的一块，交界是 1px 的锯齿列
+  for (let yy = 8; yy <= 19; yy++) {
+    const [xl, xr] = HULL_ROWS[yy - HULL_Y0];
+    const xe = Math.min(-10 + (yy & 1), xr);
+    if (xe > xl) {
+      g.fillStyle = HP.chin;
+      g.fillRect(xl, yy, xe - xl, 1);
+    }
+  }
+  // 蒙皮拼缝与铆钉
+  g.fillStyle = HP.seam;
+  g.fillRect(0, -17, 1, 27);
+  g.fillRect(29, -9, 1, 21);
+  g.fillStyle = '#2e3632';
+  for (let i = 0; i < 8; i++) g.fillRect(-14 + i * 4, -16, 1, 1);
+  for (let i = 0; i < 6; i++) g.fillRect(-10 + i * 4, 13, 1, 1);
+  // 机头天线
+  g.fillStyle = HP.out;
+  g.fillRect(-26, -19, 1, 6);
+  g.fillStyle = '#96a09a';
+  g.fillRect(-26, -19, 1, 1);
 
   /* --- 发动机舱与排气 --- */
-  poly(g, [[-5, -8.6], [9, -8.6], [10.5, -12.4], [-4, -12.4]], '#4a5450');
-  poly(g, [[-4, -12.4], [10.5, -12.4], [10.5, -11], [-4, -11]], '#5d6864');
-  g.fillStyle = 'rgba(0,0,0,0.4)';
-  for (let i = 0; i < 5; i++) g.fillRect(-2.5 + i * 2.6, -12.2, 1.2, 3.4);
-  // 排气口：热气把边缘烧成暗红 —— 两档平涂色块，不用辉光椭圆
-  poly(g, [[9.4, -11.6], [13.6, -10.2], [13.2, -7.6], [9.2, -8.6]], '#1a1c1a');
-  g.fillStyle = 'rgba(190,90,50,0.3)';
-  g.fillRect(11.2, -10.6, 2.4, 2.4);
-  g.fillStyle = 'rgba(226,140,80,0.3)';
-  g.fillRect(12.0, -9.9, 1.1, 1.1);
+  g.fillStyle = HP.out;
+  g.fillRect(-11, -25, 33, 9);
+  g.fillStyle = HP.mid;
+  g.fillRect(-10, -24, 31, 7);
+  g.fillStyle = HP.hi;
+  g.fillRect(-10, -24, 31, 2);
+  pxDither(g, -10, 21, -22, HP.hi);
+  g.fillStyle = HP.out; // 进气格栅
+  for (let i = 0; i < 5; i++) g.fillRect(-6 + i * 5, -22, 2, 4);
+  // 排气口：两档平涂的余烬色块
+  g.fillStyle = HP.out;
+  g.fillRect(21, -23, 7, 6);
+  g.fillStyle = '#141614';
+  g.fillRect(22, -22, 5, 4);
+  g.fillStyle = '#8a4630';
+  g.fillRect(23, -21, 3, 2);
+  g.fillStyle = '#c97a4a';
+  g.fillRect(24, -21, 1, 1);
 
-  /* --- 座舱：风挡是一块多边形玻璃，反光压一条硬边的斜带 --- */
-  poly(g, [
-    [-17.6, -2.6], [-14.8, -6.2], [-9.5, -8.0], [-2.6, -7.0],
-    [-1.6, -1.2], [-4.2, 4.0], [-11, 4.6], [-16.6, 1.6],
-  ], '#122026');
-  // 玻璃反光：一条平涂斜带，边界就切在那里
-  poly(g, [
-    [-16.8, -2.2], [-14.2, -5.6], [-9.8, -7.3], [-7.6, -7.0],
-    [-12.4, -4.2], [-15.6, -0.6], [-16.6, 0.8],
-  ], 'rgba(146,196,214,0.26)');
-  // 飞行员剪影 + 仪表盘的一点绿光：方块剪影
-  g.fillStyle = 'rgba(10,14,16,0.85)';
-  g.fillRect(-10.7, -4.6, 3.8, 6.8);
-  g.fillRect(-10.1, -6.4, 2.8, 2.4);
-  g.fillStyle = 'rgba(120,220,160,0.45)';
-  g.fillRect(-13.6, -1.2, 2.6, 0.9);
-  // 窗框
-  g.strokeStyle = '#4c5652';
-  g.lineWidth = 1.1;
-  g.beginPath();
-  g.moveTo(-6.2, -7.2);
-  g.lineTo(-4.4, 4.2);
-  g.moveTo(-14.6, -6.4);
-  g.lineTo(-16.4, 2.4);
-  g.stroke();
+  /* --- 风挡：逐行扫描的玻璃 + 1px 窗框 + 台阶斜带反光 --- */
+  for (let i = 0; i < GLASS_ROWS.length; i++) {
+    const [xl, xr] = GLASS_ROWS[i];
+    if (xr <= xl) continue;
+    g.fillStyle = '#454f4a';
+    g.fillRect(xl - 1, GLASS_Y0 + i, xr - xl + 2, 1);
+  }
+  for (let i = 1; i < GLASS_ROWS.length - 1; i++) {
+    const [xl, xr] = GLASS_ROWS[i];
+    if (xr <= xl) continue;
+    g.fillStyle = '#0e181d';
+    g.fillRect(xl, GLASS_Y0 + i, xr - xl, 1);
+  }
+  // 飞行员剪影 + 目镜 + 仪表绿光
+  g.fillStyle = '#0a0f11';
+  g.fillRect(-21, -9, 8, 13);
+  g.fillRect(-20, -13, 6, 5);
+  g.fillStyle = '#1d2a30';
+  g.fillRect(-20, -11, 3, 2);
+  g.fillStyle = 'rgba(120,220,160,0.5)';
+  g.fillRect(-28, -2, 5, 2);
+  g.fillStyle = '#9fe6b8';
+  g.fillRect(-27, -2, 1, 1);
+  // 中央窗框柱
+  g.fillStyle = '#454f4a';
+  g.fillRect(-13, -14, 2, 22);
+  // 玻璃反光：两条台阶斜带（2px 一步），硬边
+  g.fillStyle = 'rgba(150,198,214,0.30)';
+  for (let i = 0; i < 8; i++) g.fillRect(-31 + i * 2, 2 - i * 2, 2, 4);
+  g.fillStyle = 'rgba(150,198,214,0.16)';
+  for (let i = 0; i < 6; i++) g.fillRect(-24 + i * 2, 4 - i * 2, 1, 3);
 
-  /* --- 敞开的侧舱门 + 探身的机组 --- */
+  /* --- 敞开的侧舱门 + 探身的机组 ---
+     门洞是 CABIN 的像素化（x 3..25、y -11..11，门槛行对齐 heliSillAt）。 */
   const doorShut = c01(o.doorShut || 0);
-  const { x0: cx0, x1: cx1, y0: cy0, y1: cy1 } = CABIN;
-  const cw = cx1 - cx0;
-  const ch = cy1 - cy0;
-  /* 门洞：整块压到比蒙皮更暗，再在四边描一圈门框。不这么做的话它跟机身
-     是同一个明度，机组看起来就像贴在机壳外面，而不是站在一个洞里。 */
-  g.fillStyle = '#070b0b';
-  g.fillRect(cx0, cy0, cw, ch);
-  /* 舱内的顶灯。人物脚下要有一片被照亮的地板，才读得出"里面是个空间"。
-     三档平涂色带代替线性渐变：亮度从顶到底一档一档地掉，硬边界。 */
-  g.fillStyle = 'rgba(214,202,160,0.32)';
-  g.fillRect(cx0, cy0, cw, 3.2);
-  g.fillStyle = 'rgba(170,168,140,0.12)';
-  g.fillRect(cx0, cy0 + 3.2, cw, 3.4);
-  g.fillStyle = 'rgba(120,150,150,0.05)';
-  g.fillRect(cx0, cy0 + 6.6, cw, ch - 6.6);
-  // 舱内地板的一点反光
-  g.fillStyle = 'rgba(150,170,160,0.16)';
-  g.fillRect(cx0, cy1 - 1.9, cw, 1.9);
-  // 舱壁上的固定件，给背景一点层次，人才不是浮在黑洞前面
-  g.fillStyle = 'rgba(18,24,22,0.6)';
-  g.fillRect(cx0 + 0.5, cy0 + 0.9, 1.4, 3.2);
-  g.fillRect(cx1 - 1.8, cy0 + 1.3, 1.4, 4.6);
-  // 门框：上沿受光、下沿（门槛）最亮，人踩上去那条边要看得见
-  g.fillStyle = 'rgba(126,138,132,0.55)';
-  g.fillRect(cx0, cy0, cw, 0.6);
+  g.fillStyle = '#060a0b';
+  g.fillRect(3, -11, 22, 22);
+  // 舱内顶灯：三档硬边色带 + 交界抖动行
+  g.fillStyle = 'rgba(210,198,158,0.30)';
+  g.fillRect(4, -11, 20, 6);
+  g.fillStyle = 'rgba(178,172,140,0.12)';
+  g.fillRect(4, -5, 20, 6);
+  pxDither(g, 4, 24, -5, 'rgba(210,198,158,0.30)');
+  pxDither(g, 4, 24, 1, 'rgba(178,172,140,0.12)');
+  // 舱内地板反光
+  g.fillStyle = 'rgba(148,168,158,0.16)';
+  g.fillRect(4, 7, 20, 3);
+  // 舱壁固定件
+  g.fillStyle = 'rgba(16,22,20,0.7)';
+  g.fillRect(4, -9, 3, 6);
+  g.fillRect(21, -8, 3, 9);
+  // 门框：上沿受光、门槛最亮（人踩上去那条边）
+  g.fillStyle = '#5e6963';
+  g.fillRect(3, -12, 22, 1);
+  g.fillStyle = '#49524d';
+  g.fillRect(2, -11, 1, 22);
+  g.fillRect(25, -11, 1, 22);
   g.fillStyle = '#7b857f';
-  g.fillRect(cx0, cy1 - 0.7, cw, 0.7);
-  g.fillStyle = 'rgba(96,106,101,0.5)';
-  g.fillRect(cx0, cy0, 0.6, ch);
-  g.fillRect(cx1 - 0.6, cy0, 0.6, ch);
+  g.fillRect(3, 10, 22, 1);
 
   /* 机组两名：里面那个站着待命，门口那个坐在门槛上接应。
-     drawCrew 画在机体局部单位里，所以跟着 scale/dir 一起走。 */
-  drawCrew(g, 3.9, 3.4, { t, pose: 'stand', gun: true, seed: 1.7, aim: { x: 3.1, y: -3.4 }, reach: 0.55 });
+     drawCrew 画在机体局部像素里，跟着 dir 一起镜像。 */
+  drawCrew(g, 8, -1, { t, pose: 'stand', gun: true, seed: 1.7, aim: { x: 6, y: -7 }, reach: 0.55 });
 
   /* 玩家：夹在两名机组之间。见函数头的 inCabin 说明 */
   if (o.inCabin) {
     g.save();
-    g.scale(1 / (s * dir), 1 / s);
-    g.translate(-x, -y);
+    g.scale(dir / sc, 1 / sc);
+    g.translate(-X, -Y);
     o.inCabin(g);
     g.restore();
   }
 
-  /* 门口那名：手要伸到 grabTo（画布坐标）。局部单位 = (画布 - 机心) / 缩放，
+  /* 门口那名：手要伸到 grabTo（画布坐标）。局部像素 = (画布 - 机心) / 缩放，
      x 还要再除一次 dir，因为机体是镜像画的。 */
-  const gsit = { x: 9.6, y: 2.4 };
-  let gaim = { x: 4.4, y: 5.2 };
+  const gsit = { x: 19, y: 5 };
+  let gaim = { x: 9, y: 10 };
   if (o.grabTo) {
     gaim = {
-      x: (o.grabTo.x - x) / (s * dir) - gsit.x,
-      y: (o.grabTo.y - y) / s - gsit.y,
+      x: (o.grabTo.x - X) / (sc * dir) - gsit.x,
+      y: (o.grabTo.y - Y) / sc - gsit.y,
     };
   }
   drawCrew(g, gsit.x, gsit.y, {
@@ -1820,118 +1923,127 @@ export function drawHeli(g, x, y, t, o = {}) {
     aim: gaim,
   });
 
-  // 滑开的门板收在后面；拽人进舱之后会滑回来把舱口封上
-  const dx0 = 13 - doorShut * 11.4;
-  poly(g, [[dx0, -6], [dx0 + 2.6, -6], [dx0 + 2.6, 5.6], [dx0, 5.6]], '#4c5652');
-  poly(g, [[dx0, -6], [dx0 + 2.6, -6], [dx0 + 2.6, -4.6], [dx0, -4.6]], '#68736e');
+  // 滑轨上的门板：先画关上的整块，再画前缘立柱；全部整数格
+  const dx0 = Math.round(25 - doorShut * 22);
   if (doorShut > 0.02) {
-    // 关上的那一段门板：一整块，中间一个方形小舷窗（带一道窗框暗边）
-    poly(g, [[dx0 + 2.4, -5.6], [13.2, -5.6], [13.2, 5.4], [dx0 + 2.4, 5.4]], '#414a47');
-    poly(g, [[dx0 + 2.4, -5.6], [13.2, -5.6], [13.2, -4.4], [dx0 + 2.4, -4.4]], '#5b6661');
-    g.fillStyle = '#2c3431';
-    g.fillRect(dx0 + 2.9, -3.0, 3.8, 3.2);
-    g.fillStyle = 'rgba(150,190,200,0.22)';
-    g.fillRect(dx0 + 3.3, -2.6, 3.0, 2.4);
+    const dw = 26 - (dx0 + 5);
+    if (dw > 0) {
+      g.fillStyle = '#3c4540';
+      g.fillRect(dx0 + 5, -11, dw, 22);
+      g.fillStyle = '#57615b';
+      g.fillRect(dx0 + 5, -11, dw, 2);
+      pxDither(g, dx0 + 5, dx0 + 5 + dw, -9, '#57615b');
+      // 方形小舷窗
+      g.fillStyle = '#22282a';
+      g.fillRect(dx0 + 7, -6, 8, 7);
+      g.fillStyle = '#31424a';
+      g.fillRect(dx0 + 8, -5, 6, 5);
+      g.fillStyle = 'rgba(150,190,200,0.35)';
+      g.fillRect(dx0 + 8, -5, 2, 5);
+    }
   }
+  g.fillStyle = HP.out;
+  g.fillRect(dx0, -12, 6, 24);
+  g.fillStyle = '#4c5651';
+  g.fillRect(dx0 + 1, -11, 4, 22);
+  g.fillStyle = '#666f6a';
+  g.fillRect(dx0 + 1, -11, 4, 2);
 
-  /* --- 绞盘吊臂：绳子就是从这里出去的。滑轮是方块套方块 --- */
-  g.strokeStyle = '#59635e';
-  g.lineWidth = 1.6;
-  g.beginPath();
-  g.moveTo(4.4, -6.4);
-  g.lineTo(11.6, -8.4);
-  g.stroke();
-  g.fillStyle = '#6a7570';
-  g.fillRect(2.6, -8.4, 3.6, 2.6);
-  g.fillStyle = '#8b968f';
-  g.fillRect(9.9, -9.7, 3.0, 3.0);
-  g.fillStyle = '#2a3230';
-  g.fillRect(10.8, -8.8, 1.2, 1.2);
+  /* --- 绞盘吊臂：像素折线的吊臂 + 方块套方块的滑轮组 --- */
+  pxLine(g, 8, -13, 21, -16, HP.steelD, 2);
+  g.fillStyle = HP.out;
+  g.fillRect(4, -18, 8, 7);
+  g.fillStyle = HP.steel;
+  g.fillRect(5, -17, 6, 5);
+  g.fillStyle = HP.steelD;
+  g.fillRect(5, -14, 6, 2);
+  g.fillStyle = HP.out;
+  g.fillRect(19, -20, 8, 8);
+  g.fillStyle = '#7f8a84';
+  g.fillRect(20, -19, 6, 6);
+  g.fillStyle = HP.out;
+  g.fillRect(22, -17, 2, 2);
 
-  /* --- 起落滑橇 --- */
-  g.strokeStyle = '#1e2528';
-  g.lineWidth = 2.0;
-  g.beginPath();
-  g.moveTo(-14.5, 13.6);
-  g.lineTo(14.5, 13.2);
-  g.stroke();
-  g.strokeStyle = '#39423f';
-  g.lineWidth = 1.5;
-  g.beginPath();
-  // 前后各一对支柱，中间一根斜撑
-  g.moveTo(-8.4, 7.2);
-  g.lineTo(-10.4, 13.5);
-  g.moveTo(8.4, 7.4);
-  g.lineTo(10.2, 13.3);
-  g.moveTo(-8.4, 7.2);
-  g.lineTo(-4.2, 13.5);
-  g.moveTo(8.4, 7.4);
-  g.lineTo(4.6, 13.4);
-  g.stroke();
-  // 滑橇前端上翘
-  g.strokeStyle = '#1e2528';
-  g.lineWidth = 1.8;
-  g.beginPath();
-  g.moveTo(-14.5, 13.6);
-  g.lineTo(-17.6, 11.4);
-  g.stroke();
+  /* --- 起落滑橇：支柱是像素斜线，横杆是整数条，前端台阶上翘 --- */
+  for (const [sx0, sx1] of [[-17, -21], [16, 20], [-17, -9], [16, 9]]) {
+    pxLine(g, sx0, 13, sx1, 25, '#232b2e', 2);
+  }
+  g.fillStyle = HP.out;
+  g.fillRect(-30, 25, 60, 3);
+  g.fillStyle = '#454f4a';
+  g.fillRect(-29, 25, 58, 1);
+  for (let i = 1; i <= 4; i++) {
+    g.fillStyle = HP.out;
+    g.fillRect(-30 - i, 25 - i, 3, 3);
+  }
+  g.fillStyle = '#454f4a';
+  g.fillRect(-33, 21, 2, 2);
 
-  /* --- 机腹探照灯：方形灯罩 + 方形灯口，灯口位置仍在 heliLampAt --- */
-  g.fillStyle = '#39423f';
-  g.fillRect(-15.8, 4.2, 5.6, 4.2);
-  g.fillStyle = '#4a544f';
-  g.fillRect(-15.8, 4.2, 5.6, 0.9);
-  g.fillStyle = 'rgba(226,238,244,0.75)';
-  g.fillRect(-15.0, 6.6, 3.8, 1.9);
+  /* --- 机腹探照灯：方形灯罩 + 方形灯口，灯口位置仍对齐 heliLampAt --- */
+  g.fillStyle = HP.out;
+  g.fillRect(-32, 8, 13, 10);
+  g.fillStyle = HP.steelD;
+  g.fillRect(-31, 9, 11, 8);
+  g.fillStyle = HP.steel;
+  g.fillRect(-31, 9, 11, 2);
+  g.fillStyle = '#dfeef4';
+  g.fillRect(-29, 13, 8, 4);
+  g.fillStyle = '#9fb6ba';
+  g.fillRect(-29, 13, 8, 1);
 
-  /* --- 机身编号 --- */
+  /* --- 机身编号：手拼的像素字 L7（字体在 4px 下会糊，像素字不会） --- */
   g.save();
-  g.scale(dir, 1); // 文字不跟着机身镜像
-  g.fillStyle = 'rgba(206,214,206,0.42)';
-  g.font = 'bold 4px monospace';
-  g.fillText('L7-R', dir < 0 ? -4 : -4, 1.6);
+  g.scale(dir, 1); // 字不跟着机身镜像
+  const bx0 = dir < 0 ? -49 : 39;
+  g.fillStyle = '#96a09a';
+  g.fillRect(bx0, -3, 1, 5);
+  g.fillRect(bx0 + 1, 1, 3, 1);
+  g.fillRect(bx0 + 6, -3, 4, 1);
+  g.fillRect(bx0 + 9, -2, 1, 1);
+  g.fillRect(bx0 + 8, -1, 1, 1);
+  g.fillRect(bx0 + 7, 0, 1, 2);
   g.restore();
 
-  /* --- 主旋翼：桨毂 + 四片桨。桨位量化到 1/10 圈，在格点间跳；
-     每片桨拖两份分档递暗的残影 —— 扫掠感靠离散的残影段，
-     不再画那圈平滑的半透明椭圆盘。 --- */
-  const mastY = -14.6;
-  g.fillStyle = '#4c5652';
-  g.fillRect(-2.6, -14.4, 4.4, 3.4);
+  /* --- 主旋翼：桨位量化到 1/10 圈，在格点间跳；每片桨是 2px 的像素直线，
+     拖两份分档递暗的像素残影 —— 扫掠感全靠离散的残影段。 --- */
+  const mastX = -1;
+  const mastY = -28;
+  g.fillStyle = HP.out;
+  g.fillRect(mastX - 3, -26, 8, 4);
+  g.fillStyle = HP.steelD;
+  g.fillRect(mastX - 2, -25, 6, 2);
   const RSTEP = Math.PI / 5;
   const ra = Math.floor((t * 26) / RSTEP) * RSTEP;
   for (let gh = 2; gh >= 0; gh--) {
-    g.strokeStyle = gh === 0 ? 'rgba(215,228,232,0.62)' : gh === 1 ? 'rgba(205,218,224,0.26)' : 'rgba(195,208,214,0.12)';
-    g.lineWidth = gh === 0 ? 1.7 : 1.3;
+    const col = gh === 0 ? '#d9e3e5' : gh === 1 ? 'rgba(206,218,222,0.30)' : 'rgba(198,210,214,0.14)';
     for (let i = 0; i < 4; i++) {
       const a = ra + (i * Math.PI) / 2 - gh * RSTEP;
-      g.beginPath();
-      g.moveTo(-0.5, mastY);
-      g.lineTo(-0.5 + Math.cos(a) * 40, mastY + Math.sin(a) * 5.6);
-      g.stroke();
+      pxLine(g, mastX, mastY, mastX + Math.cos(a) * 76, mastY + Math.sin(a) * 11, col, gh === 0 ? 2 : 1);
     }
   }
-  g.fillStyle = '#67726d';
-  g.fillRect(-3.7, mastY - 1.7, 6.4, 3.4);
-  g.fillStyle = '#98a3a0';
-  g.fillRect(-1.4, mastY - 2.6, 2.0, 2.4);
+  // 桨毂盖在桨根上
+  g.fillStyle = HP.out;
+  g.fillRect(mastX - 4, mastY - 3, 10, 6);
+  g.fillStyle = HP.steel;
+  g.fillRect(mastX - 3, mastY - 2, 8, 4);
+  g.fillStyle = '#aab5b2';
+  g.fillRect(mastX - 1, mastY - 2, 3, 1);
 
   g.restore();
 
-  // 航行灯：红绿交替闪 + 机背的防撞频闪。
-  // 辉光是三档同心方块的平涂，不再用径向渐变 —— 像素灯的读法。
+  // 航行灯：红绿交替闪 + 机背的防撞频闪。辉光是三档同心方块的平涂。
   const blink = Math.sin(t * 7) > 0;
   const strobe = Math.sin(t * 11) > 0.86;
   const lamps = [
-    [x - 18 * s * dir, y + 2 * s, '255,70,60', blink ? 0.85 : 0.12, 11],
-    [x + 47 * s * dir, y - 14 * s, '120,255,140', blink ? 0.12 : 0.85, 11],
-    [x - 1 * s * dir, y - 12.6 * s, '255,250,235', strobe ? 0.9 : 0.05, 16],
+    [X - 35 * sc * dir, Y + 4 * sc, '255,70,60', blink ? 0.85 : 0.12, 13],
+    [X + 92 * sc * dir, Y - 27 * sc, '120,255,140', blink ? 0.12 : 0.85, 13],
+    [X - 1 * sc * dir, Y - 25 * sc, '255,250,235', strobe ? 0.9 : 0.05, 19],
   ];
   g.save();
   g.globalCompositeOperation = 'lighter';
   for (const [lx, ly, rgb, k, rr] of lamps) {
     if (k < 0.06) continue;
-    const r = rr * s * 0.6;
+    const r = rr * sc * 0.6;
     for (const [f, a] of [[1, 0.09], [0.5, 0.2], [0.18, 0.8]]) {
       const q = Math.max(1, Math.round(r * f));
       g.fillStyle = `rgba(${rgb},${(k * a).toFixed(3)})`;
@@ -1942,77 +2054,94 @@ export function drawHeli(g, x, y, t, o = {}) {
 }
 
 /**
- * 直升机的探照灯锥：三层嵌套的硬边锥形，由外到内收窄、抬亮 ——
- * 分档色带代替线性渐变，亮度再量化到 6 档，闪烁是跳变而不是呼吸。
+ * 直升机的探照灯锥：逐段扫描带拼出来的硬边锥 —— 每 3px 一条横带，
+ * 带内是三档嵌套的平涂矩形，隔带明暗交替（扫描线的读法）。
+ * 亮度量化到 5 档，闪烁是跳变而不是呼吸。低饱和、无渐变。
  */
 export function drawHeliBeam(g, x, y, tx, ty, w, k) {
-  const kq = qz(c01(k), 1 / 6);
+  const kq = qz(c01(k), 1 / 5);
   if (kq <= 0.01) return;
-  const dx = tx - x;
-  const dy = ty - y;
-  const l = Math.hypot(dx, dy) || 1;
-  const nx = -dy / l;
-  const ny = dx / l;
+  const Y0 = Math.round(y);
+  const Y1 = Math.round(ty);
+  const H = Y1 - Y0;
+  if (H < 8) return;
   g.save();
   g.globalCompositeOperation = 'lighter';
-  for (const [f, a] of [[1, 0.05], [0.62, 0.07], [0.3, 0.1]]) {
-    g.fillStyle = `rgba(196,208,212,${(a * kq).toFixed(3)})`;
-    g.beginPath();
-    g.moveTo(x - nx * 3 * f, y - ny * 3 * f);
-    g.lineTo(x + nx * 3 * f, y + ny * 3 * f);
-    g.lineTo(tx + nx * w * f, ty + ny * w * f);
-    g.lineTo(tx - nx * w * f, ty - ny * w * f);
-    g.closePath();
-    g.fill();
+  const STEP = 3;
+  for (let yy = 0; yy < H; yy += STEP) {
+    const f = yy / H;
+    const cx = x + (tx - x) * f;
+    const hw = 2.5 + (w - 2.5) * f;
+    const bh = Math.min(STEP, H - yy);
+    const band = (yy / STEP) & 1 ? 1.25 : 0.8; // 硬扫描带的明暗交替
+    for (const [fw, a] of [[1, 0.045], [0.6, 0.065], [0.28, 0.1]]) {
+      const q = Math.max(1, Math.round(hw * fw));
+      g.fillStyle = `rgba(188,200,204,${(a * kq * band).toFixed(3)})`;
+      g.fillRect(Math.round(cx - q), Y0 + yy, q * 2, bh);
+    }
+  }
+  // 灯口的亮块
+  g.fillStyle = `rgba(220,234,240,${(0.5 * kq).toFixed(3)})`;
+  g.fillRect(Math.round(x) - 2, Y0 - 1, 4, 3);
+  // 地面光斑：三档同心的扁矩形台阶
+  const R = Math.round(w * 0.6);
+  for (const [fr, a] of [[1, 0.05], [0.62, 0.07], [0.3, 0.09]]) {
+    const q = Math.max(2, Math.round(R * fr));
+    g.fillStyle = `rgba(196,208,206,${(a * kq).toFixed(3)})`;
+    g.fillRect(Math.round(tx) - q, Y1 - Math.round(q * 0.45), q * 2, Math.max(2, Math.round(q * 0.9)));
   }
   g.restore();
 }
 
 /**
- * 垂下的绳索：直线段拼的折线 + 末端的八边形救援套环。
- * 摆动的相位按 7fps 定格、横向偏移对齐到 1.5px 的格 —— 平滑的正弦蠕动
- * 是矢量动画的观感，量化成一格一格的甩动才像逐帧画的。
- * 粗细与套环大小跟着 HELI_S 走，机体放大后绳子不能还是一根发丝。
+ * 垂下的绳索：逐像素往下铺的 4px 宽像素绳 —— 1px 暗色包边 + 两股
+ * 隔两行交错的亮暗芯，读出"搓出来的麻绳"；末端是行扫的像素圆套环。
+ * 摆动相位按 7fps 定格、横向偏移量化到整像素：一格一格地甩，
+ * 不是平滑的正弦蠕动。
  */
 export function drawRope(g, x0, y0, x1, y1, t, sway = 1, loop = true) {
-  const s = HELI_S;
   const tq = tick(t, 7); // 摆动定格
-  const N = 10;
-  const pts = [];
-  for (let i = 0; i <= N; i++) {
-    const k = i / N;
-    const raw = Math.sin(tq * 2.3 + k * 3.2) * 5.2 * sway * Math.sin(k * Math.PI);
-    pts.push([x0 + (x1 - x0) * k + qz(raw, 1.5), y0 + (y1 - y0) * k]);
-  }
-  g.save();
-  g.lineCap = 'butt';
-  g.lineJoin = 'miter';
-  // 先描一遍暗色做外廓，雨夜里绳子才不会糊进背景
-  for (const [col, lw] of [['rgba(24,20,14,0.7)', 3.2 * s * 0.6], ['#8a7f63', 2.0 * s * 0.6]]) {
-    g.strokeStyle = col;
-    g.lineWidth = lw;
-    g.beginPath();
-    g.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i <= N; i++) g.lineTo(pts[i][0], pts[i][1]);
-    g.stroke();
-  }
-  // 绳结分节：隔一节压一块亮色，读出"一节一节的麻绳"而不是一条光滑曲线
-  g.fillStyle = 'rgba(216,204,168,0.3)';
-  for (let i = 1; i < N; i += 2) {
-    g.fillRect(pts[i][0] - 1.0 * s * 0.6, pts[i][1] - 1.3, 2.0 * s * 0.6, 2.6);
+  const X0 = Math.round(x0);
+  const Y0 = Math.round(y0);
+  const X1 = Math.round(x1);
+  const Y1 = Math.round(y1);
+  const n = Math.max(Math.abs(Y1 - Y0), Math.abs(X1 - X0), 1);
+  let ly = null;
+  for (let i = 0; i <= n; i++) {
+    const k = i / n;
+    const swx = qz(Math.sin(tq * 2.3 + k * 3.2) * 5 * sway * Math.sin(k * Math.PI), 1);
+    const xx = Math.round(X0 + (X1 - X0) * k + swx);
+    const yy = Math.round(Y0 + (Y1 - Y0) * k);
+    if (yy === ly) continue; // 每行只铺一次
+    ly = yy;
+    g.fillStyle = '#241f15';
+    g.fillRect(xx - 2, yy, 4, 1);
+    const st = (yy >> 1) & 1; // 两股交错
+    g.fillStyle = st ? '#93875f' : '#6d6448';
+    g.fillRect(xx - 1, yy, 2, 1);
+    g.fillStyle = st ? '#b3a375' : '#93875f';
+    g.fillRect(xx - 1 + st, yy, 1, 1);
   }
   // 末端救援套环。人抓住绳子之后不画：那时末端就在他手里，再挂一个圈很怪
   if (loop) {
-    const rx = 5.6 * s * 0.62;
-    const ry = 6.6 * s * 0.62;
-    const ring = octPts(x1, y1 + ry * 0.8, rx, ry);
-    poly(g, ring, null, 'rgba(24,20,14,0.7)', 3.0 * s * 0.6);
-    poly(g, ring, null, '#a99b78', 1.8 * s * 0.6);
-    // 套环上的锁扣
-    g.fillStyle = '#b9c2bc';
-    g.fillRect(x1 - 1.4, y1 - 1.6, 2.8, 3.4);
+    const rx = 7;
+    const ry = 8;
+    const cy = Y1 + 6;
+    for (let yy = -ry; yy <= ry; yy++) {
+      const xw = Math.round(rx * Math.sqrt(Math.max(0, 1 - (yy / ry) * (yy / ry))));
+      for (const sx of [X1 - xw, X1 + xw]) {
+        g.fillStyle = '#241f15';
+        g.fillRect(sx - 1, cy + yy, 3, 1);
+        g.fillStyle = (cy + yy) & 2 ? '#a99b78' : '#7d7355';
+        g.fillRect(sx, cy + yy, 1, 1);
+      }
+    }
+    // 顶部锁扣
+    g.fillStyle = '#39413d';
+    g.fillRect(X1 - 2, cy - ry - 3, 4, 5);
+    g.fillStyle = '#8f9a93';
+    g.fillRect(X1 - 1, cy - ry - 3, 2, 2);
   }
-  g.restore();
 }
 
 /* ------------------------------------------------------------------ *
