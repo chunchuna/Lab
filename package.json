@@ -1,6 +1,6 @@
 {
   "name": "lab7-isometric",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "LAB 7 — 等距 2D 生存解谜原型：真实视线/光线遮挡、手电筒、手枪",
   "type": "module",
   "scripts": {
