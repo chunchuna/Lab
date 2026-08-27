@@ -25,7 +25,10 @@ import {
 } from './areakit.js';
 import { computeVisibility } from './visibility.js';
 import { Lighting } from './lighting.js';
-import { clamp, flicker, setBase, blit, pixelSprite } from './util.js';
+import {
+  clamp, flicker, setBase, blit, pixelSprite,
+  pxLine, pxPolyline, pxDither, pxPoly, pxEllipse, pxText, pxGlow,
+} from './util.js';
 
 const SCALE = 2;
 const SW = VIEW_W / SCALE;
@@ -74,24 +77,25 @@ let scene = null;
 
 /** 监控墙：几块屏，跳动的波形（静态烘焙，辉光每帧另画） */
 function monitorBank(g, u0, v0, rand) {
+  const V0 = Math.round(v0);
   g.fillStyle = '#14191b';
-  g.fillRect(u0 - 4, v0 - 4, 96, 34);
+  g.fillRect(u0 - 4, V0 - 4, 96, 34);
   g.fillStyle = '#2b3336';
-  g.fillRect(u0 - 4, v0 - 4, 96, 1.6);
+  g.fillRect(u0 - 4, V0 - 4, 96, 2);
   for (let i = 0; i < 4; i++) {
     const sx = u0 + (i % 2) * 45;
-    const sy = v0 + ((i / 2) | 0) * 14;
+    const sy = V0 + ((i / 2) | 0) * 14;
     g.fillStyle = '#08171a';
-    g.fillRect(sx, sy, 41, 11.5);
-    g.strokeStyle = 'rgba(121,210,204,0.55)';
-    g.lineWidth = 0.7;
-    g.beginPath();
-    for (let u = 0; u < 41; u += 1.6) {
-      const v = sy + 5.9 + Math.sin(u * (0.4 + i * 0.13) + i) * (i === 3 ? 0.6 : 3.4) * (rand() * 0.4 + 0.8);
-      if (u === 0) g.moveTo(sx + u, v);
-      else g.lineTo(sx + u, v);
+    g.fillRect(sx, sy, 41, 12);
+    // 波形：逐列 1px 像素点，列间用竖线补连续
+    g.fillStyle = 'rgba(121,210,204,0.55)';
+    let pv = null;
+    for (let u = 0; u < 41; u++) {
+      const v = Math.round(sy + 6 + Math.sin(u * (0.4 + i * 0.13) + i) * (i === 3 ? 0.6 : 3.4) * (rand() * 0.4 + 0.8));
+      if (pv === null) g.fillRect(sx + u, v, 1, 1);
+      else g.fillRect(sx + u, Math.min(v, pv), 1, Math.abs(v - pv) + 1);
+      pv = v;
     }
-    g.stroke();
     g.fillStyle = 'rgba(121,210,204,0.22)';
     g.fillRect(sx, sy, 41, 1);
   }
@@ -109,14 +113,16 @@ const GAL = { u0: 40, u1: 442, v0: 9.9, h: 27.9 };
 function galleryFrame(g) {
   const { u0, u1, v0, h } = GAL;
   const w = u1 - u0;
+  const V0 = Math.round(v0);
+  const H = Math.round(h);
   g.fillStyle = '#0d1113';
-  g.fillRect(u0 - 4, v0 - 4, w + 8, h + 8);
+  g.fillRect(u0 - 4, V0 - 4, w + 8, H + 8);
   g.fillStyle = '#39423f';
-  g.fillRect(u0 - 4, v0 - 4, w + 8, 2.4);
+  g.fillRect(u0 - 4, V0 - 4, w + 8, 2);
   g.fillStyle = 'rgba(255,255,255,0.06)';
-  g.fillRect(u0 - 4, v0 - 4, w + 8, 1);
+  g.fillRect(u0 - 4, V0 - 4, w + 8, 1);
   g.fillStyle = '#2a3134';
-  g.fillRect(u0 - 4, v0 + h + 1, w + 8, 3);
+  g.fillRect(u0 - 4, V0 + H + 1, w + 8, 3);
 }
 
 /** 观察廊的内景。画在远墙平面上，所以要先叠上 northT 的斜切 */
@@ -129,50 +135,56 @@ function galleryLit(ctx, cam, t) {
   ctx.rect(u0, v0, w, h);
   ctx.clip();
 
-  // 廊内：顶灯打下来的一层冷灰，越往下越暗
-  const grd = ctx.createLinearGradient(0, v0, 0, v0 + h);
-  grd.addColorStop(0, 'rgba(104,120,128,0.9)');
-  grd.addColorStop(0.5, 'rgba(60,71,77,0.9)');
-  grd.addColorStop(1, 'rgba(24,31,35,0.9)');
-  ctx.fillStyle = grd;
-  ctx.fillRect(u0, v0, w, h);
+  // 廊内：顶灯打下来的一层冷灰，越往下越暗（三档硬分带 + 抖动行）
+  const V0 = Math.round(v0);
+  const H = Math.round(h);
+  const bands = [
+    [V0, 'rgba(104,120,128,0.9)'],
+    [V0 + Math.round(H * 0.36), 'rgba(60,71,77,0.9)'],
+    [V0 + Math.round(H * 0.72), 'rgba(24,31,35,0.9)'],
+    [V0 + H, ''],
+  ];
+  for (let b = 0; b < 3; b++) {
+    ctx.fillStyle = bands[b][1];
+    ctx.fillRect(u0, bands[b][0], w, bands[b + 1][0] - bands[b][0]);
+  }
+  pxDither(ctx, u0, u0 + w, bands[1][0], bands[0][1]);
+  pxDither(ctx, u0, u0 + w, bands[2][0], bands[1][1]);
 
   // 后墙上的一排指示灯
   for (let i = 0; u0 + 10 + i * 27 < u1; i++) {
     const u = u0 + 10 + i * 27;
     const on = ((t * 0.7 + i * 0.37) % 1) < 0.62;
     ctx.fillStyle = i % 4 === 3 ? 'rgba(224,165,82,0.75)' : `rgba(121,210,204,${on ? 0.7 : 0.2})`;
-    ctx.fillRect(u, v0 + 3.4, 3, 1.6);
+    ctx.fillRect(u, V0 + 3, 3, 2);
   }
 
-  // 人影：站着的、抱臂的、俯身撑在栏杆上的。极慢地挪一点重心
+  // 人影：站着的、抱臂的、俯身撑在栏杆上的。重心按 1px 步进极慢地挪
   const poses = [0.1, 0.23, 0.4, 0.55, 0.72, 0.88];
   for (let i = 0; i < poses.length; i++) {
     const lean = i % 3 === 2;
-    const cx = u0 + w * poses[i] + Math.sin(t * 0.23 + i * 1.9) * 1.6;
-    const bh = h * (lean ? 0.6 : 0.76);
-    const by = v0 + h - bh;
+    const cx = Math.round(u0 + w * poses[i] + Math.sin(t * 0.23 + i * 1.9) * 1.6);
+    const bh = Math.round(h * (lean ? 0.6 : 0.76));
+    const by = V0 + H - bh;
     ctx.fillStyle = 'rgba(9,13,15,0.88)';
-    ctx.fillRect(cx - 3.6, by + 4.4, 7.2, bh - 4.4);
-    ctx.beginPath();
-    ctx.arc(cx, by + 2.8, 3.2, 0, 6.3);
-    ctx.fill();
-    if (lean) ctx.fillRect(cx - 7.5, by + 6.5, 15, 2.6);
+    ctx.fillRect(cx - 4, by + 4, 7, bh - 4);
+    // 头：像素方块拼的圆头
+    ctx.fillRect(cx - 3, by + 1, 6, 4);
+    ctx.fillRect(cx - 2, by, 4, 1);
+    if (lean) ctx.fillRect(cx - 8, by + 6, 15, 3);
   }
   // 栏杆
   ctx.fillStyle = 'rgba(28,36,40,0.9)';
-  ctx.fillRect(u0, v0 + h - 5.5, w, 2);
+  ctx.fillRect(u0, V0 + H - 6, w, 2);
 
-  // 玻璃：斜向高光
-  ctx.fillStyle = 'rgba(178,214,218,0.09)';
-  for (let u = u0 - h; u < u1; u += 19) {
-    ctx.beginPath();
-    ctx.moveTo(u, v0 + h);
-    ctx.lineTo(u + h * 0.5, v0);
-    ctx.lineTo(u + h * 0.5 + 6, v0);
-    ctx.lineTo(u + 6, v0 + h);
-    ctx.closePath();
-    ctx.fill();
+  // 玻璃：斜向高光（像素扫描平行四边形）
+  for (let u = u0 - H; u < u1; u += 19) {
+    pxPoly(ctx, [
+      [u, V0 + H],
+      [u + H * 0.5, V0],
+      [u + H * 0.5 + 6, V0],
+      [u + 6, V0 + H],
+    ], 'rgba(178,214,218,0.09)');
   }
   ctx.restore();
 
@@ -180,7 +192,7 @@ function galleryLit(ctx, cam, t) {
   ctx.save();
   ctx.transform(HW / TILE_W, HH / TILE_W, 0, 1, cam.x, cam.y - WALL * TILE_Z);
   ctx.fillStyle = 'rgba(20,26,28,0.9)';
-  for (let u = u0 + 42; u < u1 - 4; u += 42) ctx.fillRect(u, v0, 2.6, h);
+  for (let u = u0 + 42; u < u1 - 4; u += 42) ctx.fillRect(u, V0, 3, H);
   ctx.restore();
 }
 
@@ -199,24 +211,16 @@ function paintWalls(a, rand, th) {
   galleryFrame(g);
   monitorBank(g, 78, WH * 0.53, rand);
 
-  // 舱位编号与警示牌：摆在收容舱右边，别被舱体挡住
-  g.fillStyle = 'rgba(210,210,198,0.26)';
-  g.font = 'bold 11px monospace';
-  g.fillText('CONTAINMENT-07', 274, WH * 0.62);
-  g.font = '6px monospace';
-  g.fillStyle = 'rgba(210,210,198,0.2)';
-  g.fillText('OBSERVATION LOG D-1042', 274, WH * 0.62 + 9);
-  g.fillText('SPECIMEN CLASS III / NO ENTRY', 274, WH * 0.62 + 17);
-  // 危险三角
-  const ty = WH * 0.56;
-  g.strokeStyle = 'rgba(224,165,82,0.5)';
-  g.lineWidth = 1.4;
-  g.beginPath();
-  g.moveTo(262, ty - 14);
-  g.lineTo(270, ty);
-  g.lineTo(254, ty);
-  g.closePath();
-  g.stroke();
+  // 舱位编号与警示牌：摆在收容舱右边，别被舱体挡住（3×5 字模）
+  const wy = Math.round(WH * 0.62);
+  pxText(g, 274, wy - 8, 'CONTAINMENT-07', 'rgba(210,210,198,0.26)', 1);
+  pxText(g, 274, wy + 1, 'OBSERVATION LOG D-1042', 'rgba(210,210,198,0.2)', 1);
+  pxText(g, 274, wy + 9, 'SPECIMEN CLASS III / NO ENTRY', 'rgba(210,210,198,0.2)', 1);
+  // 危险三角（像素描线）
+  const ty = Math.round(WH * 0.56);
+  pxLine(g, 262, ty - 14, 270, ty, 'rgba(224,165,82,0.5)', 1);
+  pxLine(g, 270, ty, 254, ty, 'rgba(224,165,82,0.5)', 1);
+  pxLine(g, 254, ty, 262, ty - 14, 'rgba(224,165,82,0.5)', 1);
   g.fillStyle = 'rgba(224,165,82,0.5)';
   g.fillRect(261, ty - 10, 2, 5);
   g.fillRect(261, ty - 4, 2, 2);
@@ -226,38 +230,47 @@ function paintWalls(a, rand, th) {
   g.save();
   westT(g, a.sox, a.soy, a.wallH);
   wallBase(g, a.h * TILE_W, rand, th, a.wallH);
+  const cy0 = Math.round(WH * 0.36);
+  const gy0 = Math.round(WH * 0.4);
+  const gh = Math.round(WH * 0.4);
   g.fillStyle = '#333c3d';
-  g.fillRect(132, WH * 0.36, 46, WH * 0.5);
+  g.fillRect(132, cy0, 46, Math.round(WH * 0.5));
   g.fillStyle = '#3f4a4b';
-  g.fillRect(132, WH * 0.36, 46, 2.4);
+  g.fillRect(132, cy0, 46, 2);
   g.fillStyle = 'rgba(150,200,200,0.16)';
-  g.fillRect(136, WH * 0.4, 18, WH * 0.4);
-  g.fillRect(157, WH * 0.4, 18, WH * 0.4);
-  g.strokeStyle = 'rgba(0,0,0,0.5)';
-  g.lineWidth = 0.8;
-  g.strokeRect(136, WH * 0.4, 18, WH * 0.4);
-  g.strokeRect(157, WH * 0.4, 18, WH * 0.4);
+  g.fillRect(136, gy0, 18, gh);
+  g.fillRect(157, gy0, 18, gh);
+  // 玻璃门 1px 描边
+  g.fillStyle = 'rgba(0,0,0,0.5)';
+  for (const gx of [136, 157]) {
+    g.fillRect(gx, gy0, 18, 1);
+    g.fillRect(gx, gy0 + gh - 1, 18, 1);
+    g.fillRect(gx, gy0, 1, gh);
+    g.fillRect(gx + 17, gy0, 1, gh);
+  }
   for (let i = 0; i < 8; i++) {
     g.fillStyle = ['rgba(190,205,190,0.5)', 'rgba(224,165,82,0.4)'][i % 2];
-    g.fillRect(139 + (i % 2) * 21, WH * 0.44 + ((i / 2) | 0) * 8, 11, 4);
+    g.fillRect(139 + (i % 2) * 21, Math.round(WH * 0.44) + ((i / 2) | 0) * 8, 11, 4);
   }
   // 挂着的防护服
   for (const [hx, hw] of [[74, 13], [92, 11]]) {
+    const sy0 = Math.round(WH * 0.5);
+    const sh = Math.round(WH * 0.3);
     g.fillStyle = '#c3ccc9';
-    g.fillRect(hx, WH * 0.5, hw, WH * 0.3);
+    g.fillRect(hx, sy0, hw, sh);
     g.fillStyle = '#9aa5a2';
-    g.fillRect(hx, WH * 0.5, hw * 0.36, WH * 0.3);
+    g.fillRect(hx, sy0, Math.round(hw * 0.36), sh);
     g.fillStyle = '#2d3436';
-    g.fillRect(hx - 2, WH * 0.5 - 2.4, hw + 4, 2.4);
+    g.fillRect(hx - 2, sy0 - 2, hw + 4, 2);
   }
   // 立管：从墙顶落到地面，把这面高墙的竖向撑住
-  for (const [px, pw, pc] of [[206, 5, '#4a5350'], [214, 3.4, '#39413f']]) {
+  for (const [px, pw, pc] of [[206, 5, '#4a5350'], [214, 3, '#39413f']]) {
     g.fillStyle = pc;
     g.fillRect(px, 0, pw, WH);
     g.fillStyle = 'rgba(255,255,255,0.09)';
-    g.fillRect(px, 0, 1.2, WH);
+    g.fillRect(px, 0, 1, WH);
     g.fillStyle = 'rgba(0,0,0,0.35)';
-    for (let v = 14; v < WH; v += 30) g.fillRect(px - 1.4, v, pw + 2.8, 3);
+    for (let v = 14; v < WH; v += 30) g.fillRect(px - 1, v, pw + 2, 3);
   }
   g.restore();
 
@@ -269,48 +282,50 @@ function paintFloorMarks(a, th) {
   g.save();
   floorT(g, a.sox, a.soy);
 
-  // 收容舱周围的隔离圈：地面空间里画正圆，投影出来自然是菱形方向的椭圆
+  // 收容舱周围的隔离圈：地面空间里的虚线圆改成一圈像素短段
   const cx = CHAMBER.x * TILE_W;
   const cy = CHAMBER.y * TILE_W;
-  g.strokeStyle = 'rgba(224,165,82,0.32)';
-  g.lineWidth = 3;
-  g.setLineDash([12, 9]);
-  g.beginPath();
-  g.arc(cx, cy, 2.0 * TILE_W, 0, 6.3);
-  g.stroke();
-  g.setLineDash([]);
-  g.strokeStyle = 'rgba(224,165,82,0.16)';
-  g.lineWidth = 1.2;
-  g.beginPath();
-  g.arc(cx, cy, 2.28 * TILE_W, 0, 6.3);
-  g.stroke();
+  {
+    const r1 = 2.0 * TILE_W;
+    const n1 = 26;
+    g.fillStyle = 'rgba(224,165,82,0.32)';
+    for (let i = 0; i < n1; i++) {
+      if (i % 2) continue; // 虚线：隔一段留一段
+      const a0 = (i / n1) * Math.PI * 2;
+      const a1 = ((i + 0.9) / n1) * Math.PI * 2;
+      pxLine(g, cx + Math.cos(a0) * r1, cy + Math.sin(a0) * r1, cx + Math.cos(a1) * r1, cy + Math.sin(a1) * r1, 'rgba(224,165,82,0.32)', 3);
+    }
+    // 外圈细环：稀疏像素点
+    const r2 = 2.28 * TILE_W;
+    g.fillStyle = 'rgba(224,165,82,0.16)';
+    for (let i = 0; i < 72; i++) {
+      const a0 = (i / 72) * Math.PI * 2;
+      g.fillRect(Math.round(cx + Math.cos(a0) * r2), Math.round(cy + Math.sin(a0) * r2), 1, 1);
+    }
+  }
 
-  // 地面标线与编号
-  g.fillStyle = 'rgba(214,210,190,0.16)';
-  g.font = 'bold 24px monospace';
-  g.fillText('07', cx - 76, cy + 104);
-  g.font = 'bold 10px monospace';
-  g.fillText('KEEP CLEAR', cx - 76, cy + 115);
+  // 地面标线与编号（3×5 字模）
+  pxText(g, cx - 76, cy + 85, '07', 'rgba(214,210,190,0.16)', 4);
+  pxText(g, cx - 76, cy + 108, 'KEEP CLEAR', 'rgba(214,210,190,0.16)', 2);
 
   // 近端地面的导向灯带：画面最前一条亮线，把空荡荡的前景收住
   for (let i = 0; i < 34; i++) {
-    const u = (1.6 + i * 0.32) * TILE_W;
+    const u = Math.round((1.6 + i * 0.32) * TILE_W);
     g.fillStyle = i % 4 === 0 ? 'rgba(214,226,232,0.5)' : 'rgba(150,170,180,0.22)';
-    g.fillRect(u, 6.3 * TILE_W, 7, 2.4);
+    g.fillRect(u, Math.round(6.3 * TILE_W), 7, 2);
   }
 
-  // 从舱底拉出去的线缆
-  g.strokeStyle = 'rgba(12,16,17,0.85)';
-  g.lineWidth = 2.6;
+  // 从舱底拉出去的线缆（像素折线：起点-垂点-终点）
   for (const [ex, ey] of [
     [11.4 * TILE_W, 0.7 * TILE_W],
     [1.2 * TILE_W, 0.6 * TILE_W],
     [8.2 * TILE_W, 5.6 * TILE_W],
   ]) {
-    g.beginPath();
-    g.moveTo(cx, cy + 8);
-    g.quadraticCurveTo((cx + ex) / 2, cy + 34, ex, ey);
-    g.stroke();
+    pxPolyline(g, [
+      [cx, cy + 8],
+      [(cx + ex) / 2, cy + 26],
+      [ex, ey],
+    ], 'rgba(12,16,17,0.85)', 3);
   }
   g.restore();
   resetT(g);
@@ -431,42 +446,39 @@ function pressAt(t) {
 /** 天花板灯具：外壳 + 亮着的灯管 */
 function drawFixture(g, cam, f, i) {
   const p = sc(cam, f.x, f.y, f.z);
-  const w = f.len * TILE_W * 0.5;
+  const X = Math.round(p.x);
+  const Y = Math.round(p.y);
+  const w = Math.round(f.len * TILE_W * 0.5);
   g.fillStyle = '#2b3134';
-  g.fillRect(p.x - w / 2 - 2, p.y - 3, w + 4, 4);
+  g.fillRect(X - (w >> 1) - 2, Y - 3, w + 4, 4);
   g.fillStyle = '#434c50';
-  g.fillRect(p.x - w / 2 - 2, p.y - 3, w + 4, 1.2);
+  g.fillRect(X - (w >> 1) - 2, Y - 3, w + 4, 1);
   g.fillStyle = `rgba(236,240,232,${0.25 + i * 0.7})`;
-  g.fillRect(p.x - w / 2, p.y + 1, w, 1.6);
+  g.fillRect(X - (w >> 1), Y + 1, w, 2);
   if (i > 0.05) {
+    // 三档同心方块辉光，跟直升机航行灯同一读法
     g.save();
     g.globalCompositeOperation = 'lighter';
-    const grd = g.createRadialGradient(p.x, p.y + 1, 0, p.x, p.y + 1, w * 0.9);
-    grd.addColorStop(0, `rgba(226,236,240,${0.3 * i})`);
-    grd.addColorStop(1, 'rgba(226,236,240,0)');
-    g.fillStyle = grd;
-    g.fillRect(p.x - w, p.y - w * 0.6, w * 2, w * 1.2);
+    pxGlow(g, X, Y + 1, w * 0.9, '226,236,240', 0.38 * i);
     g.restore();
   }
   // 吊杆：一直吊到天花板
-  const rod = (WALL - f.z) * TILE_Z;
+  const rod = Math.round((WALL - f.z) * TILE_Z);
   g.fillStyle = 'rgba(0,0,0,0.5)';
-  g.fillRect(p.x - 4, p.y - 3 - rod, 1, rod);
-  g.fillRect(p.x + 3, p.y - 3 - rod, 1, rod);
+  g.fillRect(X - 4, Y - 3 - rod, 1, rod);
+  g.fillRect(X + 3, Y - 3 - rod, 1, rod);
 }
 
 /** 舱体的自发光：玻璃里透出来的冷光，画在光照之后才压不黑 */
 function drawTankGlow(g, cam, k) {
   const p = sc(cam, CHAMBER.x, CHAMBER.y);
   const cy = p.y - (A.CHAMBER_FLOOR_Z + 1.3) * TILE_Z;
+  // 三档同心像素椭圆代替径向渐变
   g.save();
   g.globalCompositeOperation = 'lighter';
-  const grd = g.createRadialGradient(p.x, cy, 2, p.x, cy, 40);
-  grd.addColorStop(0, `rgba(126,220,214,${0.2 * k})`);
-  grd.addColorStop(0.55, `rgba(96,190,190,${0.09 * k})`);
-  grd.addColorStop(1, 'rgba(96,190,190,0)');
-  g.fillStyle = grd;
-  g.fillRect(p.x - 44, cy - 46, 88, 92);
+  pxEllipse(g, p.x, cy, 40, 42, `rgba(96,190,190,${(0.05 * k).toFixed(3)})`);
+  pxEllipse(g, p.x, cy, 26, 28, `rgba(96,190,190,${(0.08 * k).toFixed(3)})`);
+  pxEllipse(g, p.x, cy, 13, 14, `rgba(126,220,214,${(0.16 * k).toFixed(3)})`);
   g.restore();
 }
 
@@ -476,15 +488,11 @@ function drawRec(g, cam, on) {
   const x = p.x + A.CAMERA_REC.dx;
   const y = p.y + A.CAMERA_REC.dy;
   g.fillStyle = on ? '#e8604a' : '#3a2320';
-  g.fillRect(x, y, 1.6, 1.6);
+  g.fillRect(Math.round(x), Math.round(y), 2, 2);
   if (!on) return;
   g.save();
   g.globalCompositeOperation = 'lighter';
-  const grd = g.createRadialGradient(x, y, 0, x, y, 6);
-  grd.addColorStop(0, 'rgba(232,96,74,0.5)');
-  grd.addColorStop(1, 'rgba(232,96,74,0)');
-  g.fillStyle = grd;
-  g.fillRect(x - 6, y - 6, 12, 12);
+  pxGlow(g, x + 1, y + 1, 6, '232,96,74', 0.5);
   g.restore();
 }
 
@@ -499,11 +507,7 @@ function drawScreenGlow(g, cam, t) {
     const k = 0.7 + Math.sin(t * 2.6 + ph) * 0.16;
     g.save();
     g.globalCompositeOperation = 'lighter';
-    const grd = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-    grd.addColorStop(0, `rgba(${col},${0.16 * k})`);
-    grd.addColorStop(1, `rgba(${col},0)`);
-    g.fillStyle = grd;
-    g.fillRect(p.x - r, p.y - r, r * 2, r * 2);
+    pxGlow(g, p.x, p.y, r, col, 0.22 * k);
     g.restore();
   }
 }
@@ -590,38 +594,50 @@ export function drawMenuScene(ctx, t) {
     ctx.restore();
   }
 
-  // 尘埃
+  // 尘埃：整数像素小点
   ctx.save();
   for (const m of motes) {
-    const x = (m.x + Math.sin(t * 0.12 + m.ph) * 9 + t * 1.6) % SW;
-    const y = m.y + Math.sin(t * 0.31 + m.ph * 2) * 5;
+    const x = Math.round((m.x + Math.sin(t * 0.12 + m.ph) * 9 + t * 1.6) % SW);
+    const y = Math.round(m.y + Math.sin(t * 0.31 + m.ph * 2) * 5);
     ctx.fillStyle = `rgba(214,226,224,${m.a})`;
-    ctx.fillRect(x, y, m.s + 0.4, m.s + 0.4);
+    ctx.fillRect(x, y, 1, 1);
   }
   ctx.restore();
 
   /* 上缘的雾：远墙顶边是一条斜线，直接切进纯黑会露出很硬的边。
-     压一层自上而下的雾，斜边就化在暗处，视线也被压回下半幅。 */
-  const hz = ctx.createLinearGradient(0, 0, 0, SH * 0.42);
-  hz.addColorStop(0, 'rgba(5,8,12,0.88)');
-  hz.addColorStop(0.55, 'rgba(5,8,12,0.34)');
-  hz.addColorStop(1, 'rgba(5,8,12,0)');
-  ctx.fillStyle = hz;
-  ctx.fillRect(0, 0, SW, SH * 0.42);
+     压几档自上而下的雾带，斜边就化在暗处，视线也被压回下半幅。 */
+  for (const [f0, f1, aH] of [
+    [0, 0.1, 0.88],
+    [0.1, 0.2, 0.6],
+    [0.2, 0.3, 0.34],
+    [0.3, 0.42, 0.14],
+  ]) {
+    ctx.fillStyle = `rgba(5,8,12,${aH})`;
+    ctx.fillRect(0, Math.round(SH * f0), SW, Math.round(SH * f1) - Math.round(SH * f0));
+  }
 
   // 右缘同理，轻一点：那边还有台灯和主管，压太狠就全糊了
-  const rg = ctx.createLinearGradient(SW, 0, SW * 0.84, 0);
-  rg.addColorStop(0, 'rgba(5,8,12,0.42)');
-  rg.addColorStop(1, 'rgba(5,8,12,0)');
-  ctx.fillStyle = rg;
-  ctx.fillRect(SW * 0.84, 0, SW * 0.16, SH);
+  for (const [f0, f1, aR] of [
+    [0.84, 0.9, 0.1],
+    [0.9, 0.95, 0.22],
+    [0.95, 1, 0.4],
+  ]) {
+    ctx.fillStyle = `rgba(5,8,12,${aR})`;
+    ctx.fillRect(Math.round(SW * f0), 0, Math.round(SW * f1) - Math.round(SW * f0), SH);
+  }
 
-  // 左下压暗：菜单文字压在上面要读得清
-  const sg = ctx.createLinearGradient(0, SH, SW * 0.62, SH * 0.3);
-  sg.addColorStop(0, 'rgba(4,6,9,0.86)');
-  sg.addColorStop(1, 'rgba(4,6,9,0)');
-  ctx.fillStyle = sg;
-  ctx.fillRect(0, 0, SW, SH);
+  // 左下压暗：菜单文字压在上面要读得清（三层嵌套三角，代替斜向渐变）
+  for (const [fw, fh, aS] of [
+    [0.62, 0.7, 0.3],
+    [0.46, 0.52, 0.34],
+    [0.3, 0.34, 0.44],
+  ]) {
+    pxPoly(ctx, [
+      [0, SH - SH * fh],
+      [SW * fw, SH],
+      [0, SH],
+    ], `rgba(4,6,9,${aS})`);
+  }
 
   setBase(ctx, 1, 0, 0, 1, 0, 0);
 }
