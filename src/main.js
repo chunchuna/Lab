@@ -1757,6 +1757,13 @@ function qteFail() {
  * 爬绳段落靠这一点把"手该举到哪"直接换算成玩家的 z（见 zForHandUp）。
  */
 const HELI_OFF = { x: 26, y: -144 };
+
+/* 像素动画量化器：时间按 hz 定格、值对齐到 step 的格上。
+   悬停的颠簸、爬绳的摆动这些小幅正弦，平滑插值读起来是矢量补间；
+   定格 + 跳变才像逐帧画的（大位移的进场/离场仍走平滑插值，不受影响）。 */
+const tick = (t, hz) => Math.floor(t * hz) / hz;
+const qstep = (v, s) => Math.round(v / s) * s;
+
 function heliHover() {
   const r = area.roof;
   return {
@@ -2506,18 +2513,20 @@ function setRopeAnim(name, k) {
     if (game.rope) game.rope.hold = true;
     const climb = name === 'climb' ? clamp(k, 0, 1) : 0;
     /* 一把一把往上：每按满 1/6 就是一"把"，手脚交替的相位跟着爬升进度走
-       而不是跟着时间走 —— 停手时人也就停在半途，不会自己在那划水。 */
+       而不是跟着时间走 —— 停手时人也就停在半途，不会自己在那划水。
+       相位量化成 5 个定格（-1/-0.5/0/0.5/1）：姿势一格一格地换，
+       是逐帧动画的读法；吊着时的晃动同样按 7fps 定格。 */
     ra.stroke = lerp(ra.stroke || 0, climb * 6, Math.min(1, game.rdt * 9));
-    const a = Math.sin(ra.stroke * Math.PI * 2);
+    const a = qstep(Math.sin(ra.stroke * Math.PI * 2), 0.5);
     // 越往上离镜头越远，同时人要小到塞得进舱门（见 playerScale 的说明）
     p.shrink = climb * CLIMB_SHRINK;
-    p.x = grab.x + Math.sin(game.rt * 1.7) * 0.05;
+    p.x = grab.x + Math.sin(tick(game.rt, 7) * 1.7) * 0.05;
     p.y = grab.y;
     // 起点：吊在绳子下端；终点：手够到离舱口抓手还差一截的地方
-    p.z = lerp(2.4, zForHandUp(GRAB_UP - 15, CLIMB_SHRINK), climb) + Math.sin(game.rt * 1.5) * 0.06;
+    p.z = lerp(2.4, zForHandUp(GRAB_UP - 15, CLIMB_SHRINK), climb) + Math.sin(tick(game.rt, 7) * 1.5) * 0.06;
     p.moving = false;
     p.walk = lerp(p.walk, 0, Math.min(1, game.rdt * 5));
-    ra.pose = climbPose(name === 'climb' ? a : Math.sin(game.rt * 1.6) * 0.35);
+    ra.pose = climbPose(name === 'climb' ? a : qstep(Math.sin(tick(game.rt, 7) * 1.6) * 0.35, 0.175));
   }
 
   p.aim = Math.atan2(r.rope.y - 2.6 - p.y, r.rope.x - p.x);
@@ -2556,7 +2565,8 @@ function updateRoof(dt) {
     h.k = Math.min(1, h.t / 4.6);
     const k = smoothstep(h.k);
     h.x = lerp(VIEW_W + 190, hv.x, k);
-    h.y = lerp(26, hv.y, k) + Math.sin(h.t * 1.7) * 2.2;
+    // 进场的大位移平滑走，叠加的颠簸按 8fps 定格
+    h.y = lerp(26, hv.y, k) + Math.sin(tick(h.t, 8) * 1.7) * 2.2;
     SFX.setRotor(0.25 + 0.75 * k);
     if (h.k >= 1) {
       game.roofPhase = 'rope';
@@ -2570,8 +2580,9 @@ function updateRoof(dt) {
     const h = game.heli;
     const hv = heliHover();
     h.t += dt;
-    h.x = hv.x + Math.sin(h.t * 0.7) * 3;
-    h.y = hv.y + Math.sin(h.t * 1.7) * 2.4;
+    // 悬停漂移按 8fps 定格：机身一格一格地颠，而不是平滑地飘
+    h.x = hv.x + Math.sin(tick(h.t, 8) * 0.7) * 3;
+    h.y = hv.y + Math.sin(tick(h.t, 8) * 1.7) * 2.4;
     if (!game.rope) {
       if (p.x > r.edge.x0 && p.x < r.edge.x1 && p.y < r.edge.y1) {
         game.rope = { t: 0, down: false };
@@ -2658,17 +2669,21 @@ function updateCine(dt) {
   if (T < CINE.grab) {
     // --- REACH：最后一把，士兵同时把手伸下来
     const k = smoothstep(T / CINE.grab);
+    /* 位置（z / shrink / nudge）仍平滑插值保证衔接，**姿势**的插值量化成
+       1/6 一档 —— 手脚一格一格地摆到位，是逐帧动画的读法，不是补间。
+       士兵的 reach 同样分档伸下来。下面几段同理。 */
+    const kp = qstep(k, 1 / 6);
     c.stroke += dt * 1.4;
     p.z = lerp(c.z0, zGrab, k);
     p.shrink = lerp(c.sh0, GRAB_SHRINK, k);
     p.nudge = { x: NUDGE_GRAB * k, y: 0 };
-    c.reach = smoothstep(clamp((T - 0.15) / 0.7, 0, 1));
+    c.reach = qstep(smoothstep(clamp((T - 0.15) / 0.7, 0, 1)), 1 / 6);
     // 够到最后那一下：够绳的手改成朝舱口伸，另一只还挂在绳上
-    c.pose = climbPose(Math.sin(c.stroke * Math.PI * 2) * (1 - k), {
-      lean: -0.1 * k,
+    c.pose = climbPose(qstep(Math.sin(c.stroke * Math.PI * 2), 0.5) * (1 - kp), {
+      lean: -0.1 * kp,
       arms: {
-        far: { x: 4.9 + k * 1.6, y: -10.5 - k * 0.5 },
-        near: { x: -3.5 + k * 1.0, y: -10.5 + k * 1.0 },
+        far: { x: 4.9 + kp * 1.6, y: -10.5 - kp * 0.5 },
+        near: { x: -3.5 + kp * 1.0, y: -10.5 + kp * 1.0 },
       },
     });
   } else if (T < CINE.haul) {
@@ -2680,24 +2695,26 @@ function updateCine(dt) {
       UI.msg('（一只戴手套的手扣住了你的手腕。）', 'good');
     }
     const k = smoothstep((T - CINE.grab) / (CINE.haul - CINE.grab));
+    const kp = qstep(k, 1 / 6);
     c.reach = 1;
     p.z = zGrab + k * 0.16;
     p.shrink = GRAB_SHRINK + k * 0.04;
     p.nudge = { x: NUDGE_GRAB + k * 1.5, y: 0 };
     c.pose = {
       face: 1, noBack: true, grit: true, hideItems: true, holster: true,
-      crouch: 1 - k,
-      lean: -0.12 - k * 0.2,
+      crouch: 1 - kp,
+      lean: -0.12 - kp * 0.2,
       // 被抓住那只手被往上提，另一只手扒上门槛
       arms: {
-        far: { x: 6.5 + k * 1.2, y: -11 - k * 1.6 },
-        near: { x: -2.5 + k * 4.5, y: -9.5 - k * 2.2 },
+        far: { x: 6.5 + kp * 1.2, y: -11 - kp * 1.6 },
+        near: { x: -2.5 + kp * 4.5, y: -9.5 - kp * 2.2 },
       },
-      legs: { a: -2.4 - k * 2, b: 1.8 + k * 1.5, la: 1 + k * 3, lb: 0.5 + k * 1 },
+      legs: { a: -2.4 - kp * 2, b: 1.8 + kp * 1.5, la: 1 + kp * 3, lb: 0.5 + kp * 1 },
     };
   } else if (T < CINE.in) {
     // --- HAUL：整个人被拖进舱门，绳索同时回收
     const k = smoothstep((T - CINE.haul) / (CINE.in - CINE.haul));
+    const kp = qstep(k, 1 / 6);
     c.reach = 1; // 手一直扣着，是这只手把人拖进去的，中途松开就白演了
     /* 上半身越过门槛的那一刻换图层：在这之前人还吊在机外（画在世界层，
        跟雨夜一起被压暗、又刚好被机腹挡住一点头顶），之后整个人在舱内。 */
@@ -2705,19 +2722,20 @@ function updateCine(dt) {
     p.z = lerp(zGrab + 0.16, zIn, k);
     p.shrink = lerp(GRAB_SHRINK + 0.04, IN_SHRINK, k);
     p.nudge = { x: lerp(NUDGE_GRAB + 1.5, NUDGE_IN, k), y: 0 };
-    c.retract = clamp((T - CINE.haul - 0.15) / 1.2, 0, 1);
+    // 绞盘收绳量化成 1/8 一档：绳头一顿一顿地缩回去，是棘轮在咬，不是橡皮筋
+    c.retract = qstep(clamp((T - CINE.haul - 0.15) / 1.2, 0, 1), 1 / 8);
     // 进舱瞬间从"吊着"变成"扑倒在地板上"：身体压低、腿蹬进来
     c.pose = {
       face: 1, noBack: true, grit: true, hideItems: true, holster: true,
-      crouch: -1 + k * 8,
-      sink: k * 1.5,
-      lean: -0.32 + k * 0.5,
+      crouch: -1 + kp * 8,
+      sink: kp * 1.5,
+      lean: -0.32 + kp * 0.5,
       // 被抓的那只手一直吊在上面，另一只手先落地撑住
       arms: {
-        far: { x: 7.7 - k * 3.4, y: -15.5 + k * 4.5 },
-        near: { x: 2.0 - k * 5.4, y: -13.9 + k * 15 },
+        far: { x: 7.7 - kp * 3.4, y: -15.5 + kp * 4.5 },
+        near: { x: 2.0 - kp * 5.4, y: -13.9 + kp * 15 },
       },
-      legs: { a: -4.4 + k * 3, b: 3.3 - k * 2, la: 4 - k * 4, lb: 1.5 - k * 1.5 },
+      legs: { a: -4.4 + kp * 3, b: 3.3 - kp * 2, la: 4 - kp * 4, lb: 1.5 - kp * 1.5 },
     };
     if (k > 0.55 && !c.thud) {
       c.thud = true;
@@ -2727,18 +2745,20 @@ function updateCine(dt) {
   } else {
     // --- IN / AWAY：人在舱里瘫着，绳收完、门滑上，机头一压离场
     const k = smoothstep(clamp((T - CINE.in) / 0.7, 0, 1));
-    c.reach = 1 - k; // 人到地板上了，士兵这才松手坐回门槛
+    const kp = qstep(k, 1 / 6);
+    c.reach = 1 - kp; // 人到地板上了，士兵这才分几拍收手坐回门槛
     c.retract = 1;
     c.inCabin = true;
-    c.door = smoothstep(clamp((T - CINE.in - 0.2) / 0.9, 0, 1));
+    // 舱门滑轨量化成 1/7 一档：门板一格一格地撞到位，是机械件在滑，不是补间
+    c.door = qstep(smoothstep(clamp((T - CINE.in - 0.2) / 0.9, 0, 1)), 1 / 7);
     p.z = zIn;
     p.shrink = IN_SHRINK;
     p.nudge = { x: NUDGE_IN + k * 3, y: 0 };
     c.pose = {
       face: 1, noBack: true, hideItems: true, holster: true,
-      crouch: 7 + k * 1.5,
+      crouch: 7 + kp * 1.5,
       sink: 1.5,
-      lean: 0.18 - k * 0.06,
+      lean: 0.18 - kp * 0.06,
       arms: { far: { x: 2.5, y: -3.5 }, near: { x: -3.0, y: -2.0 } },
       legs: { a: 2.5, b: 4.5, la: 0.5, lb: 0 },
     };
@@ -2751,14 +2771,15 @@ function updateCine(dt) {
   p.aimScreen = normScreenDir(p.aim);
   game.zoomAt = { x: p.x, y: p.y, z: (p.z || 0) + 0.7 };
 
-  // 直升机：拽人时几乎不动（有个抬升的趋势），关门之后才真正拉升右飞
+  // 直升机：拽人时几乎不动（有个抬升的趋势），关门之后才真正拉升右飞。
+  // 悬停颠簸按 8fps 定格，离场的大位移仍平滑走
   const h = game.heli;
   if (h) {
     h.t += dt;
     const hv = heliHover();
     const off = Math.max(0, T - CINE.away);
-    h.x = hv.x + Math.sin(h.t * 0.7) * 3 + off * off * 13;
-    h.y = hv.y + Math.sin(h.t * 1.7) * 2 - Math.min(T, CINE.away) * 2.2 - off * off * 7;
+    h.x = hv.x + Math.sin(tick(h.t, 8) * 0.7) * 3 + off * off * 13;
+    h.y = hv.y + Math.sin(tick(h.t, 8) * 1.7) * 2 - Math.min(T, CINE.away) * 2.2 - off * off * 7;
   }
   SFX.setRotor(Math.max(0.2, 1 - Math.max(0, T - CINE.away) * 0.26));
 

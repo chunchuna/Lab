@@ -477,9 +477,11 @@ export function qteShowKey(key, mash) {
   qteTime(1);
 }
 
-/** 限时：k 从 1 收到 0，环跟着往键帽上贴 */
+/** 限时：k 从 1 收到 0，环跟着往键帽上贴。
+    收缩量化成 12 档：一格一格贴上来才是倒计时在"咬"，
+    平滑缩放读起来是 motion graphics。 */
 export function qteTime(k) {
-  const t = Math.max(0, Math.min(1, k));
+  const t = Math.ceil(Math.max(0, Math.min(1, k)) * 12) / 12;
   el.qteRing.style.transform = `scale(${(1 + t * 1.6).toFixed(3)})`;
   el.qteRing.style.opacity = (0.35 + 0.55 * (1 - t)).toFixed(2);
 }

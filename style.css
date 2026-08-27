@@ -322,17 +322,19 @@ body.devcon-on { cursor: default; }
   color: var(--surface);
   box-shadow: 0 0.1em 0 rgba(0, 0, 0, 0.55);
 }
-/* 键弹出来的那一下：从大缩到正好，眼睛会自动跟过去 */
+/* 键弹出来的那一下：从大缩到正好，眼睛会自动跟过去。
+   过渡走 steps()：三格跳到位的"定格弹出"跟画面里的像素动画一个节奏，
+   平滑的弹性曲线是 motion graphics 的观感 */
 #qte.on .q-key {
   opacity: 1;
   transform: scale(1);
-  transition: transform 0.16s cubic-bezier(0.2, 1.5, 0.4, 1), opacity 0.1s linear;
+  transition: transform 0.16s steps(3, jump-end), opacity 0.1s steps(2, jump-end);
 }
 /* 按对了：键帽炸开一下再消失 */
 #qte.hit .q-key {
   opacity: 0;
   transform: scale(1.55);
-  transition: transform 0.22s ease-out, opacity 0.22s ease-out;
+  transition: transform 0.22s steps(3, jump-end), opacity 0.22s steps(3, jump-end);
 }
 #qte.hit .q-key span { background: var(--surface); color: var(--text); box-shadow: none; }
 
@@ -365,11 +367,11 @@ body.devcon-on { cursor: default; }
 #qte.mash .q-mash { display: block; }
 .q-mash i { display: block; height: 100%; width: 0%; background: var(--text); }
 /* 连按时键帽随每一下轻微弹一下，手上有反馈 */
-#qte.mash .q-key { opacity: 1; transform: scale(1); transition: transform 0.09s ease-out; }
+#qte.mash .q-key { opacity: 1; transform: scale(1); transition: transform 0.09s steps(2, jump-end); }
 #qte.mash.punch .q-key { transform: scale(1.14); }
 
 #qte.fail .q-title { background: var(--text); color: var(--surface); padding: 0 0.5em; opacity: 1; }
-#qte.fail .q-key { opacity: 0; transform: scale(0.7); transition: all 0.25s ease-out; }
+#qte.fail .q-key { opacity: 0; transform: scale(0.7); transition: all 0.25s steps(3, jump-end); }
 #qte.fail .q-ring { opacity: 0; }
 
 /* QTE 期间字幕让位：默认字幕就压在动作名那一行上，两段文字叠在一起没法读。
