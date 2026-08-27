@@ -5,7 +5,25 @@ import {
   newArea, closeArea, paintFloor, wallBase, wallPipes, doorBay,
   floorT, northT, northPt, westT, eastT, southT, resetT, pt, THEMES, PAD, mulberry32,
 } from './areakit.js';
-import { makeCanvas, makeArtCanvas, finishArt, shade } from './util.js';
+import {
+  makeCanvas, makeArtCanvas, finishArt, shade,
+  pxDither, pxText, pxBlob, pxPoly,
+} from './util.js';
+
+/** 横向色带填充 + 相邻带交界棋盘抖动：代替竖直线性渐变 */
+function bandFillV(g, x, w, stops) {
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [y0, c] = stops[i];
+    const y1 = stops[i + 1][0];
+    g.fillStyle = c;
+    g.fillRect(x, Math.round(y0), w, Math.round(y1) - Math.round(y0));
+  }
+  for (let i = 1; i < stops.length - 1; i++) {
+    const yb = Math.round(stops[i][0]);
+    pxDither(g, x, x + w, yb - 1, stops[i - 1][1]);
+    pxDither(g, x, x + w, yb, stops[i][1]);
+  }
+}
 
 /** 每个敞开的门洞给一盏弱光，让"能看进房间"在暗处也成立 */
 function bayLights(a, bays) {
@@ -50,11 +68,9 @@ function corridorFloorAndWalls(a, rand, th, bays, opts = {}) {
   for (const b of bays) {
     doorBay(g, b.u0 * TILE_W, b.u1 * TILE_W, rand, th, b, a.wallH);
   }
-  // 楼层号喷涂
+  // 楼层号喷涂（3×5 字模放大 4 倍）
   if (opts.floorMark) {
-    g.fillStyle = 'rgba(200,200,190,0.2)';
-    g.font = 'bold 26px monospace';
-    g.fillText(opts.floorMark, 26, 34);
+    pxText(g, 26, 14, opts.floorMark, 'rgba(200,200,190,0.2)', 4);
   }
   g.restore();
 
@@ -75,25 +91,27 @@ function corridorFloorAndWalls(a, rand, th, bays, opts = {}) {
  * 上面留空，露出后面的东西或夜空。
  */
 function parapetFace(g, len, hTiles, v0, th, rand) {
-  const H = hTiles * TILE_Z;
-  const grd = g.createLinearGradient(0, v0, 0, v0 + H);
-  grd.addColorStop(0, th.wallMid);
-  grd.addColorStop(1, th.wallLow);
-  g.fillStyle = grd;
-  g.fillRect(0, v0, len, H);
+  const H = Math.round(hTiles * TILE_Z);
+  const V0 = Math.round(v0);
+  // 上下两带 + 交界抖动，代替线性渐变
+  bandFillV(g, 0, len, [
+    [V0, th.wallMid],
+    [V0 + Math.round(H * 0.55), th.wallLow],
+    [V0 + H, ''],
+  ]);
   // 压顶画亮一点，暗处才能看出这里有一道墙
   g.fillStyle = shade(th.wallTop, 0.3);
-  g.fillRect(0, v0, len, 3);
+  g.fillRect(0, V0, len, 3);
   g.fillStyle = 'rgba(255,255,255,0.16)';
-  g.fillRect(0, v0, len, 1.2);
+  g.fillRect(0, V0, len, 1);
   for (let u = 0; u <= len; u += TILE_W * 2) {
     g.fillStyle = 'rgba(0,0,0,0.3)';
-    g.fillRect(u, v0, 1.4, H);
+    g.fillRect(Math.round(u), V0, 1, H);
   }
   for (let i = 0; i < len / 26; i++) {
     g.globalAlpha = 0.24 + rand() * 0.24;
     g.fillStyle = rand() > 0.5 ? '#3f1210' : '#0a0a0a';
-    g.fillRect(rand() * len, v0 + rand() * H * 0.7, 2 + rand() * 8, 3 + rand() * 8);
+    g.fillRect(Math.round(rand() * len), V0 + Math.round(rand() * H * 0.7), 2 + ((rand() * 8) | 0), 3 + ((rand() * 8) | 0));
     g.globalAlpha = 1;
   }
 }
@@ -104,42 +122,42 @@ function corridorParapet(a, rand, th, doors, opts = {}) {
   const { c, g } = makeArtCanvas(a.bounds.w + PAD * 2, a.bounds.h + PAD * 2);
   g.save();
   southT(g, a.sox, a.soy, a.h);
-  const H = ph * TILE_Z;
+  const H = Math.round(ph * TILE_Z);
   const len = a.w * TILE_W;
-  // 墙体
-  const grd = g.createLinearGradient(0, -H, 0, 0);
-  grd.addColorStop(0, th.wallMid);
-  grd.addColorStop(1, th.wallLow);
-  g.fillStyle = grd;
-  g.fillRect(0, -H, len, H);
+  // 墙体：两带 + 抖动，代替线性渐变
+  bandFillV(g, 0, len, [
+    [-H, th.wallMid],
+    [-Math.round(H * 0.45), th.wallLow],
+    [0, ''],
+  ]);
   // 压顶画亮一点，暗处才能看出这里有一道墙
   g.fillStyle = shade(th.wallTop, 0.3);
   g.fillRect(0, -H, len, 3);
   g.fillStyle = 'rgba(255,255,255,0.16)';
-  g.fillRect(0, -H, len, 1.2);
+  g.fillRect(0, -H, len, 1);
   for (let u = 0; u <= len; u += TILE_W * 2) {
     g.fillStyle = 'rgba(0,0,0,0.3)';
-    g.fillRect(u, -H, 1.4, H);
+    g.fillRect(Math.round(u), -H, 1, H);
   }
   // 门框：只到护墙高度，暗示这一侧也有房间
   for (const d of doors) {
-    const u0 = d[0] * TILE_W;
-    const u1 = d[1] * TILE_W;
+    const u0 = Math.round(d[0] * TILE_W);
+    const u1 = Math.round(d[1] * TILE_W);
     g.fillStyle = '#0f1211';
     g.fillRect(u0 - 4, -H, u1 - u0 + 8, H);
     g.fillStyle = '#1b1f20';
     g.fillRect(u0, -H + 2, u1 - u0, H - 2);
     g.fillStyle = 'rgba(255,255,255,0.07)';
-    g.fillRect(u0 - 4, -H, u1 - u0 + 8, 1.6);
+    g.fillRect(u0 - 4, -H, u1 - u0 + 8, 2);
     // 门缝透出的一点光
     g.fillStyle = 'rgba(210,200,170,0.12)';
-    g.fillRect(u0 + (u1 - u0) / 2 - 0.8, -H + 3, 1.6, H - 5);
+    g.fillRect(u0 + Math.round((u1 - u0) / 2) - 1, -H + 3, 2, H - 5);
   }
   // 血迹与焦痕
   for (let i = 0; i < 10; i++) {
     g.globalAlpha = 0.28 + rand() * 0.24;
     g.fillStyle = rand() > 0.5 ? '#3f1210' : '#0a0a0a';
-    g.fillRect(rand() * len, -H + rand() * H * 0.6, 2 + rand() * 8, 3 + rand() * 8);
+    g.fillRect(Math.round(rand() * len), -H + Math.round(rand() * H * 0.6), 2 + ((rand() * 8) | 0), 3 + ((rand() * 8) | 0));
     g.globalAlpha = 1;
   }
   g.restore();
@@ -471,28 +489,20 @@ function buildStair() {
   g.fillRect(sx - 13, 16, 26, 9);
 
   // 上行梯段顶端的黑色开口：暗示楼梯继续往上
-  const upU = 6.9 * TILE_W;
+  const upU = Math.round(6.9 * TILE_W);
   g.fillStyle = '#07090a';
   g.fillRect(upU - 30, 6, 60, 42);
   g.fillStyle = '#2b3134';
   g.fillRect(upU - 32, 4, 64, 4);
   g.fillStyle = 'rgba(255,255,255,0.08)';
-  g.fillRect(upU - 32, 4, 64, 1.4);
-  // 楼层指示：上 3F / 下 1F
-  g.fillStyle = 'rgba(215,215,205,0.62)';
-  g.font = 'bold 15px monospace';
-  g.fillText('3F', upU - 34, 44);
-  g.font = 'bold 11px monospace';
-  g.fillText('UP', upU - 34, 55);
-  g.fillStyle = 'rgba(215,215,205,0.42)';
-  g.font = 'bold 15px monospace';
-  g.fillText('1F', upU + 10, 44);
-  g.font = 'bold 11px monospace';
-  g.fillText('DN', upU + 10, 55);
+  g.fillRect(upU - 32, 4, 64, 1);
+  // 楼层指示：上 3F / 下 1F（3×5 字模）
+  pxText(g, upU - 34, 33, '3F', 'rgba(215,215,205,0.62)', 2);
+  pxText(g, upU - 34, 48, 'UP', 'rgba(215,215,205,0.62)', 1);
+  pxText(g, upU + 10, 33, '1F', 'rgba(215,215,205,0.42)', 2);
+  pxText(g, upU + 10, 48, 'DN', 'rgba(215,215,205,0.42)', 1);
   // 当前楼层
-  g.fillStyle = 'rgba(210,210,200,0.22)';
-  g.font = 'bold 26px monospace';
-  g.fillText('2F', 22, 36);
+  pxText(g, 22, 16, '2F', 'rgba(210,210,200,0.22)', 4);
   g.restore();
 
   g.save();
@@ -598,25 +608,18 @@ function buildStairRoof() {
   g.fillRect(sx - 13, 16, 26, 9);
 
   // 上行梯段顶端的开口：这一段通到天台，没有继续往下的井
-  const upU = 6.9 * TILE_W;
+  const upU = Math.round(6.9 * TILE_W);
   g.fillStyle = '#07090a';
   g.fillRect(upU - 30, 6, 60, 42);
   g.fillStyle = '#2b3134';
   g.fillRect(upU - 32, 4, 64, 4);
   g.fillStyle = 'rgba(255,255,255,0.08)';
-  g.fillRect(upU - 32, 4, 64, 1.4);
-  g.fillStyle = 'rgba(215,215,205,0.62)';
-  g.font = 'bold 15px monospace';
-  g.fillText('4F', upU - 34, 44);
-  g.font = 'bold 11px monospace';
-  g.fillText('ROOF', upU - 34, 55);
-  g.fillStyle = 'rgba(210,210,200,0.22)';
-  g.font = 'bold 26px monospace';
-  g.fillText('3F', 22, 36);
+  g.fillRect(upU - 32, 4, 64, 1);
+  pxText(g, upU - 34, 33, '4F', 'rgba(215,215,205,0.62)', 2);
+  pxText(g, upU - 34, 48, 'ROOF', 'rgba(215,215,205,0.62)', 1);
+  pxText(g, 22, 16, '3F', 'rgba(210,210,200,0.22)', 4);
   // 有人用喷漆在墙上留过话
-  g.fillStyle = 'rgba(196,72,54,0.5)';
-  g.font = 'bold 13px monospace';
-  g.fillText('UP = OUT', 118, 62);
+  pxText(g, 118, 52, 'UP = OUT', 'rgba(196,72,54,0.5)', 2);
   g.restore();
 
   g.save();
@@ -706,20 +709,21 @@ function cityBand(g, rand, o) {
   const { base, hMin, hMax, wMin, wMax, cols, winA, winP, beaconP, gap } = o;
   let u = -30;
   while (u < VIEW_W + 30) {
-    const w = wMin + rand() * (wMax - wMin);
-    const h = hMin + rand() * (hMax - hMin);
+    const w = Math.round(wMin + rand() * (wMax - wMin));
+    const h = Math.round(hMin + rand() * (hMax - hMin));
+    const U = Math.round(u);
     const top = base - h;
     g.fillStyle = cols[(rand() * cols.length) | 0];
-    g.fillRect(u, top, w, base - top + 4);
+    g.fillRect(U, top, w, base - top + 4);
     // 楼顶的机房 / 水箱，剪影才不是一排光秃秃的方块
     if (rand() > 0.45) {
-      const cw = w * (0.18 + rand() * 0.3);
-      g.fillRect(u + rand() * (w - cw), top - 3 - rand() * 5, cw, 6);
+      const cw = Math.max(2, Math.round(w * (0.18 + rand() * 0.3)));
+      g.fillRect(U + Math.round(rand() * (w - cw)), top - 3 - ((rand() * 5) | 0), cw, 6);
     }
     // 楼顶障碍灯
     if (rand() < beaconP) {
       g.fillStyle = 'rgba(255,96,74,0.5)';
-      g.fillRect(u + w / 2 - 1, top - 4, 2, 2.4);
+      g.fillRect(U + ((w / 2) | 0) - 1, top - 4, 2, 2);
     }
     // 还亮着的窗：这座城市并没有全黑，但也剩不下几户
     if (rand() < winP) {
@@ -731,7 +735,7 @@ function cityBand(g, rand, o) {
           g.fillStyle = rand() > 0.45
             ? `rgba(226,196,124,${winA})`
             : `rgba(150,178,200,${winA * 0.7})`;
-          g.fillRect(u + 2 + c * 6, top + 3 + r * 7, 2, 2.6);
+          g.fillRect(U + 2 + c * 6, top + 3 + r * 7, 2, 3);
         }
       }
     }
@@ -744,43 +748,35 @@ function cityBand(g, rand, o) {
  * 只在建区时跑一次，运行期每帧只是一次 drawImage。
  */
 function paintRoofBackdrop(g, horizon, rand) {
-  // 夜空：顶上近黑，越靠地平线越被城市的光污染染亮一点
-  const sky = g.createLinearGradient(0, 0, 0, horizon + 14);
-  sky.addColorStop(0, '#03050a');
-  sky.addColorStop(0.42, '#070c14');
-  sky.addColorStop(0.78, '#0e1824');
-  sky.addColorStop(1, '#17242f');
-  g.fillStyle = sky;
-  g.fillRect(0, 0, VIEW_W, horizon + 14);
+  // 夜空：顶上近黑，越靠地平线越被城市的光污染染亮一点（硬分带 + 抖动）
+  const skyH = horizon + 14;
+  bandFillV(g, 0, VIEW_W, [
+    [0, '#03050a'],
+    [Math.round(skyH * 0.42), '#070c14'],
+    [Math.round(skyH * 0.62), '#0a1219'],
+    [Math.round(skyH * 0.78), '#0e1824'],
+    [Math.round(skyH * 0.9), '#17242f'],
+    [skyH, ''],
+  ]);
 
-  // 云：被下方城市照亮的低云底，压得很低，暴雨夜的那种"天花板"
+  // 云：被下方城市照亮的低云底（同心像素摊代替径向渐变）
   for (let i = 0; i < 11; i++) {
     const cx = rand() * VIEW_W;
     const cy = 8 + rand() * (horizon - 24);
     const rx = 60 + rand() * 130;
     const ry = 10 + rand() * 22;
     const k = 0.05 + rand() * 0.08;
-    const grd = g.createRadialGradient(cx, cy, 0, cx, cy, rx);
-    grd.addColorStop(0, `rgba(74,96,126,${k})`);
-    grd.addColorStop(0.6, `rgba(50,66,90,${k * 0.5})`);
-    grd.addColorStop(1, 'rgba(30,40,56,0)');
-    g.fillStyle = grd;
-    g.save();
-    g.translate(cx, cy);
-    g.scale(1, ry / rx);
-    g.beginPath();
-    g.arc(0, 0, rx, 0, 6.3);
-    g.fill();
-    g.restore();
+    pxBlob(g, cx, cy, rx, ry, `rgba(50,66,90,${(k * 0.5).toFixed(3)})`, rand);
+    pxBlob(g, cx, cy, rx * 0.6, ry * 0.6, `rgba(74,96,126,${k.toFixed(3)})`, rand);
   }
 
   // 楼下：街区的深渊。天台之所以是天台，是因为下面什么都看不到底
-  const gnd = g.createLinearGradient(0, horizon, 0, VIEW_H);
-  gnd.addColorStop(0, '#0a1017');
-  gnd.addColorStop(0.35, '#05080d');
-  gnd.addColorStop(1, '#010203');
-  g.fillStyle = gnd;
-  g.fillRect(0, horizon, VIEW_W, VIEW_H - horizon);
+  bandFillV(g, 0, VIEW_W, [
+    [horizon, '#0a1017'],
+    [horizon + Math.round((VIEW_H - horizon) * 0.35), '#05080d'],
+    [horizon + Math.round((VIEW_H - horizon) * 0.68), '#010203'],
+    [VIEW_H, ''],
+  ]);
 
   /* --- 三层城市剪影：越远越矮、越淡、越贴地平线 --- */
   cityBand(g, rand, {
@@ -822,33 +818,30 @@ function paintRoofBackdrop(g, horizon, rand) {
     }
   }
 
-  /* --- 城里几处还在烧的火：暖色的一点，也说明外面出了什么事 --- */
+  /* --- 城里几处还在烧的火：同心像素摊代替径向渐变 --- */
   for (const [fx0, fy0, fr] of [[128, horizon + 30, 46], [392, horizon + 12, 34], [534, horizon + 58, 30]]) {
-    const grd = g.createRadialGradient(fx0, fy0, 0, fx0, fy0, fr);
-    grd.addColorStop(0, 'rgba(226,124,52,0.2)');
-    grd.addColorStop(0.45, 'rgba(180,84,36,0.09)');
-    grd.addColorStop(1, 'rgba(120,50,20,0)');
-    g.fillStyle = grd;
-    g.fillRect(fx0 - fr, fy0 - fr, fr * 2, fr * 2);
+    pxBlob(g, fx0, fy0, fr * 0.9, fr * 0.65, 'rgba(180,84,36,0.09)', rand);
+    pxBlob(g, fx0, fy0, fr * 0.5, fr * 0.36, 'rgba(226,124,52,0.14)', rand);
+    pxBlob(g, fx0, fy0, fr * 0.24, fr * 0.18, 'rgba(226,124,52,0.2)', rand);
   }
 
   // 街面上残存的路灯：小到只是一点点，但让"下面很深"变得可信
   for (let i = 0; i < 42; i++) {
-    const px = rand() * VIEW_W;
-    const py = horizon + 40 + rand() * (VIEW_H - horizon - 40);
+    const px = Math.round(rand() * VIEW_W);
+    const py = Math.round(horizon + 40 + rand() * (VIEW_H - horizon - 40));
     const k = 0.05 + rand() * 0.1;
     g.fillStyle = `rgba(232,186,110,${k})`;
-    g.fillRect(px, py, 1.4, 1.4);
+    g.fillRect(px, py, 1, 1);
   }
 
-  // 整层再压一道雨幕：远景该是被雨糊住的，不能像贴纸一样锐
-  const veil = g.createLinearGradient(0, 0, 0, VIEW_H);
-  veil.addColorStop(0, 'rgba(70,92,120,0.03)');
-  veil.addColorStop(0.3, 'rgba(88,112,142,0.07)');
-  veil.addColorStop(0.62, 'rgba(52,70,94,0.05)');
-  veil.addColorStop(1, 'rgba(10,16,24,0.1)');
-  g.fillStyle = veil;
-  g.fillRect(0, 0, VIEW_W, VIEW_H);
+  // 整层再压一道雨幕：远景该是被雨糊住的，不能像贴纸一样锐（硬分带 + 抖动）
+  bandFillV(g, 0, VIEW_W, [
+    [0, 'rgba(70,92,120,0.03)'],
+    [Math.round(VIEW_H * 0.3), 'rgba(88,112,142,0.07)'],
+    [Math.round(VIEW_H * 0.62), 'rgba(52,70,94,0.05)'],
+    [Math.round(VIEW_H * 0.85), 'rgba(10,16,24,0.1)'],
+    [VIEW_H, ''],
+  ]);
 }
 
 /** 天台女儿墙高度（瓦片）。四周都是这个高度，露天场景不画满高室内墙 */
@@ -878,14 +871,12 @@ function parapetCoping(g, sox, soy, w, h) {
     const a1 = pt(sox, soy, x1, y1, ROOF_PH);
     const b1 = pt(sox, soy, x1, y1, ROOF_PH + 0.06);
     const b0 = pt(sox, soy, x0, y0, ROOF_PH + 0.06);
-    g.fillStyle = 'rgba(126,142,140,0.35)';
-    g.beginPath();
-    g.moveTo(a0.x, a0.y);
-    g.lineTo(a1.x, a1.y);
-    g.lineTo(b1.x, b1.y);
-    g.lineTo(b0.x, b0.y);
-    g.closePath();
-    g.fill();
+    pxPoly(g, [
+      [a0.x, a0.y],
+      [a1.x, a1.y],
+      [b1.x, b1.y],
+      [b0.x, b0.y],
+    ], 'rgba(126,142,140,0.35)');
   };
   cap(0, 0, w, 0);
   cap(0, 0, 0, h);
@@ -964,17 +955,18 @@ function buildRoof() {
   a.skyPaint = (sg) => {
     /* 亮度集中在地平线那一条：往上是夜空，往下迅速掉进楼下的黑。
        下半段压得狠一点 —— 天台之所以看起来"很高"，靠的就是边缘之外那一片
-       什么都看不清的深黑，而不是一层均匀的蓝雾。 */
-    const gr = sg.createLinearGradient(0, 0, 0, VIEW_H);
-    gr.addColorStop(0, 'rgba(52,74,106,0.24)');
-    gr.addColorStop(horizon / VIEW_H - 0.07, 'rgba(92,120,158,0.56)');
-    gr.addColorStop(horizon / VIEW_H + 0.04, 'rgba(78,102,134,0.62)');
-    gr.addColorStop(0.42, 'rgba(44,62,88,0.3)');
-    gr.addColorStop(0.6, 'rgba(28,42,62,0.13)');
-    gr.addColorStop(0.8, 'rgba(16,26,40,0.05)');
-    gr.addColorStop(1, 'rgba(8,12,20,0.025)');
-    sg.fillStyle = gr;
-    sg.fillRect(0, 0, VIEW_W, VIEW_H);
+       什么都看不清的深黑，而不是一层均匀的蓝雾。
+       只烘焙一次，硬分带 + 抖动，跟背景层同一套像素语言。 */
+    bandFillV(sg, 0, VIEW_W, [
+      [0, 'rgba(52,74,106,0.24)'],
+      [Math.round(horizon - VIEW_H * 0.07), 'rgba(92,120,158,0.56)'],
+      [Math.round(horizon + VIEW_H * 0.04), 'rgba(78,102,134,0.62)'],
+      [Math.round(VIEW_H * 0.42), 'rgba(44,62,88,0.3)'],
+      [Math.round(VIEW_H * 0.6), 'rgba(28,42,62,0.13)'],
+      [Math.round(VIEW_H * 0.8), 'rgba(16,26,40,0.05)'],
+      [Math.round(VIEW_H * 0.92), 'rgba(8,12,20,0.025)'],
+      [VIEW_H, ''],
+    ]);
   };
   /* 远处楼顶的障碍灯：每帧几个小加色点，比整张背景重画便宜得多。
      坐标是画布坐标，跟背景层同一套空间。 */
@@ -1015,11 +1007,12 @@ function buildDorm312() {
   doorBay(g, 5.4 * TILE_W, 7.0 * TILE_W, rand, th, { state: 'closed', kind: 'dorm', label: '312' }, a.wallH);
   // 墙上的照片与便签，暗示这里有人住到最后
   for (let i = 0; i < 7; i++) {
-    const x = 30 + i * 22 + rand() * 8;
+    const x = Math.round(30 + i * 22 + rand() * 8);
+    const y = Math.round(18 + rand() * 10);
     g.fillStyle = 'rgba(220,214,196,0.5)';
-    g.fillRect(x, 18 + rand() * 10, 12, 9);
+    g.fillRect(x, y, 12, 9);
     g.fillStyle = 'rgba(60,70,72,0.55)';
-    g.fillRect(x + 1.5, 19.5 + rand() * 10, 9, 6);
+    g.fillRect(x + 2, y + 2, 9, 6);
   }
   g.restore();
 
