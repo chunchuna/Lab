@@ -1,4 +1,5 @@
 import { drawPistolIcon, drawFlashIcon, drawPortraitBust, PORTRAIT_BUST } from './art.js';
+import { pxLine } from './util.js';
 import { MAG_SIZE } from './config.js';
 import * as SFX from './audio.js';
 import { VERSION } from './version.js';
@@ -757,8 +758,6 @@ function drawScanFace(t, failed) {
       by = 58 - pad,
       bw = 140 + pad * 2,
       bh = 200 + pad * 2;
-    g.strokeStyle = acc;
-    g.lineWidth = 1.6;
     const c = 20;
     for (const [sx, sy, dx, dy] of [
       [bx, by, 1, 1],
@@ -766,45 +765,42 @@ function drawScanFace(t, failed) {
       [bx, by + bh, 1, -1],
       [bx + bw, by + bh, -1, -1],
     ]) {
-      g.beginPath();
-      g.moveTo(sx + dx * c, sy);
-      g.lineTo(sx, sy);
-      g.lineTo(sx, sy + dy * c);
-      g.stroke();
+      // 角标：两段 2px 像素线
+      pxLine(g, sx + dx * c, sy, sx, sy, acc, 2);
+      pxLine(g, sx, sy, sx, sy + dy * c, acc, 2);
     }
-    g.strokeStyle = accDim;
-    g.lineWidth = 0.8;
-    g.strokeRect(bx, by, bw, bh);
+    // 对焦框：1px 像素边
+    const RX = Math.round(bx);
+    const RY = Math.round(by);
+    const RW = Math.round(bw);
+    const RH = Math.round(bh);
+    g.fillStyle = accDim;
+    g.fillRect(RX, RY, RW, 1);
+    g.fillRect(RX, RY + RH - 1, RW, 1);
+    g.fillRect(RX, RY, 1, RH);
+    g.fillRect(RX + RW - 1, RY, 1, RH);
   }
 
   // 特征点
   if (t > 1.4) {
     const p = Math.min(1, (t - 1.4) / 1.1);
     const n = Math.floor(landmarks.length * p);
-    // 网格连线
-    g.strokeStyle = accDim;
-    g.lineWidth = 0.7;
-    g.beginPath();
+    // 网格连线（像素线）
     for (let i = 1; i < n; i++) {
       const a = landmarks[i - 1],
         b = landmarks[i];
-      if (a.g === b.g) {
-        g.moveTo(a.x, a.y);
-        g.lineTo(b.x, b.y);
-      }
+      if (a.g === b.g) pxLine(g, a.x, a.y, b.x, b.y, accDim, 1);
     }
     // 交叉网格
     for (let i = 0; i < n; i += 3) {
       const a = landmarks[i];
       const b = landmarks[(i * 7 + 11) % Math.max(1, n)];
-      g.moveTo(a.x, a.y);
-      g.lineTo(b.x, b.y);
+      pxLine(g, a.x, a.y, b.x, b.y, accDim, 1);
     }
-    g.stroke();
     for (let i = 0; i < n; i++) {
       const pt = landmarks[i];
       g.fillStyle = acc;
-      g.fillRect(pt.x - 1.2, pt.y - 1.2, 2.4, 2.4);
+      g.fillRect(Math.round(pt.x) - 1, Math.round(pt.y) - 1, 2, 2);
     }
   }
 
@@ -817,14 +813,8 @@ function drawScanFace(t, failed) {
 
   // 失败叠加：反色色块 + 划叉，不用红色
   if (failed) {
-    g.strokeStyle = acc;
-    g.lineWidth = 3;
-    g.beginPath();
-    g.moveTo(150, 58);
-    g.lineTo(290, 258);
-    g.moveTo(290, 58);
-    g.lineTo(150, 258);
-    g.stroke();
+    pxLine(g, 150, 58, 290, 258, acc, 3);
+    pxLine(g, 290, 58, 150, 258, acc, 3);
     g.fillStyle = acc;
     g.fillRect(148, 284, 148, 26);
     g.fillStyle = '#24242a';
@@ -838,7 +828,7 @@ function drawScanFace(t, failed) {
   g.globalAlpha = failed ? 0.1 : 0.04;
   for (let i = 0; i < 180; i++) {
     g.fillStyle = Math.random() > 0.5 ? '#ded8c8' : '#000';
-    g.fillRect(Math.random() * W, Math.random() * H, 1.5, 1.5);
+    g.fillRect(Math.round(Math.random() * W), Math.round(Math.random() * H), 2, 2);
   }
   g.globalAlpha = 1;
 

@@ -27,7 +27,10 @@ import { initDevcon, toggleDevcon, closeDevcon, isDevconOpen } from './devcon.js
 import {
   pad, initControls, setButton, setPadVisible, endFrameControls, screenDirToWorld,
 } from './controls.js';
-import { clamp, flicker, lerp, makeCanvas, pixelSprite, smoothstep, setBase, blit } from './util.js';
+import {
+  clamp, flicker, lerp, makeCanvas, pixelSprite, smoothstep, setBase, blit,
+  pxLine, pxPolyline, pxEllipse, pxPoly, pxGlow, pxDitherV,
+} from './util.js';
 
 /* 世界直接画在 640N×360N 的像素网格上（4K 时 N=6 → 3840×2160）。
    逻辑坐标仍是 640×360，倍率折进基础变换。#game 的 backing store 就是这张
@@ -2937,13 +2940,13 @@ function wakePose(t) {
     return { x: lieX, y: lieY, z: bedTop + br, rot: LIE_ROT };
   }
   if (t < WAKE.sit) {
-    // 坐起：旋转回直立，同时挪到床沿
+    // 坐起：旋转回直立，同时挪到床沿。旋转量化成 π/14 一档，读作逐帧动画
     const k = smoothstep((t - WAKE.lie) / (WAKE.sit - WAKE.lie));
     return {
       x: lerp(lieX, sitX, k),
       y: lerp(lieY, sitY, k),
       z: bedTop,
-      rot: LIE_ROT * (1 - k),
+      rot: A.qz(LIE_ROT * (1 - k), Math.PI / 14),
     };
   }
   if (t < WAKE.stand) {
@@ -2959,11 +2962,29 @@ function wakePose(t) {
   return { x: PLAYER_START.x, y: PLAYER_START.y, z: 0, rot: 0 };
 }
 
-function fixtureXform(g, cam, f) {
-  g.save();
-  g.translate(cam.x + (f.x - f.y) * HW, cam.y + (f.x + f.y) * HH - f.z * TILE_Z);
-  g.rotate(ISO_ANG + (f.tilt || 0));
-  return (f.len * ISO_UNIT) / 2;
+/** 沿轴线逐列画竖条（每列只落一次笔，半透明色不会自叠加） */
+function pxBandCols(g, x0, y0, x1, y1, yOff, h, c) {
+  const n = Math.max(Math.abs(Math.round(x1) - Math.round(x0)), 1);
+  g.fillStyle = c;
+  let lx = null;
+  for (let i = 0; i <= n; i++) {
+    const xx = Math.round(x0 + ((x1 - x0) * i) / n);
+    if (xx === lx) continue;
+    const yy = Math.round(y0 + ((y1 - y0) * i) / n);
+    g.fillRect(xx, yy + yOff, 1, h);
+    lx = xx;
+  }
+}
+
+/** 灯具轴线两端（屏幕坐标）。不再用 rotate：像素线沿等距轴逐格落点 */
+function fixtureAxis(cam, f) {
+  const cx = cam.x + (f.x - f.y) * HW;
+  const cy = cam.y + (f.x + f.y) * HH - f.z * TILE_Z;
+  const L = (f.len * ISO_UNIT) / 2;
+  const ang = ISO_ANG + (f.tilt || 0);
+  const dx = Math.cos(ang);
+  const dy = Math.sin(ang);
+  return { x0: cx - dx * L, y0: cy - dy * L, x1: cx + dx * L, y1: cy + dy * L };
 }
 
 /**
@@ -2972,41 +2993,30 @@ function fixtureXform(g, cam, f) {
  * 而不是一条纯黑的横杠割在画面上。
  */
 function drawFixtureBody(g, cam, f, intensity) {
-  const L = fixtureXform(g, cam, f);
+  const { x0, y0, x1, y1 } = fixtureAxis(cam, f);
+  g.save();
   g.globalAlpha = 0.32 + 0.68 * clamp(intensity, 0, 1);
   // 吊杆（一端断裂的灯会歪着挂）
-  g.strokeStyle = 'rgba(150,162,162,0.75)';
-  g.lineWidth = 1;
-  g.beginPath();
-  g.moveTo(-L + 5, -2);
-  g.lineTo(-L + 5, -13);
+  pxLine(g, x0 + 4, y0 - 2, x0 + 4, y0 - 13, 'rgba(150,162,162,0.75)', 1);
   if (!f.tilt) {
-    g.moveTo(L - 5, -2);
-    g.lineTo(L - 5, -13);
+    pxLine(g, x1 - 4, y1 - 2, x1 - 4, y1 - 13, 'rgba(150,162,162,0.75)', 1);
+  } else {
+    // 断裂的挂链：像素折线
+    pxPolyline(g, [
+      [x1 - 5, y1 - 2],
+      [x1 - 2, y1 - 8],
+      [x1 - 7, y1 - 14],
+    ], 'rgba(40,44,46,0.9)', 1);
   }
-  g.stroke();
-  if (f.tilt) {
-    g.strokeStyle = 'rgba(40,44,46,0.9)';
-    g.lineWidth = 1.2;
-    g.beginPath();
-    g.moveTo(L - 6, -2);
-    g.quadraticCurveTo(L - 2, -9, L - 8, -14);
-    g.stroke();
-  }
-  // 灯壳
-  g.fillStyle = '#59615e';
-  g.fillRect(-L - 1, -6, L * 2 + 2, 7);
-  g.fillStyle = '#767f7b';
-  g.fillRect(-L - 1, -6, L * 2 + 2, 2.2);
-  g.fillStyle = 'rgba(255,255,255,0.2)';
-  g.fillRect(-L - 1, -6, L * 2 + 2, 0.8);
+  // 灯壳：沿轴线的粗像素带 + 顶部亮边 + 端头
+  pxLine(g, x0, y0 - 6, x1, y1 - 6, '#59615e', 7);
+  pxLine(g, x0, y0 - 6, x1, y1 - 6, '#767f7b', 2);
+  pxLine(g, x0, y0 - 7, x1, y1 - 7, 'rgba(255,255,255,0.2)', 1);
   g.fillStyle = '#454d4a';
-  g.fillRect(-L - 1, -6, 3, 7);
-  g.fillRect(L - 2, -6, 3, 7);
+  g.fillRect(Math.round(x0) - 1, Math.round(y0) - 6, 3, 7);
+  g.fillRect(Math.round(x1) - 2, Math.round(y1) - 6, 3, 7);
   // 熄灭的灯管本体（暗，但不是全黑）
-  g.fillStyle = '#8b8f86';
-  g.fillRect(-L + 2, -3.4, L * 2 - 4, 3.4);
-  g.globalAlpha = 1;
+  pxLine(g, x0 + 2, y0 - 3, x1 - 2, y1 - 3, '#8b8f86', 3);
   g.restore();
 }
 
@@ -3014,19 +3024,15 @@ function drawFixtureBody(g, cam, f, intensity) {
 function drawFixtureGlow(g, cam, f, intensity) {
   const i = clamp(intensity, 0, 1);
   if (i <= 0.05) return;
-  const L = fixtureXform(g, cam, f);
+  const { x0, y0, x1, y1 } = fixtureAxis(cam, f);
   const c = Math.round(120 + 135 * i);
-  g.fillStyle = `rgb(${c},${Math.min(255, Math.round(c * 1.03))},${Math.round(c * 0.94)})`;
-  g.fillRect(-L + 2, -3.4, L * 2 - 4, 3.4);
-  g.fillStyle = `rgba(255,255,255,${0.55 * i})`;
-  g.fillRect(-L + 2, -3.2, L * 2 - 4, 1.2);
+  pxLine(g, x0 + 2, y0 - 3, x1 - 2, y1 - 3, `rgb(${c},${Math.min(255, Math.round(c * 1.03))},${Math.round(c * 0.94)})`, 3);
+  pxBandCols(g, x0 + 2, y0, x1 - 2, y1, -3, 1, `rgba(255,255,255,${(0.55 * i).toFixed(3)})`);
+  // 辉光：两档沿轴线的半透明竖条带（逐列扫描不自叠色），代替线性渐变
+  g.save();
   g.globalCompositeOperation = 'lighter';
-  const grd = g.createLinearGradient(0, -12, 0, 14);
-  grd.addColorStop(0, 'rgba(180,220,235,0)');
-  grd.addColorStop(0.4, `rgba(205,235,245,${0.3 * i})`);
-  grd.addColorStop(1, 'rgba(180,220,235,0)');
-  g.fillStyle = grd;
-  g.fillRect(-L - 10, -12, L * 2 + 20, 26);
+  pxBandCols(g, x0 - 6, y0, x1 + 6, y1, -12, 22, `rgba(205,235,245,${(0.1 * i).toFixed(3)})`);
+  pxBandCols(g, x0 - 2, y0, x1 + 2, y1, -7, 12, `rgba(205,235,245,${(0.14 * i).toFixed(3)})`);
   g.restore();
 }
 
@@ -3048,13 +3054,11 @@ function drawHighlight(g, cam) {
     ];
     g.save();
     g.globalAlpha = a;
-    g.strokeStyle = '#ded8c8';
-    g.lineWidth = 2; // 与精灵描边环（8 向偏移 r=1）的视觉粗细对齐
-    g.beginPath();
-    g.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
-    g.closePath();
-    g.stroke();
+    // 像素线勾门框，粗细与精灵描边环（8 向偏移 r=1）对齐
+    for (let i = 0; i < pts.length; i++) {
+      const q = pts[(i + 1) % pts.length];
+      pxLine(g, pts[i].x, pts[i].y, q.x, q.y, '#ded8c8', 2);
+    }
     g.restore();
     return;
   }
@@ -3073,31 +3077,23 @@ function drawHighlight(g, cam) {
 function drawEmissive(g, cam) {
   const p = game.player;
 
-  // 门顶红色警示灯
+  // 门顶红色警示灯：三档同心方块辉光，跟直升机航行灯同一读法
   const pulse = 0.45 + 0.55 * Math.pow(Math.sin(game.t * 2.1) * 0.5 + 0.5, 2);
   const lamp = wallNorthPt(DOOR.cx, DOOR.top - 10, cam.x, cam.y);
   g.globalCompositeOperation = 'lighter';
-  let grd = g.createRadialGradient(lamp.x, lamp.y, 0, lamp.x, lamp.y, 11);
-  grd.addColorStop(0, `rgba(255,70,50,${0.45 * pulse})`);
-  grd.addColorStop(1, 'rgba(255,70,50,0)');
-  g.fillStyle = grd;
-  g.fillRect(lamp.x - 11, lamp.y - 11, 22, 22);
+  pxGlow(g, lamp.x, lamp.y, 11, '255,70,50', 0.5 * pulse);
   g.globalCompositeOperation = 'source-over';
   g.fillStyle = `rgba(255,${80 + 60 * pulse},64,${0.5 + 0.45 * pulse})`;
-  g.fillRect(lamp.x - 5, lamp.y - 1.2, 10, 2.6);
+  g.fillRect(Math.round(lamp.x) - 5, Math.round(lamp.y) - 1, 10, 3);
 
   // 扫描仪镜头
   const cam1 = wallNorthPt(SCANNER.u, SCANNER.v - 4, cam.x, cam.y);
   const on = game.shotScanner ? 0 : 0.5 + 0.5 * Math.sin(game.t * 3.3);
   if (on > 0.02) {
     g.fillStyle = `rgba(120,230,220,${0.35 + 0.5 * on})`;
-    g.fillRect(cam1.x - 1, cam1.y - 1, 2, 2);
+    g.fillRect(Math.round(cam1.x) - 1, Math.round(cam1.y) - 1, 2, 2);
     g.globalCompositeOperation = 'lighter';
-    grd = g.createRadialGradient(cam1.x, cam1.y, 0, cam1.x, cam1.y, 9);
-    grd.addColorStop(0, `rgba(110,220,215,${0.3 * on})`);
-    grd.addColorStop(1, 'rgba(110,220,215,0)');
-    g.fillStyle = grd;
-    g.fillRect(cam1.x - 9, cam1.y - 9, 18, 18);
+    pxGlow(g, cam1.x, cam1.y, 9, '110,220,215', 0.35 * on);
     g.globalCompositeOperation = 'source-over';
   }
 
@@ -3107,11 +3103,7 @@ function drawEmissive(g, cam) {
   const sy = cam.y + (scr.x + scr.y) * HH - scr.z * TILE_Z;
   const fl = 0.5 + 0.5 * Math.sin(game.t * 9.1) * Math.sin(game.t * 2.3);
   g.globalCompositeOperation = 'lighter';
-  grd = g.createRadialGradient(sx, sy, 0, sx, sy, 24);
-  grd.addColorStop(0, `rgba(90,210,205,${0.22 + 0.12 * fl})`);
-  grd.addColorStop(1, 'rgba(90,210,205,0)');
-  g.fillStyle = grd;
-  g.fillRect(sx - 24, sy - 24, 48, 48);
+  pxGlow(g, sx, sy, 24, '90,210,205', 0.3 + 0.15 * fl);
   g.globalCompositeOperation = 'source-over';
 }
 
@@ -3163,90 +3155,68 @@ function drawDoorDamage(g, cam) {
   ];
   for (let i = 0; i < Math.min(hits, 3); i++) {
     const [hx, hy] = holes[i];
-    // 弹孔
-    g.fillStyle = '#0a0c0c';
-    g.beginPath();
-    g.ellipse(hx, hy, 3.4, 3, 0, 0, 6.3);
-    g.fill();
-    g.fillStyle = 'rgba(230,226,210,0.5)';
-    g.beginPath();
-    g.ellipse(hx, hy, 4.6, 4, 0, 0, 6.3);
-    g.fill();
-    g.fillStyle = '#0a0c0c';
-    g.beginPath();
-    g.ellipse(hx, hy, 3, 2.6, 0, 0, 6.3);
-    g.fill();
-    // 放射裂纹
-    g.strokeStyle = 'rgba(20,22,22,0.8)';
-    g.lineWidth = 0.9;
-    g.beginPath();
+    // 弹孔：像素椭圆三层（崩边亮圈 + 深孔）
+    pxEllipse(g, hx, hy, 5, 4, 'rgba(230,226,210,0.5)');
+    pxEllipse(g, hx, hy, 3, 3, '#0a0c0c');
+    // 放射裂纹（像素线）
     for (let k = 0; k < 7; k++) {
       const a = k * 0.9 + i;
-      g.moveTo(hx, hy);
-      g.lineTo(hx + Math.cos(a) * (5 + ((k * 3 + i * 5) % 9)), hy + Math.sin(a) * (4 + ((k * 2 + i) % 7)));
+      pxLine(g, hx, hy, hx + Math.cos(a) * (5 + ((k * 3 + i * 5) % 9)), hy + Math.sin(a) * (4 + ((k * 2 + i) % 7)), 'rgba(20,22,22,0.8)', 1);
     }
-    g.stroke();
   }
 
   // 第二枪起：识别终端炸掉
   if (hits >= 2) {
-    const sx = SCANNER.u - 9;
-    const sy = SCANNER.v - 11;
+    const sx = Math.round(SCANNER.u - 9);
+    const sy = Math.round(SCANNER.v - 11);
     g.fillStyle = '#0c0e0e';
     g.fillRect(sx, sy, 18, 22);
     g.fillStyle = '#2a2320';
     g.fillRect(sx + 2, sy + 3, 14, 9);
-    g.strokeStyle = 'rgba(210,200,180,0.4)';
-    g.lineWidth = 0.8;
-    g.beginPath();
     for (let k = 0; k < 6; k++) {
-      g.moveTo(sx + 9, sy + 7);
-      g.lineTo(sx + 9 + Math.cos(k * 1.1) * 8, sy + 7 + Math.sin(k * 1.7) * 9);
+      pxLine(g, sx + 9, sy + 7, sx + 9 + Math.cos(k * 1.1) * 8, sy + 7 + Math.sin(k * 1.7) * 9, 'rgba(210,200,180,0.4)', 1);
     }
-    g.stroke();
-    // 挂下来的线束
-    g.strokeStyle = '#1a1512';
-    g.lineWidth = 1.2;
-    g.beginPath();
-    g.moveTo(sx + 6, sy + 20);
-    g.quadraticCurveTo(sx + 10, sy + 30, sx + 4, sy + 38);
-    g.stroke();
+    // 挂下来的线束（像素折线）
+    pxPolyline(g, [
+      [sx + 6, sy + 20],
+      [sx + 9, sy + 29],
+      [sx + 4, sy + 38],
+    ], '#1a1512', 1);
   }
 
   // 打穿之后：门被顶开一道缝
   if (game.door.broken) {
-    const gapW = (u1 - u0) * 0.42;
-    const gx = cx - gapW / 2;
+    const gapW = Math.round((u1 - u0) * 0.42);
+    const gx = Math.round(cx - gapW / 2);
+    const dh = bottom - top - 6;
     // 黑洞洞的门缝
     g.fillStyle = '#050706';
-    g.fillRect(gx, top + 3, gapW, bottom - top - 6);
-    // 走廊那侧透进来的一点光
-    const lg = g.createLinearGradient(gx, 0, gx + gapW, 0);
-    lg.addColorStop(0, 'rgba(190,180,150,0.16)');
-    lg.addColorStop(0.5, 'rgba(190,180,150,0.05)');
-    lg.addColorStop(1, 'rgba(190,180,150,0.16)');
-    g.fillStyle = lg;
-    g.fillRect(gx, top + 3, gapW, bottom - top - 6);
-    // 两扇门被挤歪
+    g.fillRect(gx, top + 3, gapW, dh);
+    // 走廊那侧透进来的一点光：两侧亮条 + 抖动列，代替横向渐变
+    g.fillStyle = 'rgba(190,180,150,0.16)';
+    g.fillRect(gx, top + 3, 3, dh);
+    g.fillRect(gx + gapW - 3, top + 3, 3, dh);
+    g.fillStyle = 'rgba(190,180,150,0.05)';
+    g.fillRect(gx + 3, top + 3, gapW - 6, dh);
+    pxDitherV(g, gx + 3, top + 3, top + 3 + dh, 'rgba(190,180,150,0.16)');
+    pxDitherV(g, gx + gapW - 4, top + 3, top + 3 + dh, 'rgba(190,180,150,0.16)');
+    // 两扇门被挤歪：像素扫描的斜四边形代替 rotate
     for (const side of [-1, 1]) {
-      g.save();
-      g.translate(cx + side * (gapW / 2), top + (bottom - top) / 2);
-      g.rotate(side * 0.06);
-      g.fillStyle = side < 0 ? '#4b565b' : '#576267';
-      g.fillRect(side < 0 ? -(u1 - u0) / 2 : 0, -(bottom - top) / 2 + 3, (u1 - u0) / 2, bottom - top - 6);
-      g.fillStyle = 'rgba(0,0,0,0.35)';
-      g.fillRect(side < 0 ? -2 : 0, -(bottom - top) / 2 + 3, 2, bottom - top - 6);
-      g.restore();
+      const ix = side < 0 ? gx : gx + gapW; // 内缘 x
+      const ox = side < 0 ? u0 : u1; // 外缘 x
+      const lean = 3; // 顶边相对底边的水平错位：读作"被顶歪了"
+      pxPoly(g, [
+        [ix + side * lean, top + 3],
+        [ix, bottom - 3],
+        [ox, bottom - 3],
+        [ox + side * lean, top + 3],
+      ], side < 0 ? '#4b565b' : '#576267');
+      // 内缘阴影
+      pxLine(g, ix, top + 3, ix, bottom - 3, 'rgba(0,0,0,0.35)', 2);
     }
     // 变形的门框
-    g.strokeStyle = 'rgba(150,150,140,0.5)';
-    g.lineWidth = 1.4;
-    g.beginPath();
-    g.moveTo(u0 - 5, top - 4);
-    g.lineTo(u0 + 2, top + 2);
-    g.moveTo(u1 + 5, top - 4);
-    g.lineTo(u1 - 3, top + 3);
-    g.stroke();
+    pxLine(g, u0 - 5, top - 4, u0 + 2, top + 2, 'rgba(150,150,140,0.5)', 1);
+    pxLine(g, u1 + 5, top - 4, u1 - 3, top + 3, 'rgba(150,150,140,0.5)', 1);
   }
   g.restore();
   resetTransform(g);
@@ -3289,15 +3259,11 @@ function drawFire(g, cam) {
   A.drawFlames(g, base.x, base.y, 26, 34, game.t, 1.3);
   A.drawFlames(g, base.x - 14, base.y + 2, 15, 20, game.t * 1.3, 4.7);
   A.drawFlames(g, base.x + 15, base.y + 1, 13, 17, game.t * 0.9, 8.1);
-  // 火上方的热浪与烟
+  // 火上方的热浪与烟：三档同心方块辉光
   g.save();
   g.globalCompositeOperation = 'lighter';
-  const grd = g.createRadialGradient(base.x, base.y - 14, 2, base.x, base.y - 14, 40);
   const k = 0.32 + 0.12 * Math.sin(game.t * 7.7);
-  grd.addColorStop(0, `rgba(255,170,70,${k})`);
-  grd.addColorStop(1, 'rgba(255,120,40,0)');
-  g.fillStyle = grd;
-  g.fillRect(base.x - 40, base.y - 54, 80, 80);
+  pxGlow(g, base.x, base.y - 14, 40, '255,160,60', k * 0.9);
   g.restore();
   if (Math.random() < 0.25) fx.smoke(f.x, 0.4, 2.2, 1);
 }
@@ -3315,13 +3281,9 @@ function drawAreaGlow(g, cam) {
       const a = 0.1 + 0.55 * k * k;
       const bx = b.x + (cam.x - area.cam.x);
       const by = b.y + (cam.y - area.cam.y);
-      const grd = g.createRadialGradient(bx, by, 0, bx, by, 7);
-      grd.addColorStop(0, `rgba(${b.c},${a})`);
-      grd.addColorStop(1, `rgba(${b.c},0)`);
-      g.fillStyle = grd;
-      g.fillRect(bx - 7, by - 7, 14, 14);
+      pxGlow(g, bx, by, 7, b.c, a * 1.1);
       g.fillStyle = `rgba(${b.c},${Math.min(1, a * 1.6)})`;
-      g.fillRect(bx - 0.7, by - 0.7, 1.6, 1.6);
+      g.fillRect(Math.round(bx) - 1, Math.round(by) - 1, 2, 2);
     }
     g.restore();
   }
@@ -3336,11 +3298,7 @@ function drawAreaGlow(g, cam) {
     g.fillRect(s.x + 1, s.y - 2, 3, 2);
     g.fillRect(s.x + 1, s.y + 1, 3, 2);
     g.globalCompositeOperation = 'lighter';
-    const grd = g.createRadialGradient(s.x, s.y, 0, s.x, s.y, 30);
-    grd.addColorStop(0, `rgba(110,235,140,${0.3 * k})`);
-    grd.addColorStop(1, 'rgba(110,235,140,0)');
-    g.fillStyle = grd;
-    g.fillRect(s.x - 30, s.y - 30, 60, 60);
+    pxGlow(g, s.x, s.y, 30, '110,235,140', 0.34 * k);
     g.globalCompositeOperation = 'source-over';
   }
   if (area.radio) {
@@ -3353,7 +3311,7 @@ function drawAreaGlow(g, cam) {
     g.fillStyle = '#33383d';
     g.fillRect(sx - 3, sy - 6, 6, 2);
     g.fillStyle = '#15181a';
-    g.fillRect(sx - 1, sy - 11, 1.6, 5);
+    g.fillRect(Math.round(sx) - 1, Math.round(sy) - 11, 2, 5);
     // 呼叫/通话时急闪；剧情走完只留一下一下的慢闪
     const ph = game.radio.phase;
     const on = ph === 'call' || ph === 'talk';
@@ -3363,13 +3321,9 @@ function drawAreaGlow(g, cam) {
         ? 0.1 + 0.16 * Math.sin(game.t * 0.9)
         : 0.35 + 0.2 * Math.sin(game.t * 1.6);
     g.fillStyle = `rgba(120,240,160,${0.5 + 0.5 * k})`;
-    g.fillRect(sx + 1, sy - 4, 1.6, 1.6);
+    g.fillRect(Math.round(sx) + 1, Math.round(sy) - 4, 2, 2);
     g.globalCompositeOperation = 'lighter';
-    const grd = g.createRadialGradient(sx, sy - 4, 0, sx, sy - 4, 18);
-    grd.addColorStop(0, `rgba(110,235,150,${0.24 * (0.4 + k)})`);
-    grd.addColorStop(1, 'rgba(110,235,150,0)');
-    g.fillStyle = grd;
-    g.fillRect(sx - 18, sy - 22, 36, 36);
+    pxGlow(g, sx, sy - 4, 18, '110,235,150', 0.28 * (0.4 + k));
     g.globalCompositeOperation = 'source-over';
   }
 }
@@ -3711,11 +3665,7 @@ function render() {
       y: cam.y + (SPARK_SRC.x + SPARK_SRC.y) * HH - SPARK_SRC.z * TILE_Z,
     };
     ctx.globalCompositeOperation = 'lighter';
-    const grd = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, 26);
-    grd.addColorStop(0, `rgba(190,220,255,${0.5 * game.sparkPower})`);
-    grd.addColorStop(1, 'rgba(190,220,255,0)');
-    ctx.fillStyle = grd;
-    ctx.fillRect(sp.x - 26, sp.y - 26, 52, 52);
+    pxGlow(ctx, sp.x, sp.y, 26, '190,220,255', 0.55 * game.sparkPower);
     ctx.globalCompositeOperation = 'source-over';
   }
 
