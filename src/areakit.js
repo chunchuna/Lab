@@ -1,6 +1,9 @@
 import { HW, HH, TILE_W, TILE_Z, WALL_H } from './config.js';
 import { boundsFor, camFor } from './iso.js';
-import { makeArtCanvas, finishArt, mulberry32, shade, baseT, localT } from './util.js';
+import {
+  makeArtCanvas, finishArt, mulberry32, shade, baseT, localT,
+  pxLine, pxPolyline, pxDither, pxDitherV, pxPoly, pxEllipseRing, pxBlob, pxText,
+} from './util.js';
 
 export const PAD = 10;
 
@@ -126,32 +129,28 @@ export function paintFloor(g, sox, soy, w, h, rand, th, opts = {}) {
     }
   }
 
-  // 大面积污渍与焦痕
+  // 大面积污渍与焦痕：两档同心的像素摊，代替径向渐变
   const stains = Math.round(30 + w * 2);
   for (let i = 0; i < stains; i++) {
     const x = rand() * w * TILE_W;
     const y = rand() * h * TILE_W;
     const r = 10 + rand() * 48;
-    const grd = g.createRadialGradient(x, y, 0, x, y, r);
     const dark = rand() < th.scorch * 0.5;
-    grd.addColorStop(0, `rgba(${dark ? '8,8,8' : '26,22,16'},${0.12 + rand() * 0.24})`);
-    grd.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = grd;
-    g.fillRect(x - r, y - r, r * 2, r * 2);
+    const rgb = dark ? '8,8,8' : '26,22,16';
+    const a = 0.08 + rand() * 0.14;
+    pxBlob(g, x, y, r, r * (0.5 + rand() * 0.4), `rgba(${rgb},${a.toFixed(3)})`, rand);
+    pxBlob(g, x, y, r * 0.55, r * 0.32, `rgba(${rgb},${a.toFixed(3)})`, rand);
   }
 
-  // 血迹
+  // 血迹：像素摊
   const bloods = Math.round(14 * th.blood);
   for (let i = 0; i < bloods; i++) {
     const cx = rand() * w * TILE_W;
     const cy = rand() * h * TILE_W;
     g.globalAlpha = 0.3 + rand() * 0.3;
-    g.fillStyle = '#3f1210';
     const n = 3 + ((rand() * 6) | 0);
     for (let k = 0; k < n; k++) {
-      g.beginPath();
-      g.ellipse(cx + (rand() - 0.5) * 60, cy + (rand() - 0.5) * 40, 3 + rand() * 14, 3 + rand() * 10, rand() * 3, 0, 6.3);
-      g.fill();
+      pxBlob(g, cx + (rand() - 0.5) * 60, cy + (rand() - 0.5) * 40, 3 + rand() * 14, 3 + rand() * 10, '#3f1210', rand);
     }
     g.globalAlpha = 1;
   }
@@ -159,40 +158,36 @@ export function paintFloor(g, sox, soy, w, h, rand, th, opts = {}) {
   // 灰尘颗粒
   for (let i = 0; i < w * 60; i++) {
     g.fillStyle = ['rgba(200,210,205,0.09)', 'rgba(0,0,0,0.2)', 'rgba(160,150,130,0.09)'][(rand() * 3) | 0];
-    g.fillRect(rand() * w * TILE_W, rand() * h * TILE_W, 1 + rand() * 2.4, 1 + rand() * 1.8);
+    g.fillRect(Math.round(rand() * w * TILE_W), Math.round(rand() * h * TILE_W), 1 + ((rand() * 2) | 0), 1 + ((rand() * 2) | 0));
   }
   g.restore();
 
-  // 碎块（屏幕空间小菱形）
+  // 碎块（屏幕空间小菱形，逐行扫描）
   for (let i = 0; i < w * 8; i++) {
     const p = pt(sox, soy, rand() * w, rand() * h);
-    const s = 0.6 + rand() * 2.4;
-    g.fillStyle = ['#4a5250', '#39403e', '#5c6462', 'rgba(180,215,210,0.3)'][(rand() * 4) | 0];
-    g.beginPath();
-    g.moveTo(p.x, p.y - s * 0.5);
-    g.lineTo(p.x + s, p.y);
-    g.lineTo(p.x, p.y + s * 0.5);
-    g.lineTo(p.x - s, p.y);
-    g.closePath();
-    g.fill();
+    const s = Math.max(1, Math.round(0.6 + rand() * 2.4));
+    pxPoly(g, [
+      [p.x, p.y - s * 0.5],
+      [p.x + s, p.y],
+      [p.x, p.y + s * 0.5],
+      [p.x - s, p.y],
+    ], ['#4a5250', '#39403e', '#5c6462', 'rgba(180,215,210,0.3)'][(rand() * 4) | 0]);
   }
 
-  // 地面裂缝
-  g.strokeStyle = 'rgba(0,0,0,0.4)';
-  g.lineWidth = 0.9;
+  // 地面裂缝：像素折线
   for (let i = 0; i < Math.round(w / 3); i++) {
     let px = rand() * w;
     let py = rand() * h;
-    g.beginPath();
+    const ptsArr = [];
     const a = pt(sox, soy, px, py);
-    g.moveTo(a.x, a.y);
+    ptsArr.push([a.x, a.y]);
     for (let s = 0; s < 5; s++) {
       px += (rand() - 0.5) * 2;
       py += (rand() - 0.5) * 1.4;
       const b = pt(sox, soy, px, py);
-      g.lineTo(b.x, b.y);
+      ptsArr.push([b.x, b.y]);
     }
-    g.stroke();
+    pxPolyline(g, ptsArr, 'rgba(0,0,0,0.4)', 1);
   }
 
   // 积水：雨夜的天台用。画在地面空间里，才会跟着透视压扁成菱形方向
@@ -204,40 +199,21 @@ export function paintFloor(g, sox, soy, w, h, rand, th, opts = {}) {
       const cy = rand() * h * TILE_W;
       const rx = 14 + rand() * 44;
       const ry = rx * (0.5 + rand() * 0.4);
-      const grd = g.createRadialGradient(cx, cy, 0, cx, cy, rx);
-      grd.addColorStop(0, 'rgba(120,150,160,0.16)');
-      grd.addColorStop(0.68, 'rgba(70,92,100,0.1)');
-      grd.addColorStop(1, 'rgba(40,54,60,0)');
-      g.fillStyle = grd;
-      g.save();
-      g.translate(cx, cy);
-      g.scale(1, ry / rx);
-      g.beginPath();
-      g.arc(0, 0, rx, 0, 6.3);
-      g.fill();
-      g.restore();
-      // 水面反光的一点亮边
-      g.strokeStyle = 'rgba(160,190,200,0.1)';
-      g.lineWidth = 1.2;
-      g.beginPath();
-      g.ellipse(cx, cy, rx * 0.82, ry * 0.82, 0, 0, 6.3);
-      g.stroke();
+      // 两档同心的像素水面 + 1px 环形反光边
+      pxBlob(g, cx, cy, rx, ry, 'rgba(90,118,128,0.1)', rand);
+      pxBlob(g, cx, cy, rx * 0.62, ry * 0.62, 'rgba(120,150,160,0.12)', rand);
+      pxEllipseRing(g, cx, cy, rx * 0.82, ry * 0.82, 'rgba(160,190,200,0.1)', 1);
     }
     g.restore();
   }
 
-  // 房间前缘暗边
+  // 房间前缘暗边：像素直线
   if (opts.edge !== false) {
-    g.strokeStyle = 'rgba(0,0,0,0.85)';
-    g.lineWidth = 2;
-    g.beginPath();
-    let p = pt(sox, soy, w, 0);
-    g.moveTo(p.x, p.y);
-    p = pt(sox, soy, w, h);
-    g.lineTo(p.x, p.y);
-    p = pt(sox, soy, 0, h);
-    g.lineTo(p.x, p.y);
-    g.stroke();
+    const p0 = pt(sox, soy, w, 0);
+    const p1 = pt(sox, soy, w, h);
+    const p2 = pt(sox, soy, 0, h);
+    pxLine(g, p0.x, p0.y, p1.x, p1.y, 'rgba(0,0,0,0.85)', 2);
+    pxLine(g, p1.x, p1.y, p2.x, p2.y, 'rgba(0,0,0,0.85)', 2);
   }
 }
 
@@ -246,113 +222,119 @@ export function paintFloor(g, sox, soy, w, h, rand, th, opts = {}) {
  * ------------------------------------------------------------------ */
 
 export function wallBase(g, len, rand, th, wallH = WALL_H) {
-  const H = wallH * TILE_Z;
-  const grd = g.createLinearGradient(0, 0, 0, H);
-  grd.addColorStop(0, th.wallTop);
-  grd.addColorStop(0.55, th.wallMid);
-  grd.addColorStop(1, th.wallLow);
-  g.fillStyle = grd;
-  g.fillRect(0, 0, len, H);
+  const H = Math.round(wallH * TILE_Z);
+  const L = Math.round(len);
+  // 三档硬分带（顶亮 / 中 / 底暗）+ 交界行棋盘抖动，代替竖向渐变
+  const cutA = Math.round(H * 0.34);
+  const cutB = Math.round(H * 0.72);
+  g.fillStyle = th.wallTop;
+  g.fillRect(0, 0, L, cutA);
+  g.fillStyle = th.wallMid;
+  g.fillRect(0, cutA, L, cutB - cutA);
+  g.fillStyle = th.wallLow;
+  g.fillRect(0, cutB, L, H - cutB);
+  pxDither(g, 0, L, cutA, th.wallTop);
+  pxDither(g, 0, L, cutA + 1, th.wallMid);
+  pxDither(g, 0, L, cutB, th.wallMid);
+  pxDither(g, 0, L, cutB + 1, th.wallLow);
 
-  // 面板分缝 + 铆钉
-  for (let u = 0; u <= len; u += TILE_W * 2) {
+  // 面板分缝 + 受光边
+  for (let u = 0; u <= L; u += TILE_W * 2) {
     g.fillStyle = 'rgba(0,0,0,0.32)';
-    g.fillRect(u, 0, 1.5, H);
+    g.fillRect(u, 0, 2, H);
     g.fillStyle = 'rgba(255,255,255,0.045)';
-    g.fillRect(u + 1.5, 0, 1, H);
+    g.fillRect(u + 2, 0, 1, H);
   }
-  for (const v of [H * 0.32, H * 0.7]) {
+  for (const v of [Math.round(H * 0.32), Math.round(H * 0.7)]) {
     g.fillStyle = 'rgba(0,0,0,0.28)';
-    g.fillRect(0, v, len, 1.4);
+    g.fillRect(0, v, L, 1);
     g.fillStyle = 'rgba(255,255,255,0.04)';
-    g.fillRect(0, v + 1.4, len, 0.8);
+    g.fillRect(0, v + 1, L, 1);
   }
   // 踢脚
   g.fillStyle = 'rgba(0,0,0,0.4)';
-  g.fillRect(0, H - 4, len, 4);
+  g.fillRect(0, H - 4, L, 4);
 
-  // 水痕 / 锈斑 / 焦痕
-  for (let i = 0; i < len / 12; i++) {
-    const x = rand() * len;
-    const hh = 8 + rand() * (H - 10);
-    const gr = g.createLinearGradient(0, H - hh, 0, H);
-    gr.addColorStop(0, 'rgba(20,16,12,0)');
-    gr.addColorStop(1, `rgba(${['24,18,12', '30,22,14', '12,12,12'][(rand() * 3) | 0]},${0.12 + rand() * 0.26})`);
-    g.fillStyle = gr;
-    g.fillRect(x, H - hh, 3 + rand() * 16, hh);
+  // 水痕：两段平涂（下重上轻）+ 顶端抖动行，代替竖向渐变
+  for (let i = 0; i < L / 12; i++) {
+    const x = Math.round(rand() * L);
+    const hh = Math.round(8 + rand() * (H - 10));
+    const ww = Math.round(3 + rand() * 16);
+    const rgb = ['24,18,12', '30,22,14', '12,12,12'][(rand() * 3) | 0];
+    const a = 0.12 + rand() * 0.26;
+    g.fillStyle = `rgba(${rgb},${(a * 0.45).toFixed(3)})`;
+    g.fillRect(x, H - hh, ww, hh);
+    g.fillStyle = `rgba(${rgb},${(a * 0.55).toFixed(3)})`;
+    g.fillRect(x, H - Math.round(hh * 0.55), ww, Math.round(hh * 0.55));
+    pxDither(g, x, x + ww, H - hh - 1, `rgba(${rgb},${(a * 0.45).toFixed(3)})`);
   }
-  for (let i = 0; i < len / 8; i++) {
-    g.fillStyle = `rgba(${['109,74,48', '143,96,56', '50,44,40'][(rand() * 3) | 0]},${0.1 + rand() * 0.26})`;
-    g.beginPath();
-    g.ellipse(rand() * len, rand() * H, 1 + rand() * 5, 1 + rand() * 4, 0, 0, 6.3);
-    g.fill();
+  // 锈斑：像素摊
+  for (let i = 0; i < L / 8; i++) {
+    pxBlob(g, rand() * L, rand() * H, 1 + rand() * 5, 1 + rand() * 4, `rgba(${['109,74,48', '143,96,56', '50,44,40'][(rand() * 3) | 0]},${(0.1 + rand() * 0.26).toFixed(3)})`, rand);
   }
-  // 爆炸焦痕
-  for (let i = 0; i < Math.round((len / 90) * th.scorch * 3); i++) {
-    const x = rand() * len;
+  // 爆炸焦痕：两档同心的像素摊
+  for (let i = 0; i < Math.round((L / 90) * th.scorch * 3); i++) {
+    const x = rand() * L;
     const y = H * (0.3 + rand() * 0.5);
     const r = 18 + rand() * 30;
-    const bg = g.createRadialGradient(x, y, 1, x, y, r);
-    bg.addColorStop(0, 'rgba(0,0,0,0.55)');
-    bg.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = bg;
-    g.fillRect(x - r, y - r, r * 2, r * 2);
+    pxBlob(g, x, y, r, r * 0.66, 'rgba(0,0,0,0.22)', rand);
+    pxBlob(g, x, y, r * 0.5, r * 0.34, 'rgba(0,0,0,0.35)', rand);
   }
   // 血手印 / 拖痕
   for (let i = 0; i < Math.round(th.blood * 3); i++) {
     g.globalAlpha = 0.3 + rand() * 0.25;
     g.fillStyle = '#3f1210';
-    const x = rand() * len;
+    const x = rand() * L;
     const y = H * (0.35 + rand() * 0.4);
     for (let k = 0; k < 5; k++) {
-      g.fillRect(x + k * 2.2, y + rand() * 10, 1.6, 5 + rand() * 12);
+      g.fillRect(Math.round(x + k * 2.2), Math.round(y + rand() * 10), 2, Math.round(5 + rand() * 12));
     }
     g.globalAlpha = 1;
   }
   // 颗粒
-  for (let i = 0; i < len * 1.4; i++) {
+  for (let i = 0; i < L * 1.4; i++) {
     g.fillStyle = ['rgba(255,255,255,0.045)', 'rgba(0,0,0,0.16)'][(rand() * 2) | 0];
-    g.fillRect(rand() * len, rand() * H, 1, 1);
+    g.fillRect(Math.round(rand() * L), Math.round(rand() * H), 1, 1);
   }
 }
 
 /** 墙顶的管线与线缆 */
 export function wallPipes(g, len, rand, v0, th) {
   for (const [vv, r, c] of [
-    [v0, 3.4, th.trim],
-    [v0 + 7.5, 2.4, '#41494a'],
+    [v0, 3, th.trim],
+    [v0 + 8, 2, '#41494a'],
   ]) {
     g.fillStyle = shade(c, -0.42);
-    g.fillRect(0, vv, len, r * 2);
+    g.fillRect(0, Math.round(vv), Math.round(len), r * 2);
     g.fillStyle = c;
-    g.fillRect(0, vv, len, r);
+    g.fillRect(0, Math.round(vv), Math.round(len), r);
     g.fillStyle = 'rgba(255,255,255,0.12)';
-    g.fillRect(0, vv + 0.6, len, 1);
+    g.fillRect(0, Math.round(vv) + 1, Math.round(len), 1);
     for (let u = 18; u < len; u += 78) {
       g.fillStyle = shade(c, -0.2);
-      g.fillRect(u, vv - 1.2, 5, r * 2 + 2.4);
+      g.fillRect(u, Math.round(vv) - 1, 5, r * 2 + 2);
     }
   }
-  g.lineCap = 'round';
+  // 松垂的电缆：每 40px 一段的像素折线
   for (let i = 0; i < 4; i++) {
-    g.strokeStyle = ['#14181a', '#1d1a16', '#101416'][(rand() * 3) | 0];
-    g.lineWidth = 1.1 + rand();
-    g.beginPath();
-    g.moveTo(0, v0 + 13 + i * 2.1);
+    const col = ['#14181a', '#1d1a16', '#101416'][(rand() * 3) | 0];
+    const base = v0 + 13 + i * 2.1;
+    const ptsArr = [[0, base]];
     for (let u = 0; u < len; u += 40) {
-      g.quadraticCurveTo(u + 20, v0 + 13 + i * 2.1 + (rand() - 0.3) * 6, u + 40, v0 + 13 + i * 2.1 + (rand() - 0.5) * 3);
+      ptsArr.push([u + 20, base + (rand() - 0.3) * 6]);
+      ptsArr.push([u + 40, base + (rand() - 0.5) * 3]);
     }
-    g.stroke();
+    pxPolyline(g, ptsArr, col, 1 + (rand() > 0.5 ? 1 : 0));
   }
-  // 断落的线缆
+  // 断落的线缆：像素折线下垂
   for (let i = 0; i < len / 130; i++) {
     const x = rand() * len;
-    g.strokeStyle = '#101416';
-    g.lineWidth = 1.4;
-    g.beginPath();
-    g.moveTo(x, v0 + 16);
-    g.quadraticCurveTo(x + 8, v0 + 34, x - 4, v0 + 52);
-    g.stroke();
+    pxPolyline(g, [
+      [x, v0 + 16],
+      [x + 6, v0 + 30],
+      [x + 3, v0 + 42],
+      [x - 4, v0 + 52],
+    ], '#101416', 1);
   }
 }
 
@@ -381,13 +363,13 @@ function roomInterior(g, u0, u1, top, bottom, kind, rand, burning) {
   g.fillRect(u0, top + h * 0.62, w, h * 0.38);
   g.fillStyle = 'rgba(0,0,0,0.35)';
   g.fillRect(u0, top + h * 0.6, w, 2);
-  // 只在顶部压一点阴影，保留纵深又不至于全黑
-  const sh = g.createLinearGradient(0, top, 0, bottom);
-  sh.addColorStop(0, 'rgba(0,0,0,0.5)');
-  sh.addColorStop(0.45, 'rgba(0,0,0,0)');
-  sh.addColorStop(1, 'rgba(0,0,0,0.28)');
-  g.fillStyle = sh;
-  g.fillRect(u0, top, w, h);
+  // 只在顶部压一点阴影，保留纵深又不至于全黑：两条硬带 + 抖动行
+  g.fillStyle = 'rgba(0,0,0,0.4)';
+  g.fillRect(Math.round(u0), Math.round(top), Math.round(w), Math.round(h * 0.22));
+  pxDither(g, u0, u0 + w, top + h * 0.22, 'rgba(0,0,0,0.4)');
+  g.fillStyle = 'rgba(0,0,0,0.22)';
+  g.fillRect(Math.round(u0), Math.round(bottom - h * 0.14), Math.round(w), Math.round(h * 0.14));
+  pxDither(g, u0, u0 + w, bottom - h * 0.14 - 1, 'rgba(0,0,0,0.22)');
 
   const fx = (t) => u0 + w * t;
   const fy = (t) => top + h * t;
@@ -437,24 +419,18 @@ function roomInterior(g, u0, u1, top, bottom, kind, rand, burning) {
     g.fillRect(fx(0.62), fy(0.42), w * 0.22, h * 0.26);
   }
 
-  // 狼藉：碎片与血
+  // 狼藉：碎片与血（像素摊）
   g.globalAlpha = 0.5;
-  g.fillStyle = '#3f1210';
   for (let i = 0; i < 4; i++) {
-    g.beginPath();
-    g.ellipse(fx(0.15 + rand() * 0.7), fy(0.78 + rand() * 0.16), 3 + rand() * 8, 2 + rand() * 5, 0, 0, 6.3);
-    g.fill();
+    pxBlob(g, fx(0.15 + rand() * 0.7), fy(0.78 + rand() * 0.16), 3 + rand() * 8, 2 + rand() * 5, '#3f1210', rand);
   }
   g.globalAlpha = 1;
 
   if (burning) {
-    // 火光把整间照亮（真实火焰由动态层每帧绘制）
-    const fg = g.createRadialGradient(fx(0.5), fy(0.7), 2, fx(0.5), fy(0.7), w * 0.7);
-    fg.addColorStop(0, 'rgba(255,180,70,0.55)');
-    fg.addColorStop(0.5, 'rgba(220,110,40,0.28)');
-    fg.addColorStop(1, 'rgba(120,50,20,0)');
-    g.fillStyle = fg;
-    g.fillRect(u0, top, w, h);
+    // 火光把整间照亮（真实火焰由动态层每帧绘制）：三档同心的硬边像素摊
+    pxBlob(g, fx(0.5), fy(0.7), w * 0.7, h * 0.55, 'rgba(220,110,40,0.2)', rand);
+    pxBlob(g, fx(0.5), fy(0.7), w * 0.44, h * 0.36, 'rgba(255,150,55,0.28)', rand);
+    pxBlob(g, fx(0.5), fy(0.7), w * 0.2, h * 0.18, 'rgba(255,190,80,0.4)', rand);
   }
 }
 
@@ -482,39 +458,49 @@ export function doorBay(g, u0, u1, rand, th, opts = {}, wallH = WALL_H) {
 
   if (opts.state === 'open') {
     roomInterior(g, u0, u1, top, bottom, opts.kind, rand, opts.burning);
-    // 歪斜的门板挂在一侧
-    g.fillStyle = shade(th.wallMid, 0.1);
-    g.save();
-    g.translate(u0 + 2, top + 4);
-    g.rotate(0.12);
-    g.fillRect(0, 0, w * 0.32, bottom - top - 8);
-    g.restore();
+    // 歪斜的门板挂在一侧：台阶斜边的平行四边形，不做旋转
+    const dw = Math.round(w * 0.32);
+    const dh = bottom - top - 8;
+    const skew = Math.round(dh * 0.12);
+    pxPoly(g, [
+      [u0 + 2, top + 4],
+      [u0 + 2 + dw, top + 4],
+      [u0 + 2 + dw - skew, top + 4 + dh],
+      [u0 + 2 - skew, top + 4 + dh],
+    ], shade(th.wallMid, 0.1));
     g.fillStyle = 'rgba(0,0,0,0.4)';
     g.fillRect(u0, top, 3, bottom - top);
   } else if (opts.state === 'sealed') {
-    // 被杂物封死
+    // 被杂物封死：一根根台阶斜置的木板（像素粗线）
     g.fillStyle = '#1a1c1a';
     g.fillRect(u0, top, w, bottom - top);
-    g.fillStyle = th.trim;
+    const cx = u0 + w / 2;
+    const cy = top + (bottom - top) / 2;
     for (let i = 0; i < 6; i++) {
-      g.save();
-      g.translate(u0 + w / 2, top + (bottom - top) / 2);
-      g.rotate(-0.6 + i * 0.24);
-      g.fillRect(-w * 0.6, -2 + i * 1.5, w * 1.2, 4);
-      g.restore();
+      const ang = -0.6 + i * 0.24;
+      const dx = Math.cos(ang) * w * 0.6;
+      const dy = Math.sin(ang) * w * 0.6;
+      const off = -2 + i * 1.5;
+      pxLine(g, cx - dx, cy + off - dy, cx + dx, cy + off + dy, th.trim, 4);
     }
   } else {
-    // 关着的门：两扇 + 观察窗，窗里透出房间的一点内容
-    const dg = g.createLinearGradient(u0, 0, u1, 0);
-    dg.addColorStop(0, '#4d565a');
-    dg.addColorStop(0.35, '#626c71');
-    dg.addColorStop(0.5, '#414a4e');
-    dg.addColorStop(0.68, '#5e686d');
-    dg.addColorStop(1, '#475054');
-    g.fillStyle = dg;
-    g.fillRect(u0, top, w, bottom - top);
+    // 关着的门：两扇，硬分带明暗 + 抖动列，观察窗里透出房间的一点内容
+    const dh2 = bottom - top;
+    for (const [f0, f1, dc] of [
+      [0, 0.2, '#4d565a'],
+      [0.2, 0.5, '#626c71'],
+      [0.5, 0.68, '#414a4e'],
+      [0.68, 0.86, '#5e686d'],
+      [0.86, 1, '#475054'],
+    ]) {
+      g.fillStyle = dc;
+      g.fillRect(Math.round(u0 + w * f0), top, Math.round(u0 + w * f1) - Math.round(u0 + w * f0), dh2);
+    }
+    for (const f of [0.2, 0.5, 0.68, 0.86]) {
+      pxDitherV(g, u0 + w * f, top, bottom, '#525c60');
+    }
     g.fillStyle = '#121616';
-    g.fillRect(u0 + w / 2 - 1, top, 2, bottom - top);
+    g.fillRect(u0 + w / 2 - 1, top, 2, dh2);
     for (const side of [0, 1]) {
       const x = u0 + side * (w / 2) + 3;
       const ww = w / 2 - 6;
@@ -525,47 +511,48 @@ export function doorBay(g, u0, u1, rand, th, opts = {}, wallH = WALL_H) {
       g.clip();
       roomInterior(g, u0, u1, top - 6, bottom, opts.kind, rand, opts.burning);
       g.restore();
-      g.strokeStyle = 'rgba(0,0,0,0.6)';
-      g.lineWidth = 1;
-      g.strokeRect(x + 2, top + 7, ww - 4, 13);
-      // 玻璃裂纹
+      {
+        const bx = Math.round(x + 2);
+        const by = top + 7;
+        const bw = Math.round(ww - 4);
+        g.fillStyle = 'rgba(0,0,0,0.6)';
+        g.fillRect(bx, by, bw, 1);
+        g.fillRect(bx, by + 12, bw, 1);
+        g.fillRect(bx, by, 1, 13);
+        g.fillRect(bx + bw - 1, by, 1, 13);
+      }
+      // 玻璃裂纹：像素放射线
       if (rand() > 0.45) {
-        g.strokeStyle = 'rgba(210,225,225,0.35)';
-        g.lineWidth = 0.6;
-        g.beginPath();
         const cx = x + ww / 2;
         const cy = top + 13;
         for (let i = 0; i < 5; i++) {
-          g.moveTo(cx, cy);
-          g.lineTo(cx + Math.cos(i * 1.3) * (3 + rand() * 7), cy + Math.sin(i * 1.7) * (2 + rand() * 5));
+          pxLine(g, cx, cy, cx + Math.cos(i * 1.3) * (3 + rand() * 7), cy + Math.sin(i * 1.7) * (2 + rand() * 5), 'rgba(210,225,225,0.35)', 1);
         }
-        g.stroke();
       }
       g.fillStyle = 'rgba(0,0,0,0.22)';
       g.fillRect(x, bottom - 18, ww, 1);
     }
-    // 下部危险条纹
-    g.save();
-    g.beginPath();
-    g.rect(u0 + 2, bottom - 12, w - 4, 8);
-    g.clip();
-    for (let i = -10; i < w + 10; i += 8) {
-      g.fillStyle = i % 16 === 0 ? '#8a7433' : '#1e2220';
-      g.beginPath();
-      g.moveTo(u0 + i, bottom - 12);
-      g.lineTo(u0 + i + 5, bottom - 12);
-      g.lineTo(u0 + i - 4, bottom - 4);
-      g.lineTo(u0 + i - 9, bottom - 4);
-      g.closePath();
-      g.fill();
+    // 下部危险条纹：逐行扫描，行内按斜移后的 8px 周期分色
+    {
+      const sy0 = bottom - 12;
+      const sh2 = 8;
+      const sx0 = Math.round(u0 + 2);
+      const sw2 = Math.round(w - 4);
+      for (let yy = 0; yy < sh2; yy++) {
+        const shift = Math.round(yy * 1.1);
+        for (let x = 0; x < sw2; ) {
+          const idx = Math.floor((x + shift) / 8);
+          const runEnd = Math.min(sw2, (idx + 1) * 8 - shift);
+          g.fillStyle = ((idx % 2) + 2) % 2 === 0 ? '#8a7433' : '#1e2220';
+          g.fillRect(sx0 + x, sy0 + yy, Math.max(1, runEnd - x), 1);
+          x = runEnd;
+        }
+      }
     }
-    g.restore();
-    // 门牌
+    // 门牌：像素字
     g.fillStyle = 'rgba(200,200,190,0.3)';
     g.fillRect(u0 + w / 2 - 12, top + 25, 24, 7);
-    g.fillStyle = '#1a1c1a';
-    g.font = '5px monospace';
-    g.fillText(opts.label || '', u0 + w / 2 - 10, top + 30.5);
+    if (opts.label) pxText(g, u0 + w / 2 - (String(opts.label).length * 4 - 1) / 2, top + 26, opts.label, '#1a1c1a', 1);
   }
 }
 
