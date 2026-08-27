@@ -11,6 +11,19 @@ function noise(dur = 1) {
   return buf;
 }
 
+// 主音量。设置面板可能在 AudioContext 还没建立时就改它，所以先存着，
+// initAudio 时再套到 master 上。
+let masterVol = 0.55;
+
+export function setMasterVolume(v) {
+  masterVol = Math.max(0, Math.min(1, v));
+  if (master) master.gain.value = masterVol;
+}
+
+export function getMasterVolume() {
+  return masterVol;
+}
+
 export function initAudio() {
   if (started) return;
   try {
@@ -20,7 +33,7 @@ export function initAudio() {
   }
   started = true;
   master = ac.createGain();
-  master.gain.value = 0.55;
+  master.gain.value = masterVol;
   master.connect(ac.destination);
   noiseBuf = noise(2);
   ambience();

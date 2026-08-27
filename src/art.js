@@ -2129,6 +2129,800 @@ export function drawBadgeIcon(g, w, h) {
   g.restore();
 }
 
+/* ------------------------------------------------------------------ *
+ * 主菜单画面：收容舱 · 舱内个体 · 舱外的观察人员
+ *
+ * 全部程序化生成，跟场景里的道具走同一套等距画法。收容舱拆成"背面"与
+ * "正面"两张精灵：个体夹在两者之间画，玻璃才真的挡在它前面。
+ * ------------------------------------------------------------------ */
+
+const CH = {
+  r: 1.06, // 半径（瓦片）
+  base: 0.42, // 底座高（高度单位）
+  glass: 3.0, // 玻璃段高：舱里那位要站得下，还得留出头顶的空间
+  cap: 0.3, // 顶盖高
+};
+CH.top = CH.base + CH.glass;
+CH.full = CH.top + CH.cap;
+
+const CH_RX = CH.r * HW * Math.SQRT2;
+const CH_RY = CH_RX * (HH / HW);
+
+/** 圆柱剪影：下底近半椭圆 + 两侧 + 上底远半椭圆 */
+function cylPath(g, cx, cy, rx, ry, h) {
+  g.beginPath();
+  g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI);
+  g.lineTo(cx - rx, cy - h);
+  g.ellipse(cx, cy - h, rx, ry, 0, Math.PI, Math.PI * 2);
+  g.closePath();
+}
+
+function ellipseFill(g, cx, cy, rx, ry, fill) {
+  g.fillStyle = fill;
+  g.beginPath();
+  g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  g.fill();
+}
+
+/** 椭圆的一半：near=true 取靠近镜头的下半 */
+function halfArc(g, cx, cy, rx, ry, near, stroke, lw = 1) {
+  g.strokeStyle = stroke;
+  g.lineWidth = lw;
+  g.beginPath();
+  g.ellipse(cx, cy, rx, ry, 0, near ? 0 : Math.PI, near ? Math.PI : Math.PI * 2);
+  g.stroke();
+}
+
+/**
+ * 收容舱。返回 { back, front, r, h }，back / front 是两张精灵，
+ * 中间留给舱内个体。
+ */
+export function makeChamber(seed = 907) {
+  const foot = CH.r * 2 + 0.5;
+  const back = makeProp(foot, foot, CH.full, (g, ox, oy) => {
+    const rand = mulberry32(seed);
+    aoShadow(g, ox, oy, foot, foot, 0.55);
+
+    const zBase = CH.base * TILE_Z;
+    const zGlass = CH.glass * TILE_Z;
+
+    // 底座：金属圆台
+    const bg = g.createLinearGradient(0, oy - zBase, 0, oy);
+    bg.addColorStop(0, PAL.metalLite);
+    bg.addColorStop(0.5, PAL.metal);
+    bg.addColorStop(1, PAL.metalDark);
+    cylPath(g, ox, oy, CH_RX, CH_RY, zBase);
+    g.fillStyle = bg;
+    g.fill();
+    // 底座上的散热槽
+    g.fillStyle = 'rgba(0,0,0,0.34)';
+    for (let i = -5; i <= 5; i++) {
+      const u = (i / 6) * CH_RX;
+      const k = Math.sqrt(Math.max(0, 1 - (u / CH_RX) ** 2));
+      g.fillRect(ox + u - 0.6, oy - zBase + 2 + CH_RY * k * 0.5, 1.4, zBase - 4);
+    }
+    // 舱内地面
+    ellipseFill(g, ox, oy - zBase, CH_RX, CH_RY, '#39433f');
+    ellipseFill(g, ox, oy - zBase, CH_RX * 0.86, CH_RY * 0.86, '#232c2b');
+    ellipseFill(g, ox, oy - zBase, CH_RX * 0.7, CH_RY * 0.7, 'rgba(121,210,204,0.16)');
+    // 排水格栅
+    g.strokeStyle = 'rgba(0,0,0,0.4)';
+    g.lineWidth = 0.8;
+    for (let i = -3; i <= 3; i++) {
+      const u = (i / 4) * CH_RX * 0.8;
+      const k = Math.sqrt(Math.max(0, 1 - (u / (CH_RX * 0.8)) ** 2));
+      g.beginPath();
+      g.moveTo(ox + u, oy - zBase - CH_RY * 0.8 * k);
+      g.lineTo(ox + u, oy - zBase + CH_RY * 0.8 * k);
+      g.stroke();
+    }
+
+    // 舱内空气：底部亮、顶部暗，看起来像充着一层雾
+    const gy = oy - zBase;
+    cylPath(g, ox, gy, CH_RX, CH_RY, zGlass);
+    const ig = g.createLinearGradient(0, gy - zGlass, 0, gy);
+    ig.addColorStop(0, 'rgba(14,26,30,0.92)');
+    ig.addColorStop(0.55, 'rgba(20,42,46,0.8)');
+    ig.addColorStop(1, 'rgba(58,116,116,0.55)');
+    g.fillStyle = ig;
+    g.fill();
+    // 远侧内壁的反光
+    g.save();
+    cylPath(g, ox, gy, CH_RX, CH_RY, zGlass);
+    g.clip();
+    g.fillStyle = 'rgba(150,205,205,0.07)';
+    g.fillRect(ox - CH_RX, gy - zGlass, CH_RX * 2, zGlass * 0.34);
+    g.strokeStyle = 'rgba(170,220,215,0.12)';
+    g.lineWidth = 1.2;
+    for (let i = 0; i < 3; i++) {
+      g.beginPath();
+      g.moveTo(ox - CH_RX + 4 + i * 9, gy - zGlass);
+      g.lineTo(ox - CH_RX + 12 + i * 9, gy);
+      g.stroke();
+    }
+    g.restore();
+    // 底部积雾
+    g.save();
+    g.globalAlpha = 0.5;
+    ellipseFill(g, ox, gy - 3, CH_RX * 0.88, CH_RY * 0.7, 'rgba(140,215,210,0.2)');
+    g.globalAlpha = 1;
+    g.restore();
+
+    // 远侧上下环
+    halfArc(g, ox, gy, CH_RX, CH_RY, false, PAL.metal, 2.4);
+    halfArc(g, ox, gy - zGlass, CH_RX, CH_RY, false, PAL.metalDark, 2.4);
+    // 远侧的竖向支撑
+    g.fillStyle = 'rgba(0,0,0,0.35)';
+    for (const u of [-0.55, 0.55]) {
+      g.fillRect(ox + u * CH_RX - 1, gy - zGlass, 2, zGlass);
+    }
+    // 底座的油污
+    g.save();
+    cylPath(g, ox, oy, CH_RX, CH_RY, zBase);
+    g.clip();
+    g.globalAlpha = 0.35;
+    speckle(g, ox - CH_RX, oy - zBase, CH_RX * 2, zBase + CH_RY, rand, 40, ['#0d1112', PAL.rust, '#6d7377'], 1.3, 1);
+    g.globalAlpha = 1;
+    g.restore();
+  });
+
+  const front = makeProp(foot, foot, CH.full, (g, ox, oy) => {
+    const rand = mulberry32(seed + 13);
+    const zBase = CH.base * TILE_Z;
+    const zGlass = CH.glass * TILE_Z;
+    const gy = oy - zBase;
+    const ty = gy - zGlass;
+
+    // 玻璃本体：一层很淡的冷色 + 从上到下的反光
+    g.save();
+    cylPath(g, ox, gy, CH_RX, CH_RY, zGlass);
+    g.clip();
+    /* 玻璃只压很淡的一层：再重一点，舱里的东西就看不清了 —— 而那正是
+       这张画面唯一的主角。 */
+    const fg = g.createLinearGradient(0, ty, 0, gy);
+    fg.addColorStop(0, 'rgba(196,226,228,0.1)');
+    fg.addColorStop(0.45, 'rgba(150,196,200,0.03)');
+    fg.addColorStop(1, 'rgba(110,170,175,0.07)');
+    g.fillStyle = fg;
+    g.fillRect(ox - CH_RX, ty, CH_RX * 2, zGlass + CH_RY);
+    // 斜向高光条：只走两侧，中间留给舱里的个体
+    g.globalAlpha = 0.42;
+    for (const [u, w] of [
+      [-0.74, 4],
+      [-0.55, 2],
+      [0.68, 3],
+    ]) {
+      g.fillStyle = 'rgba(226,240,238,0.3)';
+      g.beginPath();
+      g.moveTo(ox + u * CH_RX, ty);
+      g.lineTo(ox + u * CH_RX + w, ty);
+      g.lineTo(ox + u * CH_RX + w + 7, gy + CH_RY);
+      g.lineTo(ox + u * CH_RX + 7, gy + CH_RY);
+      g.closePath();
+      g.fill();
+    }
+    g.globalAlpha = 1;
+    // 被从里面撞出来的裂纹
+    g.strokeStyle = 'rgba(232,244,240,0.42)';
+    g.lineWidth = 0.7;
+    const cx0 = ox + CH_RX * 0.3;
+    const cy0 = gy - zGlass * 0.52;
+    g.beginPath();
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * 6.28 + rand();
+      g.moveTo(cx0, cy0);
+      g.lineTo(cx0 + Math.cos(a) * (3 + rand() * 11), cy0 + Math.sin(a) * (3 + rand() * 9));
+    }
+    g.stroke();
+    g.restore();
+
+    // 近侧的上下金属环
+    halfArc(g, ox, gy, CH_RX, CH_RY, true, PAL.metalLite, 2.6);
+    halfArc(g, ox, gy + 1.6, CH_RX, CH_RY, true, 'rgba(0,0,0,0.45)', 1.6);
+    halfArc(g, ox, ty, CH_RX, CH_RY, true, PAL.metal, 2.4);
+
+    // 玻璃两侧的边光：没有它，圆柱在亮墙前面会整个化掉
+    g.save();
+    cylPath(g, ox, gy, CH_RX, CH_RY, zGlass);
+    g.strokeStyle = 'rgba(198,226,224,0.35)';
+    g.lineWidth = 1.2;
+    g.stroke();
+    g.restore();
+
+    // 立柱：左右两根 + 正面一道接缝
+    for (const [u, w, col] of [
+      [-1, 3.2, PAL.metalLite],
+      [1, 3.2, PAL.metalLite],
+      [0.02, 1.6, 'rgba(140,152,156,0.5)'],
+    ]) {
+      g.fillStyle = col;
+      g.fillRect(ox + u * CH_RX - w / 2, ty, w, zGlass);
+      g.fillStyle = 'rgba(255,255,255,0.12)';
+      g.fillRect(ox + u * CH_RX - w / 2, ty, Math.max(1, w * 0.3), zGlass);
+      g.fillStyle = 'rgba(0,0,0,0.3)';
+      for (let v = 6; v < zGlass; v += 13) g.fillRect(ox + u * CH_RX - w / 2, ty + v, w, 1);
+    }
+
+    // 底座近侧：警示条纹 + 控制面板
+    g.save();
+    cylPath(g, ox, oy, CH_RX, CH_RY, zBase);
+    g.clip();
+    for (let i = -14; i < 14; i++) {
+      g.fillStyle = i % 2 === 0 ? '#8a7433' : '#1e2220';
+      g.beginPath();
+      g.moveTo(ox + i * 5, oy);
+      g.lineTo(ox + i * 5 + 3, oy);
+      g.lineTo(ox + i * 5 - 2, oy + CH_RY);
+      g.lineTo(ox + i * 5 - 5, oy + CH_RY);
+      g.closePath();
+      g.fill();
+    }
+    g.fillStyle = 'rgba(0,0,0,0.55)';
+    g.fillRect(ox - CH_RX, oy - zBase - 2, CH_RX * 2, 3);
+    g.restore();
+    // 控制面板
+    g.fillStyle = '#20272a';
+    g.fillRect(ox + 6, oy - zBase + 1, 15, 7);
+    g.fillStyle = '#39434a';
+    g.fillRect(ox + 6, oy - zBase + 1, 15, 1.4);
+    for (let i = 0; i < 3; i++) {
+      g.fillStyle = ['rgba(121,210,204,0.85)', 'rgba(224,165,82,0.8)', 'rgba(201,74,58,0.7)'][i];
+      g.fillRect(ox + 8 + i * 4, oy - zBase + 4, 2, 2);
+    }
+
+    /* 顶盖 + 管线。盖子压暗：它是从上方看到的一整片，画亮了会变成整幅画里
+       最抢眼的东西，而这一幕的主角在玻璃后面。 */
+    const zc = CH.cap * TILE_Z;
+    const capR = 1.0;
+    cylPath(g, ox, ty, CH_RX * capR, CH_RY * capR, zc);
+    const cg = g.createLinearGradient(0, ty - zc, 0, ty);
+    cg.addColorStop(0, '#454e51');
+    cg.addColorStop(1, '#232a2c');
+    g.fillStyle = cg;
+    g.fill();
+    ellipseFill(g, ox, ty - zc, CH_RX * capR, CH_RY * capR, '#39413f');
+    ellipseFill(g, ox, ty - zc, CH_RX * 0.78, CH_RY * 0.78, '#2b3234');
+    ellipseFill(g, ox, ty - zc, CH_RX * 0.3, CH_RY * 0.3, '#1b2123');
+    halfArc(g, ox, ty - zc, CH_RX * capR, CH_RY * capR, false, 'rgba(150,162,166,0.55)', 1.2);
+    g.fillStyle = 'rgba(0,0,0,0.3)';
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * 6.28;
+      g.fillRect(ox + Math.cos(a) * CH_RX * 0.9 - 1, ty - zc + Math.sin(a) * CH_RY * 0.9 - 1, 2, 2);
+    }
+    // 顶上的软管
+    g.strokeStyle = '#1b2022';
+    g.lineCap = 'round';
+    for (const [dx, dy] of [
+      [-14, -16],
+      [10, -20],
+    ]) {
+      g.lineWidth = 3.2;
+      g.beginPath();
+      g.moveTo(ox + dx * 0.3, ty - zc - 1);
+      g.quadraticCurveTo(ox + dx, ty - zc - 8, ox + dx * 1.5, ty - zc + dy);
+      g.stroke();
+      g.strokeStyle = '#333c3e';
+      g.lineWidth = 1.2;
+      g.beginPath();
+      g.moveTo(ox + dx * 0.3, ty - zc - 2);
+      g.quadraticCurveTo(ox + dx, ty - zc - 9, ox + dx * 1.5, ty - zc + dy);
+      g.stroke();
+      g.strokeStyle = '#1b2022';
+    }
+  });
+
+  return { back, front, r: CH.r, h: CH.full, glassTop: CH.top, floorZ: CH.base };
+}
+
+/** 舱内个体在舱里的落脚高度（高度单位） */
+export const CHAMBER_FLOOR_Z = CH.base;
+
+/* ---------------- 舱内个体 ---------------- */
+
+const SPEC = {
+  skin: '#a3b096',
+  skinD: '#65735f',
+  skinHi: '#d2dbc2',
+  rim: 'rgba(186,236,226,0.55)', // 舱内冷光打出来的轮廓光
+  vein: '#54654f',
+  maw: '#3d1a1b',
+  scar: '#4a1512',
+};
+
+/**
+ * 舱内的个体：佝偻、四肢过长、没有毛发。
+ * o = { t, scale, press }（press: 0..1 扑向玻璃）
+ */
+export function drawSpecimen(g, sx, sy, o = {}) {
+  const sc = o.scale || 1;
+  g.save();
+  g.translate(sx, sy);
+  if (sc !== 1) g.scale(sc, sc);
+  specimenBody(g, o);
+  g.restore();
+}
+
+function specimenBody(g, o) {
+  const t = o.t || 0;
+  const press = o.press || 0;
+  // 呼吸：胸腔起伏；晃动：整体绕脚踝极轻微地摆
+  const br = Math.sin(t * 1.5) * 0.55 + Math.sin(t * 0.63 + 1.2) * 0.3;
+  const sway = Math.sin(t * 0.47) * 0.02;
+  const lean = press * 3.4;
+
+  // 脚下的影子
+  g.save();
+  g.globalAlpha = 0.5;
+  g.fillStyle = '#000';
+  g.beginPath();
+  g.ellipse(0, 0, 10, 3.8, 0, 0, 6.3);
+  g.fill();
+  g.restore();
+
+  g.save();
+  g.rotate(sway);
+
+  const hipY = -19 - br * 0.3;
+  const shY = -35 - br;
+
+  // 远侧腿
+  leg(g, -1, hipY, SPEC.skinD, t, 0.7);
+  // 躯干：胸腔宽、腰细，整体前倾
+  g.save();
+  g.translate(lean * 0.4, 0);
+  g.rotate(press * 0.05);
+  poly(
+    g,
+    [
+      [-8.4, shY + 1],
+      [8.4, shY - 1],
+      [5.4, hipY],
+      [-5.4, hipY + 1],
+    ],
+    SPEC.skin,
+  );
+  // 背脊的隆起
+  poly(
+    g,
+    [
+      [-8.4, shY + 1],
+      [-5.2, shY - 5],
+      [1.2, shY - 4.4],
+      [3.6, shY - 0.5],
+    ],
+    SPEC.skinD,
+  );
+  // 暗侧
+  poly(
+    g,
+    [
+      [-8.4, shY + 1],
+      [-4, shY + 0.4],
+      [-3, hipY + 1],
+      [-5.4, hipY + 1],
+    ],
+    'rgba(0,0,0,0.3)',
+  );
+  // 舱内冷光在胸口右缘打出的轮廓光
+  g.strokeStyle = SPEC.rim;
+  g.lineWidth = 1.3;
+  g.beginPath();
+  g.moveTo(8.2, shY - 0.6);
+  g.lineTo(5.4, hipY);
+  g.stroke();
+  // 肋
+  g.strokeStyle = SPEC.vein;
+  g.lineWidth = 1.1;
+  for (let i = 0; i < 5; i++) {
+    const y = shY + 4.5 + i * 2.9;
+    g.beginPath();
+    g.moveTo(-5.2, y);
+    g.quadraticCurveTo(0, y + 1.8 + br * 0.4, 5.8, y - 0.6);
+    g.stroke();
+  }
+  // 缝合痕
+  g.strokeStyle = SPEC.scar;
+  g.lineWidth = 0.9;
+  g.beginPath();
+  g.moveTo(1.6, shY + 3);
+  g.lineTo(1.6, hipY - 1);
+  g.stroke();
+  for (let i = 0; i < 4; i++) {
+    g.beginPath();
+    g.moveTo(-0.8, shY + 5.5 + i * 3.4);
+    g.lineTo(4, shY + 4.5 + i * 3.4);
+    g.stroke();
+  }
+  g.restore();
+
+  // 近侧腿
+  leg(g, 1, hipY, SPEC.skin, t, 0);
+
+  // 手臂：过长，垂到膝下；press 时近手拍在玻璃上
+  arm(g, -1, shY, t, 0.9, 0, SPEC.skinD);
+  arm(g, 1, shY, t, 0, press, SPEC.skin);
+
+  // 头：拉长的颅骨，几乎没有脖子，向前探
+  const hx = 3.6 + lean * 0.5;
+  const hy = shY - 5.4 + Math.sin(t * 0.9) * 0.4;
+  g.save();
+  g.translate(hx, hy);
+  g.rotate(0.2 + press * 0.14 + Math.sin(t * 0.31) * 0.06);
+  // 颅骨
+  poly(
+    g,
+    [
+      [-6.6, -4],
+      [3.8, -6],
+      [7.2, -1.6],
+      [6.2, 3.2],
+      [0.8, 5.6],
+      [-5.6, 2.6],
+    ],
+    SPEC.skin,
+  );
+  poly(
+    g,
+    [
+      [-6.6, -4],
+      [-1.2, -5.2],
+      [-0.8, 3.2],
+      [-5.6, 2.6],
+    ],
+    'rgba(0,0,0,0.26)',
+  );
+  // 头顶高光与轮廓光
+  g.fillStyle = SPEC.skinHi;
+  g.fillRect(-3, -5, 5.4, 1.4);
+  g.strokeStyle = SPEC.rim;
+  g.lineWidth = 1.2;
+  g.beginPath();
+  g.moveTo(3.8, -5.6);
+  g.lineTo(7, -1.6);
+  g.lineTo(6, 3);
+  g.stroke();
+  // 眼窝
+  g.fillStyle = '#141c1b';
+  g.fillRect(0.4, -3.2, 6.2, 3.8);
+  // 颚：微张，露出牙
+  poly(
+    g,
+    [
+      [0.6, 2.6],
+      [6.4, 1.6],
+      [5.4, 4.4],
+      [1, 4.8],
+    ],
+    SPEC.maw,
+  );
+  g.fillStyle = '#cfd6c2';
+  for (let i = 0; i < 5; i++) g.fillRect(1.4 + i * 1.1, 2.5, 0.8, 1.4);
+  g.restore();
+
+  // 眼睛的冷光：位置跟着头走，画在最后免得被颚盖住
+  const ex = hx + 3.2;
+  const ey = hy - 1.4;
+  const glow = 0.6 + Math.sin(t * 2.3) * 0.12 + press * 0.35;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  const eg = g.createRadialGradient(ex, ey, 0, ex, ey, 9);
+  eg.addColorStop(0, `rgba(150,240,228,${0.6 * glow})`);
+  eg.addColorStop(1, 'rgba(150,240,228,0)');
+  g.fillStyle = eg;
+  g.fillRect(ex - 9, ey - 9, 18, 18);
+  g.restore();
+  g.fillStyle = '#e6fff8';
+  g.fillRect(ex - 1.8, ey - 0.6, 1.9, 1.9);
+  g.fillRect(ex + 1.8, ey - 1.2, 1.9, 1.9);
+
+  // 颈环与拖在身后的线缆
+  g.fillStyle = '#2c3438';
+  g.fillRect(-1.8, shY - 4, 8.4, 2.8);
+  g.fillStyle = '#5a6469';
+  g.fillRect(-1.8, shY - 4, 8.4, 1);
+  g.fillStyle = 'rgba(224,165,82,0.9)';
+  g.fillRect(5, shY - 3.4, 1.3, 1.3);
+  g.strokeStyle = '#1b2022';
+  g.lineWidth = 1.2;
+  g.beginPath();
+  g.moveTo(-1.6, shY - 2.6);
+  g.quadraticCurveTo(-10, shY + 7, -8, 0);
+  g.stroke();
+
+  g.restore();
+}
+
+function leg(g, side, hipY, col, t, ph) {
+  const k = Math.sin(t * 0.6 + ph) * 0.6;
+  g.strokeStyle = col;
+  g.lineWidth = 5;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.beginPath();
+  g.moveTo(side * 3.6, hipY);
+  g.lineTo(side * 6.2 + k, hipY * 0.45);
+  g.lineTo(side * 4.6 + k * 0.4, -1);
+  g.stroke();
+  // 脚掌
+  g.fillStyle = col;
+  g.fillRect(side * 4.6 + k * 0.4 - (side > 0 ? 1 : 5), -1.8, 6, 2.2);
+}
+
+function arm(g, side, shY, t, ph, press, col) {
+  const drift = Math.sin(t * 0.8 + ph) * 1.1;
+  const shx = side * 7.4;
+  let ex, ey, hx, hy;
+  if (press > 0.02) {
+    // 抬手拍在玻璃上
+    ex = shx + side * 6.6;
+    ey = shY + 6 - press * 5;
+    hx = shx + side * 9.4 + press * 3;
+    hy = shY - 3.4 - press * 5;
+  } else {
+    ex = shx + side * 4.4 + drift * 0.4;
+    ey = shY + 12.5;
+    hx = shx + side * 2.6 + drift;
+    hy = shY + 25 + drift * 0.5;
+  }
+  g.strokeStyle = col;
+  g.lineWidth = 3.8;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.beginPath();
+  g.moveTo(shx, shY + 1);
+  g.lineTo(ex, ey);
+  g.lineTo(hx, hy);
+  g.stroke();
+  // 三根长指
+  g.lineWidth = 1.2;
+  const spread = press > 0.02 ? 1 : 0.5;
+  for (let i = -1; i <= 1; i++) {
+    g.beginPath();
+    g.moveTo(hx, hy);
+    g.lineTo(hx + i * 2.4 * spread + side * 0.6, hy + (press > 0.02 ? -3.8 : 5));
+    g.stroke();
+  }
+}
+
+/* ---------------- 舱外的观察人员 ---------------- */
+
+const TONES = {
+  coat: { body: PAL.coat, shade: PAL.coatShade, dark: PAL.coatDark, pants: PAL.pants },
+  suit: { body: '#4c565f', shade: '#39424a', dark: '#262d33', pants: '#2c333a' },
+  scrub: { body: '#61817e', shade: '#4a6564', dark: '#334846', pants: '#2f3a3c' },
+};
+
+/**
+ * 观察人员。姿势是摆好的，不是走路循环 —— 这是一张定格的观察现场。
+ * o = { kind: 'note' | 'camera' | 'boss' | 'tech', dir, t, seed, scale, tone, mask, cap }
+ */
+export function drawStaff(g, sx, sy, o = {}) {
+  const sc = o.scale || 1;
+  g.save();
+  g.translate(sx, sy);
+  if (sc !== 1) g.scale(sc, sc);
+  staffBody(g, o);
+  g.restore();
+}
+
+function staffBody(g, o) {
+  const kind = o.kind || 'note';
+  const dir = o.dir === undefined ? 1 : o.dir;
+  const t = o.t || 0;
+  const seed = o.seed || 0;
+  const tone = TONES[o.tone || (kind === 'boss' ? 'suit' : 'coat')];
+
+  // 站姿的重心转移：很慢，只有 1px 上下，够让画面"不是静止图片"
+  const shift = Math.sin(t * 0.6 + seed) * 0.5;
+  // 记录员每隔几秒抬一次头看舱里
+  const look = kind === 'note' ? Math.max(0, Math.sin(t * 0.42 + seed * 2.1) - 0.75) * 4 : 0;
+  const baseY = -shift;
+
+  // 影子
+  g.save();
+  g.globalAlpha = 0.45;
+  g.fillStyle = '#000';
+  g.beginPath();
+  g.ellipse(0, 0, 6, 2.8, 0, 0, 6.3);
+  g.fill();
+  g.restore();
+
+  // 腿
+  g.fillStyle = tone.pants;
+  g.fillRect(-4, baseY - 9, 3, 9);
+  g.fillRect(1, baseY - 9, 3, 9);
+  g.fillStyle = 'rgba(0,0,0,0.3)';
+  g.fillRect(-4, baseY - 9, 1, 9);
+  g.fillRect(1, baseY - 9, 1, 9);
+  g.fillStyle = PAL.shoe;
+  g.fillRect(-4 - (dir > 0 ? 0 : 1), baseY - 2, 4, 2);
+  g.fillRect(1 - (dir > 0 ? 0 : 1), baseY - 2, 4, 2);
+
+  // 下摆
+  g.fillStyle = tone.shade;
+  g.fillRect(-5, baseY - 13, 10, 5);
+  g.fillStyle = tone.body;
+  g.fillRect(-5, baseY - 13, 10, 3);
+
+  // 躯干
+  const shY = baseY - 21;
+  g.fillStyle = tone.body;
+  g.fillRect(-5, shY, 10, 9);
+  g.fillStyle = tone.shade;
+  g.fillRect(dir > 0 ? 2 : -5, shY, 3, 9);
+  g.fillStyle = tone.dark;
+  g.fillRect(-4, shY, 8, 1);
+  g.fillStyle = kind === 'boss' ? '#8f2f2a' : '#4d565c';
+  g.fillRect(-1 + dir, shY + 1, 2, 7); // 领带 / 前襟
+
+  // 胸卡
+  g.fillStyle = 'rgba(222,216,200,0.8)';
+  g.fillRect(dir > 0 ? -3.5 : 1.5, shY + 4, 2.4, 3);
+
+  // 头
+  const hx = -3 + dir;
+  const hy = baseY - 28 - look * 0.3;
+  g.fillStyle = PAL.skin;
+  g.fillRect(hx, hy + 1, 6, 6);
+  g.fillStyle = PAL.skinD;
+  g.fillRect(hx + (dir > 0 ? 4 : 0), hy + 1, 2, 6);
+  g.fillStyle = o.cap ? '#4a5359' : PAL.hair;
+  g.fillRect(hx - 1, hy, 8, 3);
+  if (!o.cap) {
+    g.fillRect(hx - 1, hy, 2, 5);
+    g.fillRect(hx + 6, hy, 1, 5);
+  }
+  // 口罩
+  if (o.mask !== false) {
+    g.fillStyle = '#cfd6d4';
+    g.fillRect(hx + (dir > 0 ? 1 : 0), hy + 4, 5, 3);
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.fillRect(hx + (dir > 0 ? 1 : 0), hy + 4, 5, 1);
+  }
+  g.fillStyle = '#1a1a1a';
+  if (dir > 0) {
+    g.fillRect(hx + 3, hy + 3, 1, 1);
+    g.fillRect(hx + 5, hy + 3, 1, 1);
+  } else {
+    g.fillRect(hx, hy + 3, 1, 1);
+    g.fillRect(hx + 2, hy + 3, 1, 1);
+  }
+
+  // 手臂与手上的东西：每种角色一套摆好的姿势
+  const armStroke = (x0, y0, x1, y1, w = 2.4, col = tone.body) => {
+    g.strokeStyle = col;
+    g.lineWidth = w;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.lineTo(x1, y1);
+    g.stroke();
+  };
+  const hand = (x, y) => {
+    g.fillStyle = PAL.skin;
+    g.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
+  };
+
+  if (kind === 'note') {
+    // 一只手托着写字板，另一只手在上面记录
+    const bx = dir * 5.2;
+    const by = shY + 4;
+    armStroke(-dir * 4.2, shY + 2, bx - dir * 1.6, by + 2, 2.4, tone.shade);
+    // 写字板
+    g.save();
+    g.translate(bx, by);
+    g.rotate(dir * 0.22);
+    g.fillStyle = '#5b6266';
+    g.fillRect(-3.6, -4.6, 7.2, 9.2);
+    g.fillStyle = 'rgba(222,216,200,0.82)';
+    g.fillRect(-3, -4, 6, 8);
+    g.fillStyle = 'rgba(60,66,68,0.7)';
+    for (let i = 0; i < 5; i++) g.fillRect(-2.2, -2.6 + i * 1.5, 4.4, 0.7);
+    g.fillStyle = '#3a4145';
+    g.fillRect(-3.6, -5.4, 7.2, 1.4);
+    g.restore();
+    // 记录的那只手：笔尖在纸上小幅移动
+    const wob = Math.sin(t * 5.2 + seed) * 1.1;
+    const px = bx + dir * 1.2 + wob * 0.6;
+    const py = by - 1 + Math.cos(t * 4.1 + seed) * 0.8;
+    armStroke(dir * 4.2, shY + 2, px, py);
+    hand(px, py);
+    g.strokeStyle = '#22282a';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(px, py);
+    g.lineTo(px + dir * 2.4, py + 2.4);
+    g.stroke();
+  } else if (kind === 'camera') {
+    // 一手扶机身，一手在取景器上
+    armStroke(-dir * 3.6, shY + 2, dir * 7, shY + 1, 2.4, tone.shade);
+    hand(dir * 7, shY + 1);
+    armStroke(dir * 4.2, shY + 2, dir * 8, shY - 2);
+    hand(dir * 8, shY - 2);
+  } else if (kind === 'boss') {
+    // 背手站着看
+    armStroke(-dir * 4.6, shY + 2, -dir * 6.4, shY + 8, 2.4, tone.shade);
+    armStroke(dir * 4.6, shY + 2, -dir * 5.4, shY + 9, 2.4, tone.shade);
+    hand(-dir * 5.8, shY + 9);
+  } else {
+    // 技术员：两手在控制台上敲
+    const k1 = Math.sin(t * 6.4 + seed) * 1.2;
+    const k2 = Math.sin(t * 5.7 + seed + 1.7) * 1.2;
+    armStroke(-dir * 3.6, shY + 2, dir * 5.6, shY + 7 + k1, 2.4, tone.shade);
+    hand(dir * 5.6, shY + 7 + k1);
+    armStroke(dir * 4.2, shY + 2, dir * 7.4, shY + 6 + k2);
+    hand(dir * 7.4, shY + 6 + k2);
+  }
+}
+
+/** 三脚架上的记录设备（摄像机）。REC 灯由场景在光照之后单独画 */
+export function makeCameraRig(seed = 811) {
+  const rand = mulberry32(seed);
+  const W = 0.9;
+  const H = 1.62;
+  return makeProp(W + 0.5, W + 0.5, H + 0.3, (g, ox, oy) => {
+    aoShadow(g, ox, oy, W, W, 0.42);
+    const hy = oy - H * TILE_Z;
+    // 三脚架
+    g.strokeStyle = '#2c3236';
+    g.lineWidth = 2;
+    g.lineCap = 'round';
+    for (const [dx, dy] of [
+      [-9, 4],
+      [9, 4],
+      [0, -6],
+    ]) {
+      g.beginPath();
+      g.moveTo(ox, hy + 4);
+      g.lineTo(ox + dx, oy + dy * 0.4);
+      g.stroke();
+    }
+    g.strokeStyle = '#59636a';
+    g.lineWidth = 0.8;
+    for (const [dx, dy] of [
+      [-9, 4],
+      [9, 4],
+      [0, -6],
+    ]) {
+      g.beginPath();
+      g.moveTo(ox - 0.5, hy + 4);
+      g.lineTo(ox + dx - 0.5, oy + dy * 0.4);
+      g.stroke();
+    }
+    // 云台
+    g.fillStyle = '#3c4449';
+    g.fillRect(ox - 4, hy + 1, 8, 4);
+    // 机身
+    g.fillStyle = '#2a3135';
+    g.fillRect(ox - 7, hy - 8, 15, 9);
+    g.fillStyle = '#414a50';
+    g.fillRect(ox - 7, hy - 8, 15, 2.4);
+    g.fillStyle = 'rgba(0,0,0,0.35)';
+    g.fillRect(ox - 7, hy - 1.4, 15, 1.4);
+    // 镜头（朝右下，对着收容舱）
+    g.fillStyle = '#20272a';
+    g.fillRect(ox + 6, hy - 6.4, 6, 6);
+    g.fillStyle = '#121819';
+    g.fillRect(ox + 10, hy - 6, 2.6, 5.2);
+    g.fillStyle = 'rgba(150,205,205,0.5)';
+    g.fillRect(ox + 11.4, hy - 5.4, 1, 4);
+    // 取景器与磁带仓
+    g.fillStyle = '#39424a';
+    g.fillRect(ox - 9.5, hy - 7, 3.4, 3.4);
+    g.fillStyle = '#4c565c';
+    g.fillRect(ox - 5, hy - 6.6, 6, 4);
+    g.fillStyle = 'rgba(20,24,26,0.8)';
+    g.fillRect(ox - 4.2, hy - 6, 4.4, 2.8);
+    // 机身上的一点脏
+    g.globalAlpha = 0.3;
+    speckle(g, ox - 7, hy - 8, 15, 9, rand, 12, ['#0c0f10', '#6d7377'], 1.1, 1);
+    g.globalAlpha = 1;
+  });
+}
+
+/** 摄像机上 REC 指示灯在屏幕空间的位置（相对精灵落点） */
+export const CAMERA_REC = { dx: -1, dy: -1.62 * TILE_Z - 9.4 };
+
 export function drawFlashIcon(g, w, h, on) {
   g.clearRect(0, 0, w, h);
   g.save();

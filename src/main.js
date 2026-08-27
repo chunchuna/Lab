@@ -17,6 +17,8 @@ import * as UI from './ui.js';
 import * as SFX from './audio.js';
 import * as INV from './inventory.js';
 import { inv } from './inventory.js';
+import * as SAVE from './save.js';
+import { drawMenuScene } from './menu.js';
 import { initInput, keys, mouse, justPressed, endFrame, view } from './input.js';
 import {
   pad, initControls, setButton, setPadVisible, endFrameControls, screenDirToWorld,
@@ -42,7 +44,7 @@ let area = getArea('lab');
 
 const game = {
   t: 0,
-  state: 'title', // title | wake | play | scan | dead | cine | end
+  state: 'menu', // menu | wake | play | scan | dead | cine | end
   phase: 0,
   shake: 0,
   flash: 0,
@@ -127,8 +129,9 @@ initInput(stage, (k) => {
   SFX.initAudio();
   SFX.resume();
 
-  if (game.state === 'title') {
-    startWake();
+  // 主菜单：键盘只喂给菜单（'__pointer' 这类非按键会被 menuKey 忽略）
+  if (game.state === 'menu') {
+    UI.menuKey(k);
     return;
   }
   if (game.state !== 'play') return;
@@ -158,10 +161,8 @@ initInput(stage, (k) => {
 function doAction(act) {
   SFX.initAudio();
   SFX.resume();
-  if (game.state === 'title') {
-    startWake();
-    return;
-  }
+  // 主菜单只走键鼠，触屏层在这里不参与
+  if (game.state === 'menu') return;
   if (game.state !== 'play') return;
   if (game.qte) return;
   if (act === 'bag') toggleBag();
@@ -266,16 +267,80 @@ function enterArea(id, spawnName) {
 
   UI.msg(area.name, 'good');
   SFX.sfxThud();
+  // 落地即存档：这是序章里唯一能安全恢复的时刻
+  saveProgress(spawnName);
   /* 换区不再抖屏。之前这里会 game.shake = 1.6，而抖动偏移在渲染里是浮点：
      静态层/道具各自 Math.round，烘焙光用未取整的偏移，几层各进各的整数格，
      看起来就是"某些物件在抖"。抖屏只留给枪声、受伤、门坏、闪电。 */
 }
 
 function startWake() {
-  UI.hideTitle();
+  UI.hideMenu();
   game.state = 'wake';
   game.phase = 0;
   SFX.sfxBeep(180, 0.4, 0.05);
+}
+
+/* ------------------------------------------------------------------ *
+ * 进度记录
+ *
+ * 序章是线性的，区域 + 几个剧情开关就够还原，不必把 game 整个序列化。
+ * 只在"换区域落地"这个安全点写：QTE / 剧情杀中途存下来没法安全恢复。
+ * ------------------------------------------------------------------ */
+
+function saveProgress(spawn) {
+  if (game.state === 'end') return;
+  const items = ['pistol', 'flashlight', 'badge'].filter((id) => INV.has(id));
+  SAVE.writeSave({
+    area: area.id,
+    areaName: area.name,
+    spawn,
+    items,
+    mags: INV.countItem('mag'),
+    hands: { left: INV.handItem('left'), right: INV.handItem('right') },
+    flashOn: inv.flashOn,
+    doorBroken: game.door.broken,
+    radioDone: game.radio.done,
+    checkpoint: game.checkpoint,
+  });
+  UI.setMenuSave(SAVE.saveLabel(SAVE.readSave()));
+}
+
+/** 从记录直接进游戏：跳过标题与起床，把装备与剧情开关补回来 */
+function loadProgress() {
+  const s = SAVE.readSave();
+  if (!s) return false;
+
+  for (const id of s.items || []) if (!INV.has(id)) INV.addItem(id);
+  const need = (s.mags || 0) - INV.countItem('mag');
+  if (need > 0) INV.addItem('mag', need);
+  for (const hand of ['left', 'right']) {
+    const id = s.hands && s.hands[hand];
+    if (id && !INV.equipped(id)) INV.quickEquip(id);
+  }
+  if (inv.flashOn !== (s.flashOn !== false)) INV.toggleFlash();
+
+  game.door.tried = true;
+  game.door.broken = !!s.doorBroken;
+  game.door.hits = s.doorBroken ? 3 : 0;
+  game.radio = { phase: s.radioDone ? 'done' : 'idle', step: 0, t: 0, done: !!s.radioDone };
+  game.checkpoint = s.checkpoint || 'stair';
+  game.gun.mag = MAG_SIZE;
+  game.player.hp = PLAYER_HP;
+  game.state = 'play';
+  game.phase = 9;
+  game.fade = 0;
+  game.fadeOff = false;
+  syncHUD();
+
+  UI.hideMenu();
+  if (s.area === 'lab') {
+    game.player.x = PLAYER_START.x;
+    game.player.y = PLAYER_START.y;
+  } else {
+    enterArea(s.area, s.spawn);
+  }
+  return true;
 }
 
 function toggleBag() {
@@ -806,6 +871,8 @@ function updateCamera() {
 
 function update(dt) {
   game.t += dt;
+  // 主菜单是一幕独立的定格画面，只吃时间，不跑世界逻辑
+  if (game.state === 'menu') return;
   fx.update(dt);
   game.shake *= Math.pow(0.0015, dt);
   game.flash = Math.max(0, game.flash - dt);
@@ -820,7 +887,7 @@ function update(dt) {
   game.sparkPower = Math.max(0, game.sparkPower - dt * 3.4);
   if (area.id === 'lab') {
     game.nextSpark -= dt;
-    if (game.nextSpark <= 0 && game.state !== 'title') {
+    if (game.nextSpark <= 0) {
       game.nextSpark = 0.9 + Math.random() * 3.2;
       game.sparkPower = 0.9 + Math.random() * 0.5;
       fx.spark(SPARK_SRC.x, SPARK_SRC.y, SPARK_SRC.z, 10 + Math.random() * 8, 0.7);
@@ -828,7 +895,6 @@ function update(dt) {
     }
   }
 
-  if (game.state === 'title') return;
   if (game.state === 'end') return;
 
   if (game.state === 'cine') {
@@ -863,6 +929,7 @@ function update(dt) {
       game.state = 'play';
       game.player.x = PLAYER_START.x;
       game.player.y = PLAYER_START.y;
+      saveProgress('start');
       UI.msg('我在这里睡了多久……');
       setTimeout(() => UI.msg('外面发生了什么……'), 2800);
     }
@@ -2336,6 +2403,12 @@ function drawSky(g, cam, px, py, zOff) {
 }
 
 function render() {
+  // 主菜单：另一幕独立的画面，跟游戏世界不共用相机与光照
+  if (game.state === 'menu') {
+    drawMenuScene(ctx, game.rt);
+    return;
+  }
+
   /* 镜头抖动对**所有层**用同一套已取整的偏移。以前 shx/shy 是浮点，静态层与
      道具各自 Math.round，烘焙光贴图又按浮点画，几层各进各的整数格，相对错开
      1px —— 那就是"换场景后有些物件在抖"的真正原因。 */
@@ -2703,7 +2776,46 @@ if (pad.enabled) {
   setButton('flash', false);
 }
 syncHUD();
+
+/* ---- 主菜单 ---- */
+
+const settings = SAVE.readSettings();
+SFX.setMasterVolume(settings.volume);
+game.losOcclusion = settings.los;
 UI.setLosState(game.losOcclusion);
+
+UI.initMenu(
+  {
+    onStart: () => {
+      // 「开始游戏」= 从头走序章：标题 → 起床
+      startWake();
+    },
+    onLoad: () => {
+      if (!loadProgress()) UI.setMenuSave(null);
+    },
+    onSetting: (patch) => {
+      if (patch.volume !== undefined) {
+        settings.volume = patch.volume;
+        SFX.setMasterVolume(patch.volume);
+      }
+      if (patch.los !== undefined) {
+        settings.los = patch.los;
+        game.losOcclusion = patch.los;
+        UI.setLosState(patch.los);
+      }
+      SAVE.writeSettings(settings);
+    },
+    onClearSave: () => {
+      SAVE.clearSave();
+      UI.setMenuSave(null);
+    },
+  },
+  settings,
+);
+UI.setMenuSave(SAVE.hasSave() ? SAVE.saveLabel(SAVE.readSave()) : null);
+// 菜单用系统指针点按钮，画面内的准星等进游戏再出来
+UI.showCursor(false);
+game.curShown = false;
 
 let last = performance.now();
 function frame(now) {
@@ -2729,9 +2841,9 @@ window.__goto = (id, spawn) => enterArea(id, spawn);
 window.__inv = INV;
 window.__pad = pad;
 window.__render = render; // 供性能基准脚本直接测量渲染耗时
-/** 跳过标题与起床过场，供测试脚本快进（每个页面省 4 秒多） */
+/** 跳过主菜单与起床过场，供测试脚本快进（每个页面省 4 秒多） */
 window.__skipIntro = () => {
-  UI.hideTitle();
+  UI.hideMenu();
   game.state = 'play';
   game.phase = 9;
   game.fade = 0;
