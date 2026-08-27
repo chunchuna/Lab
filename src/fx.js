@@ -1,4 +1,5 @@
 import { HW, HH, TILE_Z, VIEW_W, VIEW_H } from './config.js';
+import { pxLine, pxEllipse, pxEllipseRing, pxGlow } from './util.js';
 
 export class FX {
   constructor() {
@@ -189,22 +190,11 @@ export class FX {
     for (const d of this.decals) {
       const sx = cam.x + (d.x - d.y) * HW;
       const sy = cam.y + (d.x + d.y) * HH - d.z * TILE_Z;
-      ctx.save();
-      ctx.translate(sx, sy);
-      if (d.kind === 'floor') ctx.scale(1, HH / HW);
-      ctx.fillStyle = 'rgba(6,8,9,0.75)';
-      ctx.beginPath();
-      ctx.arc(0, 0, d.r, 0, 6.3);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(150,160,158,0.22)';
-      ctx.beginPath();
-      ctx.arc(0, 0, d.r + 1.1, 0, 6.3);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(6,8,9,0.85)';
-      ctx.beginPath();
-      ctx.arc(0, 0, d.r * 0.6, 0, 6.3);
-      ctx.fill();
-      ctx.restore();
+      // 弹孔：像素椭圆三层（外圈崩边、弹坑、深芯），地面贴花按等距比例压扁
+      const sq = d.kind === 'floor' ? HH / HW : 1;
+      pxEllipse(ctx, sx, sy, d.r + 1, Math.max(1, (d.r + 1) * sq), 'rgba(150,160,158,0.22)');
+      pxEllipse(ctx, sx, sy, d.r, Math.max(1, d.r * sq), 'rgba(6,8,9,0.75)');
+      pxEllipse(ctx, sx, sy, Math.max(1, d.r * 0.6), Math.max(1, d.r * 0.6 * sq), 'rgba(6,8,9,0.85)');
     }
   }
 
@@ -215,15 +205,9 @@ export class FX {
       const y0 = cam.y + (t.x0 + t.y0) * HH - t.z0 * TILE_Z;
       const x1 = cam.x + (t.x1 - t.y1) * HW;
       const y1 = cam.y + (t.x1 + t.y1) * HH - t.z1 * TILE_Z;
-      ctx.strokeStyle = `rgba(255,238,190,${a * 0.85})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-      ctx.stroke();
-      ctx.strokeStyle = `rgba(255,200,120,${a * 0.25})`;
-      ctx.lineWidth = 2.6;
-      ctx.stroke();
+      // 像素曳光：先粗后细两遍
+      pxLine(ctx, x0, y0 - 1, x1, y1 - 1, `rgba(255,200,120,${(a * 0.25).toFixed(3)})`, 3);
+      pxLine(ctx, x0, y0, x1, y1, `rgba(255,238,190,${(a * 0.85).toFixed(3)})`, 1);
     }
 
     for (const b of this.bullets) {
@@ -236,23 +220,12 @@ export class FX {
       const a = at(k);
       const t0 = at(k0);
       // 拖尾
-      ctx.strokeStyle = 'rgba(255,214,150,0.5)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(t0.x, t0.y);
-      ctx.lineTo(a.x, a.y);
-      ctx.stroke();
-      // 弹头
+      pxLine(ctx, t0.x, t0.y, a.x, a.y, 'rgba(255,214,150,0.5)', 1);
+      // 弹头：2×2 亮块 + 三档同心方块辉光（与直升机航行灯同一读法）
       ctx.fillStyle = 'rgba(255,246,214,0.95)';
-      ctx.beginPath();
-      ctx.arc(a.x, a.y, 1.5, 0, 6.3);
-      ctx.fill();
+      ctx.fillRect(Math.round(a.x) - 1, Math.round(a.y) - 1, 2, 2);
       ctx.globalCompositeOperation = 'lighter';
-      const grd = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, 6);
-      grd.addColorStop(0, 'rgba(255,226,160,0.55)');
-      grd.addColorStop(1, 'rgba(255,226,160,0)');
-      ctx.fillStyle = grd;
-      ctx.fillRect(a.x - 6, a.y - 6, 12, 12);
+      pxGlow(ctx, a.x, a.y, 6, '255,226,160', 0.55);
       ctx.globalCompositeOperation = 'source-over';
     }
 
@@ -261,28 +234,32 @@ export class FX {
       const sx = cam.x + (p.x - p.y) * HW;
       const sy = cam.y + (p.x + p.y) * HH - p.z * TILE_Z;
       if (p.type === 'smoke') {
-        ctx.fillStyle = `rgba(${p.col},${0.16 * k})`;
-        ctx.beginPath();
-        ctx.arc(sx, sy, p.size * (1 + (1 - k) * 2.4), 0, 6.3);
-        ctx.fill();
+        // 烟：整数半径的像素椭圆，膨胀按 1px 步进
+        const r = Math.max(1, Math.round(p.size * (1 + (1 - k) * 2.4)));
+        pxEllipse(ctx, sx, sy, r, r, `rgba(${p.col},${(0.16 * k).toFixed(3)})`);
       } else if (p.type === 'spark') {
         ctx.fillStyle = p.col;
         ctx.globalAlpha = Math.min(1, k * 1.6);
-        ctx.fillRect(sx - p.size / 2, sy - p.size / 2, p.size, p.size);
+        const s = Math.max(1, Math.round(p.size));
+        ctx.fillRect(Math.round(sx - s / 2), Math.round(sy - s / 2), s, s);
         ctx.globalAlpha = 1;
       } else if (p.type === 'casing') {
+        // 弹壳翻滚：旋转量化成 4 个朝向帧
         ctx.fillStyle = p.col;
         ctx.globalAlpha = Math.min(1, k * 3);
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.rotate(p.spin || 0);
-        ctx.fillRect(-1.6, -0.8, 3.2, 1.6);
-        ctx.restore();
+        const X = Math.round(sx);
+        const Y = Math.round(sy);
+        const f = Math.round((p.spin || 0) / (Math.PI / 4)) & 3;
+        if (f === 0) ctx.fillRect(X - 2, Y - 1, 4, 2);
+        else if (f === 1) { ctx.fillRect(X - 2, Y - 2, 2, 2); ctx.fillRect(X, Y, 2, 2); }
+        else if (f === 2) ctx.fillRect(X - 1, Y - 2, 2, 4);
+        else { ctx.fillRect(X, Y - 2, 2, 2); ctx.fillRect(X - 2, Y, 2, 2); }
         ctx.globalAlpha = 1;
       } else {
         ctx.fillStyle = p.col;
         ctx.globalAlpha = Math.min(1, k * 2);
-        ctx.fillRect(sx - p.size / 2, sy - p.size / 2, p.size, p.size);
+        const s = Math.max(1, Math.round(p.size));
+        ctx.fillRect(Math.round(sx - s / 2), Math.round(sy - s / 2), s, s);
         ctx.globalAlpha = 1;
       }
     }
@@ -365,28 +342,27 @@ export class Rain {
 
   draw(g, bright = 1) {
     if (!this.on) return;
-    g.save();
+    /* 像素雨丝：每滴 2~3 段错位的 1px 竖条，代替斜线 stroke。
+       段数固定、偏移由雨滴斜率决定，远近两层靠长度和透明度区分。 */
     for (const L of this.layers) {
       const vx = (L.slant + this.gust) * L.len;
-      g.strokeStyle = `rgba(186,206,220,${L.a * bright})`;
-      g.lineWidth = L.w;
-      g.beginPath();
+      g.fillStyle = `rgba(186,206,220,${(L.a * bright).toFixed(3)})`;
+      const segs = L.len > 12 ? 3 : 2;
       for (const d of L.drops) {
-        g.moveTo(d.x, d.y);
-        g.lineTo(d.x + vx * d.k, d.y + L.len * d.k);
+        const len = L.len * d.k;
+        const segH = Math.max(2, Math.round(len / segs));
+        for (let s = 0; s < segs; s++) {
+          const t = s / segs;
+          g.fillRect(Math.round(d.x + vx * d.k * t), Math.round(d.y + len * t), 1, segH);
+        }
       }
-      g.stroke();
     }
-    // 水花：一圈迅速摊开的扁椭圆
-    g.strokeStyle = `rgba(190,210,220,${0.22 * bright})`;
-    g.lineWidth = 0.8;
-    g.beginPath();
+    // 水花：迅速摊开的像素椭圆环，半径按 1px 步进
     for (const s of this.splashes) {
       const k = s.t / 0.34;
-      g.moveTo(s.x + 4 * k, s.y);
-      g.ellipse(s.x, s.y, 4 * k, 1.6 * k, 0, 0, 6.3);
+      const rx = Math.max(1, Math.round(4 * k));
+      const ry = Math.max(1, Math.round(1.6 * k));
+      pxEllipseRing(g, s.x, s.y, rx, ry, `rgba(190,210,220,${(0.22 * bright).toFixed(3)})`);
     }
-    g.stroke();
-    g.restore();
   }
 }
