@@ -1,4 +1,4 @@
-import { pixelScale, artScale } from './config.js';
+import { pixelScale } from './config.js';
 
 export function mulberry32(a) {
   return function () {
@@ -83,11 +83,73 @@ export function localT(g, a, b, c, d, e, f) {
 }
 
 /**
- * 美术用的离屏画布：分辨率取纹素网格（见 config.js 的 ART_TEXEL），
- * 比设备像素粗，贴回去时每个纹素是一块实心方块。
+ * 美术用的离屏画布。曾经按更粗的"纹素网格"生成再最近邻放大，实测抗锯齿
+ * 的过渡像素被放大后整体发糊，已回到全分辨率（见 config.js 顶部说明）。
+ * 像素感由 finishArt() 的调色板量化 + 有序抖动负责。
  */
 export function makeArtCanvas(w, h) {
-  return makeCanvas(w, h, artScale());
+  return makeCanvas(w, h);
+}
+
+/* ------------------------------------------------------------------ *
+ * 烘焙贴图的"像素语言"后处理
+ * ------------------------------------------------------------------ */
+
+// 4×4 Bayer 矩阵（经典有序抖动的阈值表）
+const BAYER4 = Uint8Array.of(0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+
+/** 量化步长：每通道 256/QSTEP ≈ 18 级。调像素感的强弱改这一个数。 */
+const QSTEP = 14;
+
+let quantLUT = null;
+function buildQuantLUT() {
+  const lut = new Uint8Array(16 * 256);
+  for (let b = 0; b < 16; b++) {
+    const dth = ((BAYER4[b] + 0.5) / 16 - 0.5) * QSTEP;
+    for (let v = 0; v < 256; v++) {
+      const q = Math.round((v + dth) / QSTEP) * QSTEP;
+      lut[b * 256 + v] = q < 0 ? 0 : q > 255 ? 255 : q;
+    }
+  }
+  return lut;
+}
+
+/**
+ * 给一张**烘焙**贴图上像素语言：有限调色板（每通道量化到 QSTEP 一档）+
+ * 4×4 有序抖动。抖动格子对齐**逻辑像素**（画布的 pix 倍率），所以渐变
+ * 断成色带后，带间的抖点是边长 N 设备像素的实心方块 —— 分辨率一点没降
+ * （形状边缘仍是设备像素级），但大面积的渐变读起来就是像素游戏的做法。
+ *
+ * 只在生成时跑一次（道具精灵、区域静态层、前景层、远景层），
+ * 每帧现画的角色与光照**不要**过这里 —— 光照要保持平滑，角色跑不起逐像素。
+ */
+export function finishArt(o) {
+  const c = o.c || o;
+  const g = o.g || c.getContext('2d');
+  const w = c.width;
+  const h = c.height;
+  if (!w || !h) return o;
+  const n = Math.max(1, Math.round(c.pix || 1));
+  if (!quantLUT) quantLUT = buildQuantLUT();
+  const lut = quantLUT;
+  const img = g.getImageData(0, 0, w, h);
+  const d = img.data;
+  for (let y = 0; y < h; y++) {
+    const by = (((y / n) | 0) & 3) * 4;
+    let i = y * w * 4;
+    for (let x = 0; x < w; x++, i += 4) {
+      const a = d[i + 3];
+      /* 全透明跳过；极淡的玻璃/辉光也跳过 —— 预乘存储在低 alpha 下
+         往返取整的噪声会被量化放大成杂色。 */
+      if (a < 24) continue;
+      const bi = ((((x / n) | 0) & 3) + by) * 256;
+      d[i] = lut[bi + d[i]];
+      d[i + 1] = lut[bi + d[i + 1]];
+      d[i + 2] = lut[bi + d[i + 2]];
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return o;
 }
 
 /** 画一张 makeCanvas 出来的贴图：按它的**逻辑**尺寸画，不按真实像素 */
@@ -96,59 +158,37 @@ export function blit(g, c, x, y) {
 }
 
 /* ------------------------------------------------------------------ *
- * 每帧现画的东西怎么落到纹素网格上
+ * 每帧现画的角色
  *
- * 道具那种一次生成、反复贴的精灵直接用 makeArtCanvas 就行。角色不一样：
- * 姿势、朝向、缩放每帧都变，没法预生成。做法是留一张暂存画布，
- * 每帧先把角色画在纹素网格上，再最近邻贴回去 —— 1.12 倍缩放、绕髋部旋转
- * 这些会产生小数边的变换，全都在量化之前完成，贴出来仍然是硬边方块。
+ * 道具那种一次生成、反复贴的精灵走 makeArtCanvas + finishArt。角色不一样：
+ * 姿势、朝向、缩放每帧都变，逐像素后处理跑不起，就直接全分辨率画在
+ * 目标上（跟 v1.5 的画法一致，零插值、设备像素级锐利）。
+ * pixelSprite 保留的只有一件事：**整数锚点吸附** —— 落点取整到逻辑格上，
+ * 人走路不会亚像素游移。纹素时代的暂存画布/最近邻回贴已移除，
+ * 那一步的低分辨率抗锯齿正是"看起来糊"的元凶。
  * ------------------------------------------------------------------ */
 
-/* 暂存画布按「倍率 + 嵌套层数」缓存：直升机那一段是把玩家画进机舱图层里的，
-   内外两次量化不能抢同一张画布。 */
-const scratches = new Map();
-let depth = 0;
-
-function scratchFor(key, a, lw, lh) {
-  const old = scratches.get(key);
-  if (old && old.lw >= lw && old.lh >= lh) return old;
-  const s = makeCanvas(Math.max(lw, old ? old.lw : 0), Math.max(lh, old ? old.lh : 0), a);
-  scratches.set(key, s);
-  return s;
-}
-
 /**
- * 在纹素网格上画一个精灵，然后贴到 g 的 (x, y)。
+ * 在 g 的 (x, y)（取整到逻辑格）处画一个精灵。
  *
- * box = { w, h, ax, ay }：暂存画布的逻辑尺寸，以及锚点在画布内的位置；
- * 精灵必须落在这个框里，超出的部分会被裁掉。
+ * box = { w, h, ax, ay }：精灵的逻辑包围框与锚点位置，沿用旧签名 ——
+ * 调用方（手、枪口这些附着点）都按"框内坐标 + dx/dy 平移"换算。
  * draw(g2, ax, ay) 里的写法跟直接画在目标上完全一样，只是原点换了。
  *
- * box.grid 指定纹素网格，默认跟同场景那些预生成的精灵一致（artScale）。
- * 主菜单整幕放大 2 倍，那一幕的静态层与道具也是按 2 倍烘的，所以它传 2。
- * 注意**不要**跟着 QTE 的近景变焦走：变焦是整帧一起放大的，地板与道具的
- * 纹素本来就会跟着变大，角色也得一起变大才不会显得比周围精细一档。
- *
- * 返回 { value, dx, dy }：value 是 draw 的返回值，dx/dy 用来把暂存画布里
+ * 返回 { value, dx, dy }：value 是 draw 的返回值，dx/dy 用来把框内
  * 算出来的坐标（比如手的位置）换算回目标空间。
  */
 export function pixelSprite(g, x, y, box, draw) {
-  const a = Math.max(1, Math.round(box.grid || artScale()));
-  const s = scratchFor(a + ':' + depth, a, box.w, box.h);
-  baseT(s.g);
-  s.g.clearRect(0, 0, box.w, box.h);
-  depth++;
-  let value;
-  try {
-    value = draw(s.g, box.ax, box.ay);
-  } finally {
-    depth--;
-  }
-  baseT(s.g);
-  // 锚点落在整数逻辑格上，纹素边界才对得上设备像素
   const dx = Math.round(x) - box.ax;
   const dy = Math.round(y) - box.ay;
-  g.drawImage(s.c, 0, 0, box.w * a, box.h * a, dx, dy, box.w, box.h);
+  g.save();
+  g.translate(dx, dy);
+  let value;
+  try {
+    value = draw(g, box.ax, box.ay);
+  } finally {
+    g.restore();
+  }
   return { value, dx, dy };
 }
 

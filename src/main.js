@@ -162,7 +162,10 @@ const END_HOLD = 4.6;
 function ensureAreaLights(a) {
   if (a.lit) return;
   for (const L of a.lights) {
-    L.vis = computeVisibility(L.x, L.y, a.segments);
+    // 光源在自己的遮挡体里面时（灯在道具上），可见性要忽略那个遮挡体，
+    // 否则烘出来是一个罩在道具上的发光棱柱（参见 menu.js 同款处理）
+    const segs = L.ignore ? a.segments.filter((s) => !L.ignore.includes(s.id)) : a.segments;
+    L.vis = computeVisibility(L.x, L.y, segs);
     L.tex = lighting.bakeLight({ x: L.x, y: L.y, r: L.r, color: L.color, vis: L.vis, cam: a.cam });
   }
   a.mask = lighting.bakeMask(a.roomVis, a.cam);
@@ -2823,9 +2826,8 @@ function drawPlayerSprite(g, cam, px, py, zOff, bodyRot, off) {
     leftItem = nearIsRight ? null : gun;
     rightItem = nearIsRight ? gun : null;
   }
-  /* 角色画在纹素网格上再最近邻贴回来：1.12 倍缩放、绕髋部的旋转、
-     走路的小数位移全在量化之前做完，贴出来是一块块硬边方块，
-     而不是设备像素级的平滑矢量图形。 */
+  /* 角色全分辨率直接画，pixelSprite 只负责整数锚点吸附：
+     走路的小数位移取整到逻辑格，人不会亚像素游移。 */
   const r = pixelSprite(g, fx0, fy0, CHAR_BOX, (gg, ax, ay) => {
     if (bodyRot !== 0) {
       gg.save();
@@ -3400,10 +3402,9 @@ function drawSky(g, cam, px, py, zOff) {
   const inCabin = c && c.inCabin ? drawP : null;
 
   /* 舱口的接应：手伸下来的程度、抓哪儿、舱门关到什么程度，全由过场时间轴给。
-     整架机体跟角色一样先落到纹素网格上 —— 机身、桨叶、舱门都是斜的，
-     不量化的话它会是画面里唯一一个平滑矢量物件。 */
+     机体跟角色一样走 pixelSprite 的整数锚点吸附。 */
   pixelSprite(g, hx, hy, HELI_BOX, (gg, ax, ay) => {
-    // 舱内的玩家是套在里面画的：抓手点按同样的位移换算回暂存画布
+    // 舱内的玩家是套在里面画的：抓手点按同样的位移换算回框内坐标
     const off = { x: ax - Math.round(hx), y: ay - Math.round(hy) };
     A.drawHeli(gg, ax, ay, game.t, {
       scale: 1,

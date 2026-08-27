@@ -1,6 +1,6 @@
 import { HW, HH, TILE_W, TILE_Z, WALL_H } from './config.js';
 import { boundsFor, camFor } from './iso.js';
-import { makeArtCanvas, mulberry32, shade, baseT, localT } from './util.js';
+import { makeArtCanvas, finishArt, mulberry32, shade, baseT, localT } from './util.js';
 
 export const PAD = 10;
 
@@ -649,6 +649,8 @@ export function closeArea(a, opts = {}) {
     { x: 0, y: 0, seg: S.w },
   ];
   resetT(a.g);
+  // 静态层收口时统一过一遍像素语言（调色板 + 有序抖动）
+  finishArt({ c: a.statics.img, g: a.g });
   delete a.g;
   return a;
 }

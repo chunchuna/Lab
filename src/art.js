@@ -1,5 +1,5 @@
 import { HW, HH, TILE_W, TILE_Z } from './config.js';
-import { makeCanvas, makeArtCanvas, mulberry32, shade, baseT, localT, blit } from './util.js';
+import { makeCanvas, makeArtCanvas, finishArt, mulberry32, shade, baseT, localT, blit } from './util.js';
 
 export const PAL = {
   floor: '#343b40',
@@ -156,6 +156,7 @@ export function makeProp(w, d, h, draw, pad = 6) {
   const { c, g } = makeArtCanvas(cw, ch);
   draw(g, ox, oy);
   resetT(g);
+  finishArt({ c, g });
   return { img: c, ox, oy, w, d, h };
 }
 

@@ -74,9 +74,19 @@ export class Lighting {
     if (any) g.fill();
   }
 
-  /** 高清网格上渐变已经有足够采样，每帧再 blur 整张 4K 缓冲太贵。低倍率才糊边。 */
-  _blur(g, px) {
-    if (pixelScale() >= 3) return;
+  /**
+   * 可见多边形的软边。
+   *
+   * 烘焙路径（force=true）**必须**糊：多边形的直边和墙面竖直拉伸出来的
+   * 矩形一旦是硬边，光就不再像光，而像一块贴在画面上的玻璃板 ——
+   * 主菜单收容舱上那个"发光菱形棱柱"就是这么来的。烘焙只在建区时跑一次，
+   * blur 的开销无所谓。
+   *
+   * 每帧路径（手电筒光锥等）保持原判断：高倍率下整张 4K 缓冲的
+   * filter: blur() 太贵，而高清网格上渐变本身采样已经够密。
+   */
+  _blur(g, px, force) {
+    if (!force && pixelScale() >= 3) return;
     g.filter = `blur(${px}px)`;
   }
 
@@ -110,7 +120,7 @@ export class Lighting {
       m.clearRect(0, 0, this.w, this.h);
       this._shape(m, o.vis, cam);
       g.globalCompositeOperation = 'destination-in';
-      this._blur(g, o.blur === undefined ? this.softness : o.blur);
+      this._blur(g, o.blur === undefined ? this.softness : o.blur, o.baked);
       blit(g, this.mask.c, 0, 0);
       g.filter = 'none';
       g.globalCompositeOperation = 'source-over';
@@ -146,16 +156,16 @@ export class Lighting {
    */
   bakeLight(o) {
     const { c, g } = makeCanvas(this.w, this.h);
-    this._renderLight(g, o, 1);
+    this._renderLight(g, { ...o, baked: true }, 1);
     return c;
   }
 
-  /** 预烘焙的裁剪遮罩（关闭视线遮挡时房间轮廓是固定的） */
+  /** 预烘焙的裁剪遮罩（关闭视线遮挡时房间轮廓是固定的），软边一次性做掉 */
   bakeMask(vis, cam) {
     const t = makeCanvas(this.w, this.h);
     this._shape(t.g, vis, cam);
     const { c, g } = makeCanvas(this.w, this.h);
-    this._blur(g, this.softness);
+    this._blur(g, this.softness, true);
     blit(g, t.c, 0, 0);
     g.filter = 'none';
     return c;

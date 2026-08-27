@@ -17,7 +17,7 @@
  * 静态层与光照贴图就要再被放大一轮，等于退回低分辨率再吹大。
  */
 
-import { VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, ART_TEXEL, pixelScale, withPixelBoost } from './config.js';
+import { VIEW_W, VIEW_H, HW, HH, TILE_W, TILE_Z, pixelScale, withPixelBoost } from './config.js';
 import * as A from './art.js';
 import {
   newArea, closeArea, paintFloor, wallBase, wallPipes, doorBay,
@@ -359,10 +359,14 @@ function buildScene() {
   a.lights.push({ id: 'tubeA', x: 3.0, y: 1.6, z: LAMP_Z, r: 6.4, color: [204, 216, 224], power: 0.52, seed: 1.1, kind: 'tube' });
   a.lights.push({ id: 'tubeB', x: 2.2, y: 4.6, z: LAMP_Z, r: 6.0, color: [204, 216, 224], power: 0.44, seed: 3.4, kind: 'tube' });
   a.lights.push({ id: 'tubeC', x: 12.2, y: 3.2, z: LAMP_Z, r: 6.4, color: [200, 212, 222], power: 0.48, seed: 5.7, kind: 'tube' });
-  a.lights.push({ id: 'tank', x: CHAMBER.x, y: CHAMBER.y, z: 1.5, r: 6.2, color: [116, 214, 208], power: 0.86, seed: 0.5, kind: 'tank' });
+  /* 光源在自己的遮挡体**里面**时（舱内冷光在舱里、台灯在控制台上），
+     可见性必须忽略那个遮挡体：否则可见多边形被压缩成遮挡体自身的轮廓，
+     连同墙面竖直拉伸，烘出来是一个罩在道具上的发光棱柱 —— 主菜单里
+     收容舱曾被这样一个巨大的发光菱形整个罩住。 */
+  a.lights.push({ id: 'tank', x: CHAMBER.x, y: CHAMBER.y, z: 1.5, r: 6.2, color: [116, 214, 208], power: 0.86, seed: 0.5, kind: 'tank', ignore: ['chamber'] });
   a.lights.push({ id: 'wallmon', x: 3.0, y: 0.1, z: 1.55, r: 3.2, color: [120, 200, 210], power: 0.3, seed: 2.7, kind: 'screen' });
   a.lights.push({ id: 'gallery', x: 8.4, y: 0.1, z: 3.6, r: 6.8, color: [176, 196, 206], power: 0.34, seed: 1.9, kind: 'gallery' });
-  a.lights.push({ id: 'desk', x: 11.2, y: 0.7, z: 1.3, r: 3.6, color: [224, 176, 108], power: 0.4, seed: 4.6, kind: 'screen' });
+  a.lights.push({ id: 'desk', x: 11.2, y: 0.7, z: 1.3, r: 3.6, color: [224, 176, 108], power: 0.4, seed: 4.6, kind: 'screen', ignore: ['console'] });
   a.lights.push({ id: 'strip', x: 7.0, y: 6.3, z: 0.06, r: 6.4, color: [186, 202, 214], power: 0.24, seed: 6.2, kind: 'strip' });
   a.lights.push({ id: 'rec', x: RIG.x, y: RIG.y, z: 1.6, r: 1.1, color: [214, 96, 74], power: 0.5, seed: 0, kind: 'rec' });
 
@@ -379,7 +383,8 @@ function buildScene() {
   const lighting = new Lighting(SW, SH);
   lighting.ambient = a.ambient;
   for (const L of a.lights) {
-    L.vis = computeVisibility(L.x, L.y, a.segments);
+    const segs = L.ignore ? a.segments.filter((s) => !L.ignore.includes(s.id)) : a.segments;
+    L.vis = computeVisibility(L.x, L.y, segs);
     L.tex = lighting.bakeLight({ x: L.x, y: L.y, r: L.r, color: L.color, vis: L.vis, cam: a.cam, zOff: L.z * TILE_Z });
   }
   a.mask = lighting.bakeMask(a.roomVis, a.cam);
@@ -399,11 +404,8 @@ function buildScene() {
  * 每帧
  * ------------------------------------------------------------------ */
 
-/**
- * 人物的暂存框：脚底是锚点，上方留够站姿与举起来的手。
- * grid 跟这一幕的静态层一样是 SCALE 倍（整幕放大 SCALE，纹素才和游戏里等大）。
- */
-const CHAR_BOX = { w: 96, h: 112, ax: 48, ay: 88, grid: SCALE * ART_TEXEL };
+/** 人物的包围框：脚底是锚点，上方留够站姿与举起来的手 */
+const CHAR_BOX = { w: 96, h: 112, ax: 48, ay: 88 };
 
 function sc(cam, x, y, z = 0) {
   return { x: cam.x + (x - y) * HW, y: cam.y + (x + y) * HH - z * TILE_Z };
@@ -539,7 +541,7 @@ export function drawMenuScene(ctx, t) {
   items.sort((m, n) => m.k - n.k);
 
   for (const it of items) {
-    // 人物跟游戏里一样先落到纹素网格上，再最近邻贴回来
+    // 人物走 pixelSprite 的整数锚点吸附，跟静态层的像素网格对齐
     if (it.c) {
       const p = sc(cam, it.c.x, it.c.y);
       pixelSprite(ctx, p.x, p.y, CHAR_BOX, (g2, ax, ay) => A.drawStaff(g2, ax, ay, { ...it.c, t }));

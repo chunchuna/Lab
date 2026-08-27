@@ -5,7 +5,7 @@ import {
   newArea, closeArea, paintFloor, wallBase, wallPipes, doorBay,
   floorT, northT, northPt, westT, eastT, southT, resetT, pt, THEMES, PAD, mulberry32,
 } from './areakit.js';
-import { makeCanvas, makeArtCanvas, shade } from './util.js';
+import { makeCanvas, makeArtCanvas, finishArt, shade } from './util.js';
 
 /** 每个敞开的门洞给一盏弱光，让"能看进房间"在暗处也成立 */
 function bayLights(a, bays) {
@@ -154,6 +154,7 @@ function corridorParapet(a, rand, th, doors, opts = {}) {
   }
 
   resetT(g);
+  finishArt({ c, g });
   return { img: c, ox: a.sox, oy: a.soy };
 }
 
@@ -866,6 +867,7 @@ function roofParapetFg(a, rand, th) {
   parapetFace(g, a.w * TILE_W, ph, -ph * TILE_Z, th, rand);
   g.restore();
   resetT(g);
+  finishArt({ c, g });
   return { img: c, ox: a.sox, oy: a.soy };
 }
 
@@ -951,6 +953,7 @@ function buildRoof() {
   const horizon = 84;
   const bd = makeCanvas(VIEW_W, VIEW_H);
   paintRoofBackdrop(bd.g, horizon, mulberry32(0x51c1));
+  finishArt(bd); // 夜空的大渐变正是有序抖动最出效果的地方
   a.backdrop = bd.c;
 
   /* 天空不能被"房间遮罩"裁掉，否则屋面以外一律是纯黑，远景等于没画。

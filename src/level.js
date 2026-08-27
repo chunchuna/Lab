@@ -2,7 +2,7 @@ import { HW, HH, TILE_W, TILE_Z, ROOM_W, ROOM_H, WALL_H } from './config.js';
 import {
   BOUNDS, boundsFor, camFor, floorTransform, wallNorthTransform, wallWestTransform, wallNorthPt,
 } from './iso.js';
-import { makeArtCanvas, mulberry32, shade } from './util.js';
+import { makeArtCanvas, finishArt, mulberry32, shade } from './util.js';
 import * as A from './art.js';
 
 const PAD = 10;
@@ -729,6 +729,7 @@ export function buildStatic() {
   paintFloor(g, sox, soy, rand);
   paintNorthWall(g, sox, soy, rand);
   paintWestWall(g, sox, soy, rand);
+  finishArt({ c, g });
   return { img: c, ox: sox, oy: soy };
 }
 
