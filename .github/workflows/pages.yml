@@ -1,7 +1,9 @@
 name: Deploy Pages
 
 on:
-  # Pages 当前改回主菜单分支部署；rooftop 只保留手动触发，避免再覆盖站点。
+  # Pages 跟随 rooftop 主线：推送即部署（主菜单分支那次借用已结束）。
+  push:
+    branches: [cursor/rooftop-prologue-7a6f]
   workflow_dispatch:
 
 permissions:
