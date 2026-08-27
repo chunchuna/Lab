@@ -7,7 +7,7 @@ import {
 } from './areakit.js';
 import {
   makeCanvas, makeArtCanvas, finishArt, shade,
-  pxDither, pxText, pxBlob, pxPoly,
+  pxDither, pxText, pxPoly,
 } from './util.js';
 
 /** 横向色带填充 + 相邻带交界棋盘抖动：代替竖直线性渐变 */
@@ -748,35 +748,48 @@ function cityBand(g, rand, o) {
  * 只在建区时跑一次，运行期每帧只是一次 drawImage。
  */
 function paintRoofBackdrop(g, horizon, rand) {
-  // 夜空：顶上近黑，越靠地平线越被城市的光污染染亮一点（硬分带 + 抖动）
-  const skyH = horizon + 14;
-  bandFillV(g, 0, VIEW_W, [
-    [0, '#03050a'],
-    [Math.round(skyH * 0.42), '#070c14'],
-    [Math.round(skyH * 0.62), '#0a1219'],
-    [Math.round(skyH * 0.78), '#0e1824'],
-    [Math.round(skyH * 0.9), '#17242f'],
-    [skyH, ''],
-  ]);
+  /* 大面积渐变**不要**手写硬分带：这张画布最后会整体过 finishArt()，
+     量化 + 有序抖动会把平滑渐变自动断成带抖点的色带。在这里先手工分带
+     等于把像素化做了两遍 —— v1.9.0 就是这么把夜空切出两道横缝、把火光
+     压成橙色饼的（见 docs/pixel-art-style.md 的「双重像素化」反模式）。 */
 
-  // 云：被下方城市照亮的低云底（同心像素摊代替径向渐变）
+  // 夜空：顶上近黑，越靠地平线越被城市的光污染染亮一点
+  const sky = g.createLinearGradient(0, 0, 0, horizon + 14);
+  sky.addColorStop(0, '#03050a');
+  sky.addColorStop(0.42, '#070c14');
+  sky.addColorStop(0.78, '#0e1824');
+  sky.addColorStop(1, '#17242f');
+  g.fillStyle = sky;
+  g.fillRect(0, 0, VIEW_W, horizon + 14);
+
+  // 云：被下方城市照亮的低云底，压得很低，暴雨夜的那种"天花板"
   for (let i = 0; i < 11; i++) {
     const cx = rand() * VIEW_W;
     const cy = 8 + rand() * (horizon - 24);
     const rx = 60 + rand() * 130;
     const ry = 10 + rand() * 22;
     const k = 0.05 + rand() * 0.08;
-    pxBlob(g, cx, cy, rx, ry, `rgba(50,66,90,${(k * 0.5).toFixed(3)})`, rand);
-    pxBlob(g, cx, cy, rx * 0.6, ry * 0.6, `rgba(74,96,126,${k.toFixed(3)})`, rand);
+    const grd = g.createRadialGradient(cx, cy, 0, cx, cy, rx);
+    grd.addColorStop(0, `rgba(74,96,126,${k})`);
+    grd.addColorStop(0.6, `rgba(50,66,90,${k * 0.5})`);
+    grd.addColorStop(1, 'rgba(30,40,56,0)');
+    g.fillStyle = grd;
+    g.save();
+    g.translate(cx, cy);
+    g.scale(1, ry / rx);
+    g.beginPath();
+    g.arc(0, 0, rx, 0, 6.3);
+    g.fill();
+    g.restore();
   }
 
   // 楼下：街区的深渊。天台之所以是天台，是因为下面什么都看不到底
-  bandFillV(g, 0, VIEW_W, [
-    [horizon, '#0a1017'],
-    [horizon + Math.round((VIEW_H - horizon) * 0.35), '#05080d'],
-    [horizon + Math.round((VIEW_H - horizon) * 0.68), '#010203'],
-    [VIEW_H, ''],
-  ]);
+  const gnd = g.createLinearGradient(0, horizon, 0, VIEW_H);
+  gnd.addColorStop(0, '#0a1017');
+  gnd.addColorStop(0.35, '#05080d');
+  gnd.addColorStop(1, '#010203');
+  g.fillStyle = gnd;
+  g.fillRect(0, horizon, VIEW_W, VIEW_H - horizon);
 
   /* --- 三层城市剪影：越远越矮、越淡、越贴地平线 --- */
   cityBand(g, rand, {
@@ -818,11 +831,15 @@ function paintRoofBackdrop(g, horizon, rand) {
     }
   }
 
-  /* --- 城里几处还在烧的火：同心像素摊代替径向渐变 --- */
+  /* --- 城里几处还在烧的火：暖色的一点，也说明外面出了什么事。
+     径向渐变即可，finishArt 会把它抖成一圈圈的像素光晕 --- */
   for (const [fx0, fy0, fr] of [[128, horizon + 30, 46], [392, horizon + 12, 34], [534, horizon + 58, 30]]) {
-    pxBlob(g, fx0, fy0, fr * 0.9, fr * 0.65, 'rgba(180,84,36,0.09)', rand);
-    pxBlob(g, fx0, fy0, fr * 0.5, fr * 0.36, 'rgba(226,124,52,0.14)', rand);
-    pxBlob(g, fx0, fy0, fr * 0.24, fr * 0.18, 'rgba(226,124,52,0.2)', rand);
+    const grd = g.createRadialGradient(fx0, fy0, 0, fx0, fy0, fr);
+    grd.addColorStop(0, 'rgba(226,124,52,0.2)');
+    grd.addColorStop(0.45, 'rgba(180,84,36,0.09)');
+    grd.addColorStop(1, 'rgba(120,50,20,0)');
+    g.fillStyle = grd;
+    g.fillRect(fx0 - fr, fy0 - fr, fr * 2, fr * 2);
   }
 
   // 街面上残存的路灯：小到只是一点点，但让"下面很深"变得可信
@@ -834,14 +851,14 @@ function paintRoofBackdrop(g, horizon, rand) {
     g.fillRect(px, py, 1, 1);
   }
 
-  // 整层再压一道雨幕：远景该是被雨糊住的，不能像贴纸一样锐（硬分带 + 抖动）
-  bandFillV(g, 0, VIEW_W, [
-    [0, 'rgba(70,92,120,0.03)'],
-    [Math.round(VIEW_H * 0.3), 'rgba(88,112,142,0.07)'],
-    [Math.round(VIEW_H * 0.62), 'rgba(52,70,94,0.05)'],
-    [Math.round(VIEW_H * 0.85), 'rgba(10,16,24,0.1)'],
-    [VIEW_H, ''],
-  ]);
+  // 整层再压一道雨幕：远景该是被雨糊住的，不能像贴纸一样锐
+  const veil = g.createLinearGradient(0, 0, 0, VIEW_H);
+  veil.addColorStop(0, 'rgba(70,92,120,0.03)');
+  veil.addColorStop(0.3, 'rgba(88,112,142,0.07)');
+  veil.addColorStop(0.62, 'rgba(52,70,94,0.05)');
+  veil.addColorStop(1, 'rgba(10,16,24,0.1)');
+  g.fillStyle = veil;
+  g.fillRect(0, 0, VIEW_W, VIEW_H);
 }
 
 /** 天台女儿墙高度（瓦片）。四周都是这个高度，露天场景不画满高室内墙 */
@@ -956,17 +973,19 @@ function buildRoof() {
     /* 亮度集中在地平线那一条：往上是夜空，往下迅速掉进楼下的黑。
        下半段压得狠一点 —— 天台之所以看起来"很高"，靠的就是边缘之外那一片
        什么都看不清的深黑，而不是一层均匀的蓝雾。
-       只烘焙一次，硬分带 + 抖动，跟背景层同一套像素语言。 */
-    bandFillV(sg, 0, VIEW_W, [
-      [0, 'rgba(52,74,106,0.24)'],
-      [Math.round(horizon - VIEW_H * 0.07), 'rgba(92,120,158,0.56)'],
-      [Math.round(horizon + VIEW_H * 0.04), 'rgba(78,102,134,0.62)'],
-      [Math.round(VIEW_H * 0.42), 'rgba(44,62,88,0.3)'],
-      [Math.round(VIEW_H * 0.6), 'rgba(28,42,62,0.13)'],
-      [Math.round(VIEW_H * 0.8), 'rgba(16,26,40,0.05)'],
-      [Math.round(VIEW_H * 0.92), 'rgba(8,12,20,0.025)'],
-      [VIEW_H, ''],
-    ]);
+       这是**光照贴图**，不是美术：按分层原则必须保持平滑（见
+       docs/pixel-art-style.md）。v1.9.0 曾把它硬分带，结果是两道横贯
+       整个天空的硬接缝叠在城市剪影上，像隔了几层玻璃。 */
+    const gr = sg.createLinearGradient(0, 0, 0, VIEW_H);
+    gr.addColorStop(0, 'rgba(52,74,106,0.24)');
+    gr.addColorStop(horizon / VIEW_H - 0.07, 'rgba(92,120,158,0.56)');
+    gr.addColorStop(horizon / VIEW_H + 0.04, 'rgba(78,102,134,0.62)');
+    gr.addColorStop(0.42, 'rgba(44,62,88,0.3)');
+    gr.addColorStop(0.6, 'rgba(28,42,62,0.13)');
+    gr.addColorStop(0.8, 'rgba(16,26,40,0.05)');
+    gr.addColorStop(1, 'rgba(8,12,20,0.025)');
+    sg.fillStyle = gr;
+    sg.fillRect(0, 0, VIEW_W, VIEW_H);
   };
   /* 远处楼顶的障碍灯：每帧几个小加色点，比整张背景重画便宜得多。
      坐标是画布坐标，跟背景层同一套空间。 */
