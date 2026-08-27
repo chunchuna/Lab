@@ -1,5 +1,5 @@
 import { HW, HH, TILE_Z } from './config.js';
-import { PAL } from './art.js';
+import { pxLine, pxEllipse, pxBlob, qz } from './art.js';
 
 /**
  * 丧尸：只做"朝玩家直线推进 + 撞墙绕行"的简单行为。
@@ -259,25 +259,22 @@ function drawZombieBody(g, x, y, z) {
   const p = poseOf(z);
   const back = f.y < -0.12 && !(p && p.noBack); // 朝画面上方走 = 背对镜头
 
-  // 蹒跚步态：两腿摆动幅度不同，身体跟着一歪一歪
-  const sw = p && p.legA !== undefined ? p.legA : Math.sin(z.walk) * 2.6;
-  const sw2 = p && p.legB !== undefined ? p.legB : Math.sin(z.walk + 0.9) * 1.7;
-  const bob = p ? 0 : Math.abs(Math.sin(z.walk * 0.5)) * 1.3;
+  // 蹒跚步态：两腿摆动幅度不同，身体跟着一歪一歪。摆腿量取整，脚踩在整像素上
+  const sw = Math.round(p && p.legA !== undefined ? p.legA : Math.sin(z.walk) * 2.6);
+  const sw2 = Math.round(p && p.legB !== undefined ? p.legB : Math.sin(z.walk + 0.9) * 1.7);
+  const bob = p ? 0 : Math.round(Math.abs(Math.sin(z.walk * 0.5)) * 1.3);
   const tilt = Math.sin(z.walk * 0.5) * 0.9 + (z.stumble > 0 ? 2.2 : 0);
-  const sink = p && p.sink ? p.sink : 0;
+  const sink = Math.round(p && p.sink ? p.sink : 0);
   const by = y - bob + sink;
   const skin = SKIN[z.variant];
   const cloth = CLOTH[z.variant];
   const lung = z.lunge * 3;
-  const bodyRot = (p && p.tilt ? p.tilt : 0) + tilt * 0.03;
+  // 躯干旋转量化到一格一格的定格，不做平滑摆动
+  const bodyRot = qz((p && p.tilt ? p.tilt : 0) + tilt * 0.03, Math.PI / 48);
 
-  g.save();
-  g.globalAlpha = 0.45;
-  g.fillStyle = '#000';
-  g.beginPath();
-  g.ellipse(x, y + (z.z ? 1 : 0), 6, 3, 0, 0, 6.3);
-  g.fill();
-  g.restore();
+  // 影子：两档像素椭圆
+  pxEllipse(g, x, y + (z.z ? 1 : 0), 6, 3, 'rgba(0,0,0,0.26)');
+  pxEllipse(g, x, y + (z.z ? 1 : 0), 4, 2, 'rgba(0,0,0,0.3)');
 
   // 腿
   const legH = Math.max(3, 9 - sink * 0.7);
@@ -311,42 +308,31 @@ function drawZombieBody(g, x, y, z) {
   const reach = (7 + lung) * armK;
   const ax = f.x * reach;
   const ay = f.y * reach * 0.7 + drop;
-  const shY = by - 18 + sink * 0.5;
-  const flail = p ? 0 : Math.sin(z.walk * 0.8) * 1.6;
-  g.strokeStyle = skin;
-  g.lineWidth = 2.4;
-  g.lineCap = 'round';
-  g.beginPath();
-  g.moveTo(x - 4, shY);
-  g.lineTo(x - 4 + ax * 0.8, shY + 3 + ay + flail);
-  g.moveTo(x + 4, shY);
-  g.lineTo(x + 4 + ax * 0.8, shY + 2 + ay - flail);
-  g.stroke();
+  const shY = by - 18 + Math.round(sink * 0.5);
+  const flail = p ? 0 : Math.round(Math.sin(z.walk * 0.8) * 1.6);
+  // 手臂：2px 像素直线，硬边台阶
+  pxLine(g, x - 4, shY, x - 4 + ax * 0.8, shY + 3 + ay + flail, skin, 2);
+  pxLine(g, x + 4, shY, x + 4 + ax * 0.8, shY + 2 + ay - flail, skin, 2);
   // 抓人的手：伸到底时张开五指，够得着才有威胁感
   if (armK > 1.15) {
-    g.lineWidth = 1;
     for (const sd of [-1, 1]) {
       const gx = x + sd * 4 + ax * 0.8;
       const gy = shY + 2.5 + ay + flail * sd;
-      g.beginPath();
       for (let i = -1; i <= 1; i++) {
-        g.moveTo(gx, gy);
-        g.lineTo(gx + f.x * 2.4 + i * 0.9, gy + f.y * 1.8 + i * 1.1);
+        pxLine(g, gx, gy, gx + f.x * 2.4 + i * 0.9, gy + f.y * 1.8 + i * 1.1, skin, 1);
       }
-      g.stroke();
     }
-    g.lineWidth = 2.4;
   }
 
   // 头（歪着）
-  const hx = x - 3 + dir + tilt * 0.5 + (p && p.headX ? p.headX : 0);
-  const hy = by - 27 + sink * 0.6 + (p && p.headY ? p.headY : 0);
+  const hx = Math.round(x - 3 + dir + tilt * 0.5 + (p && p.headX ? p.headX : 0));
+  const hy = Math.round(by - 27 + sink * 0.6 + (p && p.headY ? p.headY : 0));
   if (p && p.headGone) {
     // 爆头之后：脖子上只剩一截，血往上喷
     g.fillStyle = '#4a1512';
-    g.fillRect(x - 1.6, hy + 4, 3.4, 4);
+    g.fillRect(x - 2, hy + 4, 3, 4);
     g.fillStyle = '#6d1f19';
-    g.fillRect(x - 2.2, hy + 4, 4.6, 1.6);
+    g.fillRect(x - 2, hy + 4, 5, 2);
   } else {
     g.fillStyle = skin;
     g.fillRect(hx, hy + 1, 6, 6);
@@ -366,10 +352,10 @@ function drawZombieBody(g, x, y, z) {
         g.fillRect(hx + 1, hy + 3, 1, 1);
         g.fillRect(hx + 3, hy + 3, 1, 1);
       }
-      // 张着的嘴：扑咬那几拍张到最大
+      // 张着的嘴：扑咬那几拍张到最大（张口量取整跳变）
       const jaw = p && p.jaw !== undefined ? p.jaw : 0.35;
       g.fillStyle = '#4a1512';
-      g.fillRect(hx + (dir > 0 ? 2 : 1), hy + 5, 3, 1.2 + jaw * 2.6);
+      g.fillRect(hx + (dir > 0 ? 2 : 1), hy + 5, 3, Math.max(1, Math.round(1.2 + jaw * 2.6)));
     }
   }
 
@@ -384,13 +370,11 @@ function drawZombieBody(g, x, y, z) {
 }
 
 function drawCorpse(g, x, y, z) {
-  const t = Math.min(1, z.dead / 0.35);
+  // 血摊涨开的过程量化成 4 档，不做平滑放大
+  const t = Math.ceil(Math.min(1, z.dead / 0.35) * 4) / 4;
   g.save();
   g.globalAlpha = 0.5;
-  g.fillStyle = '#3f1210';
-  g.beginPath();
-  g.ellipse(x, y + 1, 9 * t, 4 * t, 0, 0, 6.3);
-  g.fill();
+  pxBlob(g, x, y + 1, 9 * t, 4 * t, '#3f1210');
   g.restore();
   // 保持人形轮廓，只是躺下：躯干 + 头 + 腿平铺
   const cloth = CLOTH[z.variant];
@@ -411,12 +395,8 @@ function drawCorpse(g, x, y, z) {
     g.fillStyle = '#2b241c';
     g.fillRect(x - 12, y - 7, 5, 2);
   }
-  g.strokeStyle = skin;
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(x - 6, y - 4);
-  g.lineTo(x - 9, y + 2);
-  g.stroke();
+  // 摊开的手臂：2px 像素线
+  pxLine(g, x - 6, y - 4, x - 9, y + 2, skin, 2);
 }
 
 export function zombieScreen(cam, z) {

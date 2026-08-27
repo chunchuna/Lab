@@ -1,5 +1,12 @@
 import { HW, HH, TILE_W, TILE_Z } from './config.js';
-import { makeCanvas, makeArtCanvas, finishArt, mulberry32, shade, baseT, localT, blit } from './util.js';
+import {
+  makeCanvas, makeArtCanvas, finishArt, mulberry32, shade, baseT, localT, blit,
+  pxLine, pxPolyline, pxDither, pxDitherV, pxDitherLine, pxPoly, pxEllipse, pxEllipseRing,
+  pxShadow, pxBlob, pxGlow, pxText, edgeAt, rowScan,
+} from './util.js';
+
+// 像素 helper 从这里再导出一份：zombies/menu/main 习惯从 art 拿绘制工具
+export { pxLine, pxPolyline, pxDither, pxDitherV, pxDitherLine, pxPoly, pxEllipse, pxEllipseRing, pxShadow, pxBlob, pxGlow, pxText };
 
 export const PAL = {
   floor: '#343b40',
@@ -37,19 +44,19 @@ export const PAL = {
  * 基础绘制助手
  * ------------------------------------------------------------------ */
 
+/**
+ * 多边形：逐行扫描填充 + 像素直线描边。
+ * 所有等距盒子（isoBox）的面都从这里过 —— 斜边全部变成硬边台阶。
+ */
 export function poly(g, pts, fill, stroke, lw = 1) {
-  g.beginPath();
-  g.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
-  g.closePath();
-  if (fill) {
-    g.fillStyle = fill;
-    g.fill();
-  }
+  if (fill) pxPoly(g, pts, fill);
   if (stroke) {
-    g.strokeStyle = stroke;
-    g.lineWidth = lw;
-    g.stroke();
+    const th = Math.max(1, Math.round(lw));
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      pxLine(g, a[0], a[1], b[0], b[1], stroke, th);
+    }
   }
 }
 
@@ -79,21 +86,26 @@ export function faceLeft(g, ox, oy, yl) {
 }
 export const resetT = baseT;
 
-/** 足迹阴影 */
+/** 足迹阴影：三档同心的像素椭圆平涂 + 外圈棋盘抖动，代替径向渐变 */
 export function aoShadow(g, ox, oy, w, d, a = 0.45) {
-  g.save();
-  g.translate(ox, oy);
-  g.scale(1, HH / HW);
   const r = ((w + d) / 2) * HW * 0.78;
-  const grd = g.createRadialGradient(0, 0, 0, 0, 0, r);
-  grd.addColorStop(0, `rgba(0,0,0,${a})`);
-  grd.addColorStop(0.6, `rgba(0,0,0,${a * 0.55})`);
-  grd.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = grd;
-  g.beginPath();
-  g.arc(0, 0, r, 0, Math.PI * 2);
-  g.fill();
-  g.restore();
+  const ry = r * (HH / HW);
+  pxShadow(g, ox, oy, r, ry, a);
+  // 最外一圈的抖动边：椭圆行扫，隔格点一层，影子的边不再是光滑圆弧
+  g.fillStyle = `rgba(0,0,0,${(a * 0.22).toFixed(3)})`;
+  const R = Math.max(1, Math.round(ry));
+  const X = Math.round(ox);
+  const Y = Math.round(oy);
+  for (let y = -R; y <= R; y++) {
+    const k = 1 - (y / (ry || 1)) ** 2;
+    if (k <= 0) continue;
+    const xw = Math.round(r * Math.sqrt(k) * 1.16);
+    const xi = Math.round(r * Math.sqrt(k));
+    for (let x = -xw + ((X + Y + y + xw) & 1); x <= xw; x += 2) {
+      if (x > -xi && x < xi) continue;
+      g.fillRect(X + x, Y + y, 1, 1);
+    }
+  }
 }
 
 /** 在当前变换空间内撒噪点 */
@@ -180,10 +192,7 @@ export function makeBed(seed = 7) {
     // 轮子
     for (const [lx, ly] of legs) {
       const p = P(ox, oy, lx + 0.07, ly + 0.07, 0);
-      g.fillStyle = '#15191c';
-      g.beginPath();
-      g.ellipse(p[0], p[1] + 1, 2.4, 1.4, 0, 0, Math.PI * 2);
-      g.fill();
+      pxEllipse(g, p[0], p[1] + 1, 2.4, 1.4, '#15191c');
     }
     // 床架
     isoBox(g, ox, oy, -1.45, -0.72, 0.42, 2.9, 1.42, 0.1, PAL.metal, PAL.metalDark, '#242a2e');
@@ -197,13 +206,10 @@ export function makeBed(seed = 7) {
       g.fillRect((-1.3 + rand() * 2.6) * TILE_W, (-0.6 + rand() * 1.18) * TILE_W, (0.1 + rand() * 0.5) * TILE_W, (0.06 + rand() * 0.18) * TILE_W);
     }
     g.globalAlpha = 0.42;
-    g.fillStyle = PAL.blood;
     for (let i = 0; i < 7; i++) {
       const bx = 0.15 + rand() * 0.7,
         by = -0.35 + rand() * 0.7;
-      g.beginPath();
-      g.ellipse(bx * TILE_W, by * TILE_W, (0.06 + rand() * 0.16) * TILE_W, (0.05 + rand() * 0.13) * TILE_W, 0, 0, Math.PI * 2);
-      g.fill();
+      pxBlob(g, bx * TILE_W, by * TILE_W, (0.06 + rand() * 0.16) * TILE_W, (0.05 + rand() * 0.13) * TILE_W, PAL.blood, rand);
     }
     g.globalAlpha = 0.28;
     g.fillStyle = '#5b5348';
@@ -246,14 +252,22 @@ export function makeLocker(open, seed = 3, empty = false) {
     const h = H * TILE_Z;
     g.fillStyle = '#414a47';
     g.fillRect(-(D / 2) * TILE_W, -h, D * TILE_W, h);
-    // 门缝 + 面板
+    // 门缝 + 面板（1px 描边用四条 fillRect 拼，strokeRect 的半像素线会糊）
     g.fillStyle = '#2a312f';
     g.fillRect(-0.02 * TILE_W, -h + 2, 0.04 * TILE_W, h - 4);
-    g.strokeStyle = 'rgba(0,0,0,0.5)';
-    g.lineWidth = 1;
-    g.strokeRect(-(D / 2 - 0.06) * TILE_W, -h + 4, (D - 0.12) * TILE_W, h - 8);
-    g.fillStyle = 'rgba(255,255,255,0.06)';
-    g.fillRect(-(D / 2 - 0.06) * TILE_W, -h + 4, (D - 0.12) * TILE_W, 2);
+    {
+      const px0 = Math.round(-(D / 2 - 0.06) * TILE_W);
+      const pw = Math.round((D - 0.12) * TILE_W);
+      const py0 = Math.round(-h + 4);
+      const ph = Math.round(h - 8);
+      g.fillStyle = 'rgba(0,0,0,0.5)';
+      g.fillRect(px0, py0, pw, 1);
+      g.fillRect(px0, py0 + ph - 1, pw, 1);
+      g.fillRect(px0, py0, 1, ph);
+      g.fillRect(px0 + pw - 1, py0, 1, ph);
+      g.fillStyle = 'rgba(255,255,255,0.06)';
+      g.fillRect(px0, py0, pw, 2);
+    }
     // 通风百叶
     g.fillStyle = '#242a28';
     for (let i = 0; i < 5; i++) {
@@ -264,12 +278,10 @@ export function makeLocker(open, seed = 3, empty = false) {
     g.fillStyle = PAL.metalHi;
     g.fillRect(-0.16 * TILE_W, -h * 0.52, 0.1 * TILE_W, 5);
     g.fillRect(0.07 * TILE_W, -h * 0.52, 0.1 * TILE_W, 5);
-    // 标签
+    // 标签：像素字，fillText 在这个字号下是一团糊
     g.fillStyle = 'rgba(224,165,82,0.75)';
-    g.fillRect(-(D / 2 - 0.16) * TILE_W, -h + 6, 0.5 * TILE_W, 5);
-    g.fillStyle = '#1a1c18';
-    g.font = '4px monospace';
-    g.fillText('EMG-04', -(D / 2 - 0.14) * TILE_W, -h + 10.4);
+    g.fillRect(-(D / 2 - 0.16) * TILE_W, -h + 6, 0.5 * TILE_W, 7);
+    pxText(g, -(D / 2 - 0.14) * TILE_W, -h + 7, 'EMG-04', '#1a1c18', 1);
     // 锈迹
     g.globalAlpha = 0.35;
     speckle(g, -(D / 2) * TILE_W, -h, D * TILE_W, h, rand, 60, [PAL.rust, PAL.rust2, '#2a2320'], 1.6, 1.2);
@@ -366,33 +378,31 @@ export function makeConsole(w, d, h, seed, opts = {}) {
           g.fillRect((-sw / 2 + 0.08) * TILE_W, zb - 0.6 * TILE_Z + i * 1.3, (0.2 + rand() * (sw - 0.3)) * TILE_W, 0.8);
         }
       } else {
-        // 裂纹
-        g.strokeStyle = 'rgba(190,205,205,0.4)';
-        g.lineWidth = 0.6;
-        g.beginPath();
+        // 裂纹：像素放射线
         const cx = 0,
           cy = zb - 0.36 * TILE_Z;
         for (let i = 0; i < 7; i++) {
-          g.moveTo(cx, cy);
-          g.lineTo(cx + Math.cos((i / 7) * 6.28) * (4 + rand() * 8), cy + Math.sin((i / 7) * 6.28) * (3 + rand() * 5));
+          pxLine(g, cx, cy, cx + Math.cos((i / 7) * 6.28) * (4 + rand() * 8), cy + Math.sin((i / 7) * 6.28) * (3 + rand() * 5), 'rgba(190,205,205,0.4)', 1);
         }
-        g.stroke();
       }
-      g.strokeStyle = 'rgba(0,0,0,0.6)';
-      g.lineWidth = 1;
-      g.strokeRect((-sw / 2) * TILE_W, zb - 0.66 * TILE_Z, sw * TILE_W, 0.6 * TILE_Z);
+      {
+        const bx0 = Math.round((-sw / 2) * TILE_W);
+        const bw = Math.round(sw * TILE_W);
+        const by0 = Math.round(zb - 0.66 * TILE_Z);
+        const bh = Math.round(0.6 * TILE_Z);
+        g.fillStyle = 'rgba(0,0,0,0.6)';
+        g.fillRect(bx0, by0, bw, 1);
+        g.fillRect(bx0, by0 + bh - 1, bw, 1);
+        g.fillRect(bx0, by0, 1, bh);
+        g.fillRect(bx0 + bw - 1, by0, 1, bh);
+      }
       resetT(g);
     }
-    // 线缆
-    g.strokeStyle = '#191d1f';
-    g.lineWidth = 1.4;
+    // 线缆：两段像素折线拼出下垂
     for (let i = 0; i < 3; i++) {
       const a = P(ox, oy, w / 2 - 0.1, -d / 2 + 0.2 + i * 0.2, h * 0.2);
       const b = P(ox, oy, w / 2 + 0.5 + rand() * 0.5, d / 2 + rand() * 0.4, 0);
-      g.beginPath();
-      g.moveTo(a[0], a[1]);
-      g.quadraticCurveTo(a[0] + 6, a[1] + 12, b[0], b[1]);
-      g.stroke();
+      pxPolyline(g, [[a[0], a[1]], [a[0] + 4, a[1] + 9], [(a[0] + b[0]) / 2 + 3, (a[1] + b[1]) / 2 + 5], [b[0], b[1]]], '#191d1f', 1);
     }
   });
 }
@@ -416,10 +426,7 @@ export function makeTable(seed = 11) {
     faceTop(g, ox, oy, H);
     g.globalAlpha = 0.35;
     for (let i = 0; i < 14; i++) {
-      g.fillStyle = ['#4b5b4a', '#5c5340', '#3f4a4c'][(rand() * 3) | 0];
-      g.beginPath();
-      g.ellipse((-W / 2 + rand() * W) * TILE_W, (-D / 2 + rand() * D) * TILE_W, 2 + rand() * 5, 1.5 + rand() * 3, 0, 0, 6.3);
-      g.fill();
+      pxBlob(g, (-W / 2 + rand() * W) * TILE_W, (-D / 2 + rand() * D) * TILE_W, 2 + rand() * 5, 1.5 + rand() * 3, ['#4b5b4a', '#5c5340', '#3f4a4c'][(rand() * 3) | 0], rand);
     }
     g.globalAlpha = 1;
     resetT(g);
@@ -432,14 +439,12 @@ export function makeTable(seed = 11) {
     ];
     for (const [gx, gy, gw, gh] of glassware) {
       const p = P(ox, oy, gx, gy, H);
-      g.fillStyle = 'rgba(150,190,185,0.28)';
-      g.beginPath();
-      g.moveTo(p[0] - gw / 2, p[1]);
-      g.lineTo(p[0] - gw / 4, p[1] - gh);
-      g.lineTo(p[0] + gw / 4, p[1] - gh);
-      g.lineTo(p[0] + gw / 2, p[1]);
-      g.closePath();
-      g.fill();
+      pxPoly(g, [
+        [p[0] - gw / 2, p[1]],
+        [p[0] - gw / 4, p[1] - gh],
+        [p[0] + gw / 4, p[1] - gh],
+        [p[0] + gw / 2, p[1]],
+      ], 'rgba(150,190,185,0.28)');
       g.fillStyle = 'rgba(120,190,140,0.5)';
       g.fillRect(p[0] - gw / 2 + 1, p[1] - gh * 0.35, gw - 2, gh * 0.35);
       g.fillStyle = 'rgba(230,245,245,0.35)';
@@ -478,62 +483,53 @@ export function makeBarrel(seed = 5) {
     H = 1.12;
   return makeProp(R * 2 + 0.2, R * 2 + 0.2, H + 0.1, (g, ox, oy) => {
     aoShadow(g, ox, oy, R * 2, R * 2, 0.5);
-    const rx = R * HW * 2 * 0.72,
-      ry = R * HH * 2 * 0.72;
-    const top = oy - H * TILE_Z;
-    // 桶身
-    const grd = g.createLinearGradient(ox - rx, 0, ox + rx, 0);
-    grd.addColorStop(0, '#2f3a33');
-    grd.addColorStop(0.35, '#4e5c4f');
-    grd.addColorStop(0.7, '#3c473e');
-    grd.addColorStop(1, '#232b26');
-    g.fillStyle = grd;
-    g.beginPath();
-    g.moveTo(ox - rx, oy);
-    g.lineTo(ox - rx, top);
-    g.lineTo(ox + rx, top);
-    g.lineTo(ox + rx, oy);
-    g.ellipse(ox, oy, rx, ry, 0, 0, Math.PI);
-    g.closePath();
-    g.fill();
-    // 箍
-    g.fillStyle = 'rgba(0,0,0,0.32)';
+    const rx = Math.round(R * HW * 2 * 0.72),
+      ry = Math.round(R * HH * 2 * 0.72);
+    const top = Math.round(oy - H * TILE_Z);
+    const X = Math.round(ox);
+    const Y = Math.round(oy);
+    /* 桶身：逐列扫描。明暗按 x 分四档硬带，带交界处逐列棋盘抖动；
+       下缘沿椭圆弧收，台阶轮廓由取整给出。 */
+    const cols = ['#2f3a33', '#4e5c4f', '#3c473e', '#232b26'];
+    const bandAt = (u) => (u < -0.55 ? 0 : u < 0.1 ? 1 : u < 0.62 ? 2 : 3);
+    for (let x = -rx; x <= rx; x++) {
+      const u = x / rx;
+      const yBot = Y + Math.round(ry * Math.sqrt(Math.max(0, 1 - u * u)));
+      const b = bandAt(u);
+      g.fillStyle = cols[b];
+      g.fillRect(X + x, top, 1, yBot - top);
+      // 相邻带的交界列：棋盘抖动咬合
+      if (b < 3 && bandAt((x + 2) / rx) > b) {
+        g.fillStyle = cols[b + 1];
+        for (let y = top + ((top + x) & 1); y < yBot; y += 2) g.fillRect(X + x, y, 1, 1);
+      }
+    }
+    // 桶身两侧 1px 描边
+    g.fillStyle = '#181e1a';
+    g.fillRect(X - rx, top, 1, Y - top);
+    g.fillRect(X + rx, top, 1, Y - top);
+    // 箍：像素椭圆环 + 一条横向压暗
     for (const t of [0.22, 0.5, 0.78]) {
-      g.beginPath();
-      g.ellipse(ox, top + H * TILE_Z * t, rx, ry, 0, 0, Math.PI * 2);
-      g.fill();
-      g.fillRect(ox - rx, top + H * TILE_Z * t - 1.5, rx * 2, 3);
+      const hy = top + H * TILE_Z * t;
+      pxEllipseRing(g, X, hy, rx, ry, 'rgba(0,0,0,0.32)', 1);
+      g.fillStyle = 'rgba(0,0,0,0.32)';
+      g.fillRect(X - rx, Math.round(hy) - 1, rx * 2, 3);
     }
-    // 顶盖
-    g.fillStyle = '#5b6a5c';
-    g.beginPath();
-    g.ellipse(ox, top, rx, ry, 0, 0, Math.PI * 2);
-    g.fill();
-    g.strokeStyle = '#39443b';
-    g.lineWidth = 1;
-    g.stroke();
-    g.fillStyle = '#48544a';
-    g.beginPath();
-    g.ellipse(ox, top, rx * 0.6, ry * 0.6, 0, 0, Math.PI * 2);
-    g.fill();
-    // 生化标
-    g.fillStyle = 'rgba(224,165,82,0.7)';
-    g.beginPath();
-    g.arc(ox - 2, top + H * TILE_Z * 0.42, 4.2, 0, 6.3);
-    g.fill();
+    // 顶盖：像素椭圆两档 + 1px 环
+    pxEllipse(g, X, top, rx, ry, '#5b6a5c');
+    pxEllipseRing(g, X, top, rx, ry, '#39443b', 1);
+    pxEllipse(g, X, top, rx * 0.6, ry * 0.6, '#48544a');
+    /* 生化标：像素圆盘 + 三个方块斑，读得出"有个警示圆标"即可 */
+    const mx = X - 2;
+    const my = Math.round(top + H * TILE_Z * 0.42);
+    pxEllipse(g, mx, my, 4, 4, 'rgba(224,165,82,0.7)');
     g.fillStyle = '#1d211d';
-    g.beginPath();
-    g.arc(ox - 2, top + H * TILE_Z * 0.42, 1.4, 0, 6.3);
-    g.fill();
-    for (let i = 0; i < 3; i++) {
-      g.beginPath();
-      g.moveTo(ox - 2, top + H * TILE_Z * 0.42);
-      g.arc(ox - 2, top + H * TILE_Z * 0.42, 4.2, i * 2.09 + 0.3, i * 2.09 + 1.4);
-      g.closePath();
-      g.fill();
-    }
+    g.fillRect(mx - 1, my - 1, 2, 2);
+    g.fillRect(mx - 3, my - 3, 2, 2);
+    g.fillRect(mx + 1, my - 3, 2, 2);
+    g.fillRect(mx - 1, my + 2, 2, 2);
     g.globalAlpha = 0.3;
-    speckle(g, ox - rx, top, rx * 2, H * TILE_Z, rand, 40, [PAL.rust, '#20261f'], 1.5, 1.2);
+    speckle(g, X - rx, top, rx * 2, H * TILE_Z, rand, 40, [PAL.rust, '#20261f'], 1.5, 1.2);
     g.globalAlpha = 1;
   });
 }
@@ -560,31 +556,18 @@ export function makeMonitorCart(seed = 21) {
     faceLeft(g, ox, oy, -0.26);
     g.fillStyle = '#10181a';
     g.fillRect(-0.26 * TILE_W, -1.44 * TILE_Z, 0.52 * TILE_W, 0.38 * TILE_Z);
-    // 破裂屏
-    g.strokeStyle = 'rgba(190,210,210,0.45)';
-    g.lineWidth = 0.7;
+    // 破裂屏：像素放射裂纹 + 像素圆黑斑
     const cx = 1,
       cy = -1.25 * TILE_Z;
-    g.beginPath();
     for (let i = 0; i < 9; i++) {
-      g.moveTo(cx, cy);
       const a = (i / 9) * 6.28 + rand();
-      g.lineTo(cx + Math.cos(a) * (4 + rand() * 7), cy + Math.sin(a) * (2 + rand() * 4));
+      pxLine(g, cx, cy, cx + Math.cos(a) * (4 + rand() * 7), cy + Math.sin(a) * (2 + rand() * 4), 'rgba(190,210,210,0.45)', 1);
     }
-    g.stroke();
-    g.fillStyle = 'rgba(0,0,0,0.55)';
-    g.beginPath();
-    g.arc(cx, cy, 3.2, 0, 6.3);
-    g.fill();
+    pxEllipse(g, cx, cy, 3.2, 3.2, 'rgba(0,0,0,0.55)');
     resetT(g);
-    // 线缆垂落
-    g.strokeStyle = '#171b1d';
-    g.lineWidth = 1.3;
+    // 线缆垂落：像素折线
     const a0 = P(ox, oy, 0.3, 0.1, 0.72);
-    g.beginPath();
-    g.moveTo(a0[0], a0[1]);
-    g.quadraticCurveTo(a0[0] + 8, a0[1] + 14, a0[0] + 2, oy + 4);
-    g.stroke();
+    pxPolyline(g, [[a0[0], a0[1]], [a0[0] + 6, a0[1] + 8], [a0[0] + 5, a0[1] + 14], [a0[0] + 2, oy + 4]], '#171b1d', 1);
   });
 }
 
@@ -652,13 +635,9 @@ export function makePipeStack(seed = 61) {
       const off = -0.4 + i * 0.42;
       isoBox(g, ox, oy, -W / 2, off, 0, W * 0.55, 0.24, H - rand() * 0.3, '#5a5348', '#3f4a4c', '#2f3839');
     }
-    // 阀门
+    // 阀门：像素圆环
     const p = P(ox, oy, 0, -0.2, H * 0.42);
-    g.strokeStyle = '#7a6b4a';
-    g.lineWidth = 2;
-    g.beginPath();
-    g.arc(p[0] + 4, p[1], 4, 0, 6.3);
-    g.stroke();
+    pxEllipseRing(g, p[0] + 4, p[1], 4, 4, '#7a6b4a', 2);
   });
 }
 
@@ -722,29 +701,29 @@ function drawCharacterBody(g, sx, sy, o) {
   const x = Math.round(sx);
   const y = Math.round(sy);
 
-  const crouch = po.crouch || 0;
-  const sink = po.sink || 0;
-  const lean = po.lean || 0;
+  /* 姿势量取整/量化：屈身与下沉落在整像素上，上身旋转量化到 7.5° 一档 ——
+     过场里的动作从平滑补间变成一格一格的定格步进 */
+  const crouch = Math.round(po.crouch || 0);
+  const sink = Math.round(po.sink || 0);
+  const lean = po.lean ? qz(po.lean, Math.PI / 24) : 0;
   const legs = po.legs || null;
 
-  // 影子：屈身/趴下时人更贴地，影子更实
+  // 影子：屈身/趴下时人更贴地，影子更实（两档像素椭圆，无渐变）
   g.save();
   g.globalAlpha = 0.5 + Math.min(0.25, (crouch + sink) * 0.02);
-  g.fillStyle = '#000';
-  g.beginPath();
-  g.ellipse(x, y, 6.2 + crouch * 0.14, 3.1, 0, 0, Math.PI * 2);
-  g.fill();
+  pxEllipse(g, x, y, 6.2 + crouch * 0.14, 3.1, 'rgba(0,0,0,0.55)');
+  pxEllipse(g, x, y, 4.2 + crouch * 0.1, 2.1, 'rgba(0,0,0,0.5)');
   g.restore();
 
-  const baseY = y - bob + sink;
+  const baseY = y - Math.round(bob) + sink;
   // 髋部：上半身绕它旋转，屈身时它整个下沉
   const hipY = baseY - 11 + crouch;
 
-  // 腿
-  const l1 = legs ? legs.a : sw * 2.2;
-  const l2 = legs ? legs.b : -sw * 2.2;
-  const la = legs && legs.la ? legs.la : 0;
-  const lb = legs && legs.lb ? legs.lb : 0;
+  // 腿：摆腿量取整，脚落在整像素格上
+  const l1 = Math.round(legs ? legs.a : sw * 2.2);
+  const l2 = Math.round(legs ? legs.b : -sw * 2.2);
+  const la = Math.round(legs && legs.la ? legs.la : 0);
+  const lb = Math.round(legs && legs.lb ? legs.lb : 0);
   const legTop = baseY - 9 + crouch;
   const legH = Math.max(2, 8 - crouch);
   g.fillStyle = PAL.pants;
@@ -799,12 +778,12 @@ function drawCharacterBody(g, sx, sy, o) {
     g.fillStyle = '#2a2f33';
     g.fillRect(gx, baseY - 13 + upY, 3, 5);
     g.fillStyle = '#3d444a';
-    g.fillRect(gx, baseY - 13 + upY, 3, 1.4);
+    g.fillRect(gx, baseY - 13 + upY, 3, 1);
   }
 
   // 头
-  const htx = po.headTilt ? po.headTilt.x : 0;
-  const hty = po.headTilt ? po.headTilt.y : 0;
+  const htx = po.headTilt ? Math.round(po.headTilt.x) : 0;
+  const hty = po.headTilt ? Math.round(po.headTilt.y) : 0;
   const hx = x - 3 + dirRight + htx;
   const hy = baseY - 28 + upY + hty;
   g.fillStyle = PAL.skin;
@@ -835,7 +814,7 @@ function drawCharacterBody(g, sx, sy, o) {
     // 咬牙：用力那几拍嘴张开，脸上有事发生
     if (po.grit) {
       g.fillStyle = '#2b1c18';
-      g.fillRect(hx + (dirRight > 0 ? 3 : 1), hy + 6, 3, 1.4);
+      g.fillRect(hx + (dirRight > 0 ? 3 : 1), hy + 6, 3, 1);
     }
   }
   // 脖颈阴影
@@ -848,7 +827,7 @@ function drawCharacterBody(g, sx, sy, o) {
   const itemAng = po.armAng === undefined ? null : po.armAng;
   let muzzle = null;
   const drawArm = (side, item, off) => {
-    const shx = x + side * 4.2;
+    const shx = Math.round(x + side * 4.2);
     let ax, ay;
     if (off) {
       ax = shx + off.x;
@@ -860,21 +839,13 @@ function drawCharacterBody(g, sx, sy, o) {
       ax = shx + side * 1.4 + (o.moving ? -sw * side * 1.6 : 0);
       ay = shoulderY + 8 + (o.moving ? Math.abs(sw) * 0.8 : 0);
     }
-    g.strokeStyle = PAL.coat;
-    g.lineWidth = 2.4;
-    g.lineCap = 'round';
-    g.beginPath();
-    g.moveTo(shx, shoulderY);
-    g.lineTo(ax, ay);
-    g.stroke();
-    g.strokeStyle = 'rgba(0,0,0,0.18)';
-    g.lineWidth = 1;
-    g.beginPath();
-    g.moveTo(shx, shoulderY + 1);
-    g.lineTo(ax, ay + 1);
-    g.stroke();
+    ax = Math.round(ax);
+    ay = Math.round(ay);
+    // 手臂：2px 像素直线 + 1px 底缘压暗，代替 round cap 的 stroke
+    pxLine(g, shx, shoulderY, ax, ay, PAL.coat, 2);
+    pxLine(g, shx, shoulderY + 2, ax, ay + 2, 'rgba(0,0,0,0.18)', 1);
     g.fillStyle = PAL.skin;
-    g.fillRect(ax - 1, ay - 1, 2.4, 2.4);
+    g.fillRect(ax, ay, 2, 2);
     if (item) {
       const a = itemAng === null ? Math.atan2(aim.y, aim.x) : itemAng;
       drawHeldItem(g, ax, ay, a, item, o);
@@ -918,26 +889,30 @@ function drawCharacterBody(g, sx, sy, o) {
   };
 }
 
+/**
+ * 手持物：不再用 rotate（旋转的 fillRect 会被抗锯齿糊掉），
+ * 枪身/筒身沿瞄准方向铺台阶像素线，跟机组人员胸前的卡宾枪同一画法。
+ */
 function drawHeldItem(g, ax, ay, a, item, o) {
-  g.save();
-  g.translate(ax + 0.5, ay + 0.5);
-  g.rotate(a);
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const X = Math.round(ax);
+  const Y = Math.round(ay);
   if (item === 'pistol') {
-    g.fillStyle = '#20262a';
-    g.fillRect(-1, -1.6, 8, 3);
-    g.fillStyle = '#39434a';
-    g.fillRect(-1, -1.6, 8, 1);
+    // 枪身：2px 像素线 + 1px 顶部受光
+    pxLine(g, X, Y - 1, X + ca * 7, Y - 1 + sa * 7, '#20262a', 2);
+    pxLine(g, X, Y - 2, X + ca * 7, Y - 2 + sa * 7, '#39434a', 1);
+    // 握把：垂在手下
     g.fillStyle = '#171b1e';
-    g.fillRect(0, 1.4, 2.6, 3.2);
+    g.fillRect(X, Y + 1, 2, 3);
   } else if (item === 'flashlight') {
-    g.fillStyle = '#2f373c';
-    g.fillRect(-2, -1.5, 7, 3);
-    g.fillStyle = '#4c565c';
-    g.fillRect(-2, -1.5, 7, 1);
+    // 筒身：3px 像素线（后端在手后一点）
+    pxLine(g, X - ca * 2, Y - 1 - sa * 2, X + ca * 4, Y - 1 + sa * 4, '#2f373c', 3);
+    pxLine(g, X - ca * 2, Y - 2 - sa * 2, X + ca * 4, Y - 2 + sa * 4, '#4c565c', 1);
+    // 灯头
     g.fillStyle = o.flashOn ? '#fff6d8' : '#8d9490';
-    g.fillRect(5, -1.8, 2, 3.6);
+    g.fillRect(Math.round(X + ca * 5) - 1, Math.round(Y + sa * 5) - 2, 3, 4);
   }
-  g.restore();
 }
 
 /* 躺姿不再单独画一套等距盒子身体：那样和站姿比例不一致。起床动画改成
@@ -991,10 +966,7 @@ export function makeStep(wTiles, run, rise, seed = 1) {
     g.fillStyle = 'rgba(255,255,255,0.15)';
     g.fillRect(p[0] + 2, p[1], wTiles * TILE_W * 0.5 - 3, 1.2);
     if (rand() > 0.66) {
-      g.fillStyle = 'rgba(63,18,16,0.5)';
-      g.beginPath();
-      g.ellipse(p[0] + 5 + rand() * 12, p[1] + 3 + rand() * 3, 3 + rand() * 5, 2 + rand() * 3, 0, 0, 6.3);
-      g.fill();
+      pxBlob(g, p[0] + 5 + rand() * 12, p[1] + 3 + rand() * 3, 3 + rand() * 5, 2 + rand() * 3, 'rgba(63,18,16,0.5)', rand);
     }
     // 扶手立柱
     const hx = -w2 - 0.04;
@@ -1002,12 +974,7 @@ export function makeStep(wTiles, run, rise, seed = 1) {
     // 斜扶手：本级柱顶连到下一级（+y 更低一级）柱顶
     const a = P(ox, oy, hx + 0.05, -run / 2 + 0.05, rise + railH);
     const b = P(ox, oy, hx + 0.05, run / 2 + 0.05, rise - rise + railH);
-    g.strokeStyle = '#8b9296';
-    g.lineWidth = 2;
-    g.beginPath();
-    g.moveTo(a[0], a[1]);
-    g.lineTo(b[0], b[1]);
-    g.stroke();
+    pxLine(g, a[0], a[1], b[0], b[1], '#8b9296', 2);
   });
 }
 
@@ -1022,18 +989,10 @@ export function makeLanding(wTiles, dTiles, seed = 3) {
     isoBox(g, ox, oy, hx, dTiles / 2 - 0.1, 0.16, 0.1, 0.1, 0.72, '#7d8589', '#4a5155', '#383e42');
     const a = P(ox, oy, hx + 0.05, -dTiles / 2, 0.88);
     const b = P(ox, oy, hx + 0.05, dTiles / 2, 0.88);
-    g.strokeStyle = '#8b9296';
-    g.lineWidth = 2;
-    g.beginPath();
-    g.moveTo(a[0], a[1]);
-    g.lineTo(b[0], b[1]);
-    g.stroke();
+    pxLine(g, a[0], a[1], b[0], b[1], '#8b9296', 2);
     if (rand() > 0.4) {
       const p = P(ox, oy, 0, 0, 0.16);
-      g.fillStyle = 'rgba(63,18,16,0.4)';
-      g.beginPath();
-      g.ellipse(p[0], p[1], 9, 5, 0, 0, 6.3);
-      g.fill();
+      pxBlob(g, p[0], p[1], 9, 5, 'rgba(63,18,16,0.4)', rand);
     }
   });
 }
@@ -1075,9 +1034,7 @@ export function makeStairsDown(wTiles, dTiles, seed = 2) {
       g.fillRect(p[0] + 2, p[1], (wTiles - 0.2) * TILE_W * 0.5 - 3, 1);
     }
     // 口沿
-    g.strokeStyle = '#6d757a';
-    g.lineWidth = 1.6;
-    poly(g, [P(ox, oy, -w2, -d2, 0), P(ox, oy, w2, -d2, 0), P(ox, oy, w2, d2, 0), P(ox, oy, -w2, d2, 0)], null, '#6d757a', 1.6);
+    poly(g, [P(ox, oy, -w2, -d2, 0), P(ox, oy, w2, -d2, 0), P(ox, oy, w2, d2, 0), P(ox, oy, -w2, d2, 0)], null, '#6d757a', 2);
     // 洞口边的扶手
     const hx = w2 - 0.06;
     for (let i = 0; i < 3; i++) {
@@ -1085,12 +1042,7 @@ export function makeStairsDown(wTiles, dTiles, seed = 2) {
     }
     const a = P(ox, oy, hx + 0.05, -d2, 0.74);
     const b = P(ox, oy, hx + 0.05, d2, 0.74);
-    g.strokeStyle = '#8b9296';
-    g.lineWidth = 2;
-    g.beginPath();
-    g.moveTo(a[0], a[1]);
-    g.lineTo(b[0], b[1]);
-    g.stroke();
+    pxLine(g, a[0], a[1], b[0], b[1], '#8b9296', 2);
     // 血手印拖向洞口
     g.globalAlpha = 0.45;
     g.fillStyle = '#3f1210';
@@ -1128,32 +1080,32 @@ export function makeTent(seed = 701) {
       [P(ox, oy, -RX, -RY, 0), P(ox, oy, RX, -RY, 0), ridgeB, ridgeA],
       '#2b3129',
     );
-    // 近侧坡面：主要的受光面
-    const nf = [ridgeA, ridgeB, P(ox, oy, RX, RY, 0), P(ox, oy, -RX, RY, 0)];
-    const grd = g.createLinearGradient(ridgeA[0], ridgeA[1], nf[3][0], nf[3][1]);
-    grd.addColorStop(0, '#5c6a4c');
-    grd.addColorStop(0.55, '#47533c');
-    grd.addColorStop(1, '#333d2d');
-    poly(g, nf, grd);
-    // 布面褶皱：沿脊线往下摆拉几条暗纹
-    g.strokeStyle = 'rgba(0,0,0,0.28)';
-    g.lineWidth = 1;
+    // 近侧坡面：主要的受光面。三档硬分带（脊线亮 → 下摆暗），交界棋盘抖动
+    const hemA = P(ox, oy, -RX, RY, 0);
+    const hemB = P(ox, oy, RX, RY, 0);
+    const mixPt = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+    const bandCols = ['#5c6a4c', '#47533c', '#333d2d'];
+    const cuts = [0, 0.4, 0.72, 1];
+    for (let b = 0; b < 3; b++) {
+      poly(g, [
+        mixPt(ridgeA, hemA, cuts[b]), mixPt(ridgeB, hemB, cuts[b]),
+        mixPt(ridgeB, hemB, cuts[b + 1]), mixPt(ridgeA, hemA, cuts[b + 1]),
+      ], bandCols[b]);
+      if (b > 0) {
+        const u = mixPt(ridgeA, hemA, cuts[b]);
+        const v = mixPt(ridgeB, hemB, cuts[b]);
+        pxDitherLine(g, u[0], u[1], v[0], v[1], bandCols[b - 1]);
+      }
+    }
+    // 布面褶皱：沿脊线往下摆拉几条暗纹（像素直线）
     for (let i = 1; i < 7; i++) {
       const t = i / 7;
       const a = P(ox, oy, -RX + t * RX * 2, 0.02, H - 0.03);
       const b = P(ox, oy, -RX + t * RX * 2 + 0.06, RY, 0);
-      g.beginPath();
-      g.moveTo(a[0], a[1]);
-      g.lineTo(b[0], b[1]);
-      g.stroke();
+      pxLine(g, a[0], a[1], b[0], b[1], 'rgba(0,0,0,0.28)', 1);
     }
     // 脊线与压条
-    g.strokeStyle = '#7d8a68';
-    g.lineWidth = 1.6;
-    g.beginPath();
-    g.moveTo(ridgeA[0], ridgeA[1]);
-    g.lineTo(ridgeB[0], ridgeB[1]);
-    g.stroke();
+    pxLine(g, ridgeA[0], ridgeA[1], ridgeB[0], ridgeB[1], '#7d8a68', 2);
 
     // +x 端：敞开的入口，里面是黑的
     const e0 = P(ox, oy, RX, -RY, 0);
@@ -1169,32 +1121,23 @@ export function makeTent(seed = 701) {
       '#07090a',
     );
     // 掀开、撕烂的门帘
-    g.fillStyle = '#4e5a40';
-    g.beginPath();
-    g.moveTo(ridgeB[0], ridgeB[1] + 2);
-    g.lineTo(ridgeB[0] + 9, ridgeB[1] + 12);
-    g.lineTo(ridgeB[0] + 3, ridgeB[1] + 22);
-    g.lineTo(ridgeB[0] - 2, ridgeB[1] + 10);
-    g.closePath();
-    g.fill();
-    g.strokeStyle = '#1b2018';
-    g.lineWidth = 0.8;
-    g.stroke();
+    poly(g, [
+      [ridgeB[0], ridgeB[1] + 2],
+      [ridgeB[0] + 9, ridgeB[1] + 12],
+      [ridgeB[0] + 3, ridgeB[1] + 22],
+      [ridgeB[0] - 2, ridgeB[1] + 10],
+    ], '#4e5a40', '#1b2018', 1);
 
     // 撕裂口：从入口往近侧坡面撕开一道
-    g.fillStyle = '#0a0d0b';
-    g.beginPath();
     const tr = P(ox, oy, 0.42, 0.3, 0.6);
-    g.moveTo(tr[0], tr[1]);
-    g.lineTo(tr[0] + 7, tr[1] - 5);
-    g.lineTo(tr[0] + 13, tr[1] + 3);
-    g.lineTo(tr[0] + 6, tr[1] + 9);
-    g.closePath();
-    g.fill();
+    poly(g, [
+      [tr[0], tr[1]],
+      [tr[0] + 7, tr[1] - 5],
+      [tr[0] + 13, tr[1] + 3],
+      [tr[0] + 6, tr[1] + 9],
+    ], '#0a0d0b');
 
     // 地钉与拉绳
-    g.strokeStyle = 'rgba(190,196,178,0.5)';
-    g.lineWidth = 0.9;
     for (const [gx, gy] of [
       [-RX - 0.35, RY + 0.3],
       [RX + 0.3, RY + 0.32],
@@ -1202,30 +1145,22 @@ export function makeTent(seed = 701) {
     ]) {
       const a = P(ox, oy, gx > 0 ? RX : -RX, 0, H - 0.06);
       const b = P(ox, oy, gx, gy, 0);
-      g.beginPath();
-      g.moveTo(a[0], a[1]);
-      g.lineTo(b[0], b[1]);
-      g.stroke();
+      pxLine(g, a[0], a[1], b[0], b[1], 'rgba(190,196,178,0.5)', 1);
       g.fillStyle = '#6b736e';
       g.fillRect(b[0] - 1, b[1] - 2, 2, 3);
     }
 
     // 血：帐篷上的喷溅 + 从入口拖出来的一道
     g.globalAlpha = 0.62;
-    g.fillStyle = '#3f1210';
     for (let i = 0; i < 16; i++) {
       const ty = rand() * RY; // 0 在脊线，RY 在下摆
       const zz = (1 - ty / RY) * H * (0.15 + rand() * 0.75);
       const p = P(ox, oy, -RX + rand() * RX * 2, ty, zz);
-      g.beginPath();
-      g.ellipse(p[0], p[1], 1 + rand() * 4.5, 1 + rand() * 3, rand() * 3, 0, 6.3);
-      g.fill();
+      pxBlob(g, p[0], p[1], 1 + rand() * 4.5, 1 + rand() * 3, '#3f1210', rand);
     }
     for (let i = 0; i < 9; i++) {
       const p = P(ox, oy, RX + rand() * 0.8, -RY * 0.4 + rand() * RY * 1.4, 0);
-      g.beginPath();
-      g.ellipse(p[0], p[1], 2 + rand() * 6, 1.4 + rand() * 3, 0, 0, 6.3);
-      g.fill();
+      pxBlob(g, p[0], p[1], 2 + rand() * 6, 1.4 + rand() * 3, '#3f1210', rand);
     }
     g.globalAlpha = 1;
   });
@@ -1263,24 +1198,28 @@ export function makeRoofBulkhead(seed = 731) {
     g.fillRect(uw(-0.95), vz(2.12), uw(1.9), 2.12 * TILE_Z);
     g.fillStyle = '#2a3231';
     g.fillRect(uw(-0.88), vz(2.05), uw(1.76), 2.05 * TILE_Z);
-    // 钢门：两扇，中缝 + 下部危险条纹
-    const dg = g.createLinearGradient(uw(-0.8), 0, uw(0.8), 0);
-    dg.addColorStop(0, '#465052');
-    dg.addColorStop(0.4, '#5b6568');
-    dg.addColorStop(0.55, '#3e4749');
-    dg.addColorStop(1, '#4a5355');
-    g.fillStyle = dg;
-    g.fillRect(uw(-0.8), vz(1.98), uw(1.6), 1.98 * TILE_Z);
+    // 钢门：两扇，硬分带明暗 + 交界棋盘抖动列，中缝 + 下部危险条纹
+    const dh = Math.round(1.98 * TILE_Z);
+    const dy0 = Math.round(vz(1.98));
+    for (const [u0, u1, dc] of [
+      [-0.8, -0.45, '#465052'],
+      [-0.45, -0.03, '#5b6568'],
+      [-0.03, 0.42, '#3e4749'],
+      [0.42, 0.8, '#4a5355'],
+    ]) {
+      g.fillStyle = dc;
+      g.fillRect(Math.round(uw(u0)), dy0, Math.round(uw(u1)) - Math.round(uw(u0)), dh);
+    }
+    pxDitherV(g, uw(-0.45), dy0, dy0 + dh, '#465052');
+    pxDitherV(g, uw(0.42), dy0, dy0 + dh, '#3e4749');
     g.fillStyle = '#161a1a';
-    g.fillRect(uw(-0.03), vz(1.98), 1.6, 1.98 * TILE_Z);
+    g.fillRect(uw(-0.03), vz(1.98), 2, 1.98 * TILE_Z);
     // 推杠与门牌
     g.fillStyle = '#8d968f';
-    g.fillRect(uw(-0.62), vz(1.05), uw(1.24), 2.2);
+    g.fillRect(uw(-0.62), vz(1.05), uw(1.24), 2);
     g.fillStyle = 'rgba(200,200,190,0.32)';
-    g.fillRect(uw(-0.26), vz(1.66), uw(0.52), 6);
-    g.fillStyle = '#1a1c1a';
-    g.font = '5px monospace';
-    g.fillText('R', uw(-0.06), vz(1.66) + 5);
+    g.fillRect(uw(-0.26), vz(1.66), uw(0.52), 7);
+    pxText(g, uw(-0.06), vz(1.66) + 1, 'R', '#1a1c1a', 1);
     // 门缝渗出的一点楼道光
     g.fillStyle = 'rgba(190,208,200,0.14)';
     g.fillRect(uw(-0.03), vz(1.9), 1.6, 1.8 * TILE_Z);
@@ -1314,23 +1253,13 @@ export function makeRoofBulkhead(seed = 731) {
     isoBox(g, ox, oy, -0.28, -1.4, H + 0.14, 0.56, 0.56, 0.42, '#4f5856', '#3c4544', '#2c3332');
     isoBox(g, ox, oy, -0.34, -1.46, H + 0.56, 0.68, 0.68, 0.1, '#5d6664', '#414a48', '#303735');
     isoBox(g, ox, oy, -0.3, 0.9, H + 0.14, 0.6, 0.9, 0.5, '#4a5350', '#39413f', '#2a3130');
-    // 天线杆 + 拉线
+    // 天线杆 + 拉线（像素直线）
     const top = P(ox, oy, 0.1, -0.2, H + 1.5);
     const foot = P(ox, oy, 0.1, -0.2, H + 0.14);
-    g.strokeStyle = '#59635e';
-    g.lineWidth = 1.4;
-    g.beginPath();
-    g.moveTo(foot[0], foot[1]);
-    g.lineTo(top[0], top[1]);
-    g.stroke();
-    g.strokeStyle = 'rgba(120,132,128,0.5)';
-    g.lineWidth = 0.7;
+    pxLine(g, foot[0], foot[1], top[0], top[1], '#59635e', 1);
     for (const [gx, gy] of [[-0.4, -1.1], [0.4, 0.7], [-0.4, 0.7]]) {
       const b = P(ox, oy, gx, gy, H + 0.16);
-      g.beginPath();
-      g.moveTo(top[0], top[1]);
-      g.lineTo(b[0], b[1]);
-      g.stroke();
+      pxLine(g, top[0], top[1], b[0], b[1], 'rgba(120,132,128,0.5)', 1);
     }
     // 天线顶的障碍灯
     g.fillStyle = 'rgba(255,90,70,0.75)';
@@ -1413,51 +1342,11 @@ export function heliCabinAt(x, y, dir = -1) {
 const CABIN = { x0: 1.5, x1: 13.0, y0: -5.5, y1: 5.5 };
 
 /* 像素动画量化器：值对齐到 step 的格上、时间按 hz 定格。
-   平滑的正弦补间读起来是矢量动画，量化成跳变的定格才像逐帧画的。 */
-const qz = (v, step) => Math.round(v / step) * step;
-const tick = (t, hz) => Math.floor(t * hz) / hz;
-
-/** 像素直线：逐格取整落点画 th×th 的方块，代替 stroke（硬边台阶，无抗锯齿） */
-function pxLine(g, x0, y0, x1, y1, c, th = 1) {
-  const n = Math.max(Math.abs(Math.round(x1) - Math.round(x0)), Math.abs(Math.round(y1) - Math.round(y0)), 1);
-  g.fillStyle = c;
-  let lx = null;
-  let ly = null;
-  for (let i = 0; i <= n; i++) {
-    const xx = Math.round(x0 + ((x1 - x0) * i) / n);
-    const yy = Math.round(y0 + ((y1 - y0) * i) / n);
-    if (xx === lx && yy === ly) continue;
-    g.fillRect(xx, yy, th, th);
-    lx = xx;
-    ly = yy;
-  }
-}
-
-/** 棋盘抖动行：两个色带的交界处隔格点上一层，像素画的渐变过渡 */
-function pxDither(g, x0, x1, y, c) {
-  g.fillStyle = c;
-  for (let x = x0 + ((x0 + y) & 1); x < x1; x += 2) g.fillRect(x, y, 1, 1);
-}
-
-/** 沿多段线在 y 处取 x（pts = [[y, x], ...]，y 升序，越界取端点） */
-function edgeAt(pts, y) {
-  if (y <= pts[0][0]) return pts[0][1];
-  for (let i = 1; i < pts.length; i++) {
-    if (y <= pts[i][0]) {
-      const [ya, xa] = pts[i - 1];
-      const [yb, xb] = pts[i];
-      return xa + ((xb - xa) * (y - ya)) / (yb - ya);
-    }
-  }
-  return pts[pts.length - 1][1];
-}
-
-/** 逐行扫描两条边，取整成每行 [xl, xr] —— 像素轮廓的台阶就是这么来的 */
-function rowScan(L, R, y0, y1) {
-  const rows = [];
-  for (let y = y0; y <= y1; y++) rows.push([Math.round(edgeAt(L, y)), Math.round(edgeAt(R, y))]);
-  return rows;
-}
+   平滑的正弦补间读起来是矢量动画，量化成跳变的定格才像逐帧画的。
+   （pxLine / pxDither / edgeAt / rowScan 这些像素 helper 已上移到 util.js，
+   全游戏共用；这里只剩直升机自己的量化器。） */
+export const qz = (v, step) => Math.round(v / step) * step;
+export const tick = (t, hz) => Math.floor(t * hz) / hz;
 
 /* 机体调色板：硬分档，不做半透明叠色 */
 const HP = {
@@ -2186,11 +2075,9 @@ export function drawPortrait(g, W, H, o = {}) {
   // 背景：一块纯色，不加网格和光斑
   g.fillStyle = '#1b1b20';
   g.fillRect(0, 0, 120, 200);
-  // 地面阴影
-  g.fillStyle = 'rgba(0,0,0,0.45)';
-  g.beginPath();
-  g.ellipse(60, 192, 30, 6, 0, 0, 6.3);
-  g.fill();
+  // 地面阴影：两档像素椭圆
+  pxEllipse(g, 60, 192, 30, 6, 'rgba(0,0,0,0.3)');
+  pxEllipse(g, 60, 192, 20, 4, 'rgba(0,0,0,0.35)');
 
   const R = (x, y, w, h, c) => {
     g.fillStyle = c;
@@ -2213,67 +2100,59 @@ export function drawPortrait(g, W, H, o = {}) {
 
   // 白大褂主体
   R(40, 62, 40, 80, PAL.coat);
-  // 下摆（略微展开）
-  g.fillStyle = PAL.coat;
-  g.beginPath();
-  g.moveTo(40, 120);
-  g.lineTo(80, 120);
-  g.lineTo(83, 144);
-  g.lineTo(37, 144);
-  g.closePath();
-  g.fill();
+  // 下摆（略微展开）：逐行扫描的斜边台阶
+  pxPoly(g, [
+    [40, 120],
+    [80, 120],
+    [83, 144],
+    [37, 144],
+  ], PAL.coat);
   // 侧面阴影
   R(72, 62, 11, 82, PAL.coatShade);
   R(37, 62, 4, 82, 'rgba(0,0,0,0.12)');
 
   // 内衬衬衫 + 领口
-  g.fillStyle = '#39464d';
-  g.beginPath();
-  g.moveTo(52, 60);
-  g.lineTo(68, 60);
-  g.lineTo(60, 86);
-  g.closePath();
-  g.fill();
+  pxPoly(g, [
+    [52, 60],
+    [68, 60],
+    [60, 86],
+  ], '#39464d');
   // 衣襟
-  g.fillStyle = PAL.coat;
-  g.beginPath();
-  g.moveTo(40, 62);
-  g.lineTo(58, 62);
-  g.lineTo(61, 90);
-  g.lineTo(58, 144);
-  g.lineTo(37, 144);
-  g.lineTo(40, 120);
-  g.closePath();
-  g.fill();
-  g.strokeStyle = PAL.coatDark;
-  g.lineWidth = 1;
-  g.beginPath();
-  g.moveTo(58, 62);
-  g.lineTo(61, 90);
-  g.lineTo(59, 144);
-  g.stroke();
+  pxPoly(g, [
+    [40, 62],
+    [58, 62],
+    [61, 90],
+    [58, 144],
+    [37, 144],
+    [40, 120],
+  ], PAL.coat);
+  pxPolyline(g, [
+    [58, 62],
+    [61, 90],
+    [59, 144],
+  ], PAL.coatDark, 1);
   // 领子
-  g.fillStyle = '#e2e8ea';
-  g.beginPath();
-  g.moveTo(50, 58);
-  g.lineTo(60, 74);
-  g.lineTo(56, 58);
-  g.closePath();
-  g.fill();
-  g.beginPath();
-  g.moveTo(70, 58);
-  g.lineTo(60, 74);
-  g.lineTo(64, 58);
-  g.closePath();
-  g.fill();
+  pxPoly(g, [
+    [50, 58],
+    [60, 74],
+    [56, 58],
+  ], '#e2e8ea');
+  pxPoly(g, [
+    [70, 58],
+    [60, 74],
+    [64, 58],
+  ], '#e2e8ea');
   // 纽扣
   g.fillStyle = PAL.coatDark;
   for (let i = 0; i < 4; i++) g.fillRect(62, 96 + i * 11, 2, 2);
 
-  // 口袋 + 笔
+  // 口袋 + 笔（1px 描边用四条 fillRect 拼）
   R(43, 100, 13, 14, 'rgba(0,0,0,0.10)');
-  g.strokeStyle = PAL.coatDark;
-  g.strokeRect(43.5, 100.5, 12, 13);
+  g.fillStyle = PAL.coatDark;
+  g.fillRect(43, 100, 13, 1);
+  g.fillRect(43, 113, 13, 1);
+  g.fillRect(43, 100, 1, 14);
+  g.fillRect(55, 100, 1, 14);
   R(46, 96, 2, 9, '#3f6f8a');
   R(50, 96, 2, 9, '#8a3f3f');
 
@@ -2281,27 +2160,14 @@ export function drawPortrait(g, W, H, o = {}) {
   R(66, 84, 12, 15, '#c8d0d3');
   R(66, 84, 12, 4, '#8e989c');
   R(68, 90, 4, 5, '#4c585e');
-  R(73, 90, 4, 1.5, '#7c868a');
-  R(73, 93, 4, 1.5, '#7c868a');
-  g.strokeStyle = '#6d7679';
-  g.lineWidth = 0.8;
-  g.beginPath();
-  g.moveTo(72, 84);
-  g.lineTo(70, 78);
-  g.stroke();
+  R(73, 90, 4, 1, '#7c868a');
+  R(73, 93, 4, 1, '#7c868a');
+  pxLine(g, 72, 84, 70, 78, '#6d7679', 1);
 
-  // 污渍 / 血迹
-  g.fillStyle = 'rgba(74,26,22,0.5)';
-  g.beginPath();
-  g.ellipse(50, 128, 7, 5, 0.5, 0, 6.3);
-  g.fill();
-  g.beginPath();
-  g.ellipse(45, 137, 4, 3, 0.2, 0, 6.3);
-  g.fill();
-  g.fillStyle = 'rgba(60,58,44,0.28)';
-  g.beginPath();
-  g.ellipse(70, 116, 9, 7, -0.3, 0, 6.3);
-  g.fill();
+  // 污渍 / 血迹：像素摊
+  pxBlob(g, 50, 128, 7, 5, 'rgba(74,26,22,0.5)');
+  pxBlob(g, 45, 137, 4, 3, 'rgba(74,26,22,0.5)');
+  pxBlob(g, 70, 116, 9, 7, 'rgba(60,58,44,0.28)');
 
   // 手臂
   for (const side of [-1, 1]) {
@@ -2309,17 +2175,17 @@ export function drawPortrait(g, W, H, o = {}) {
     R(ax, 64, 10, 66, PAL.coat);
     R(ax + (side < 0 ? 0 : 7), 64, 3, 66, side < 0 ? 'rgba(0,0,0,0.14)' : PAL.coatShade);
     // 袖口
-    R(ax - 0.5, 124, 11, 5, '#b9c2c6');
+    R(ax - 1, 124, 11, 5, '#b9c2c6');
     // 手
-    R(ax + 0.5, 129, 9, 11, PAL.skin);
-    R(ax + (side < 0 ? 0.5 : 6.5), 129, 3, 11, PAL.skinD);
+    R(ax + 1, 129, 9, 11, PAL.skin);
+    R(ax + (side < 0 ? 1 : 7), 129, 3, 11, PAL.skinD);
     g.fillStyle = 'rgba(0,0,0,0.2)';
-    g.fillRect(ax + 0.5, 138, 9, 1);
+    g.fillRect(ax + 1, 138, 9, 1);
   }
 
   // 肩线
   R(38, 60, 44, 4, '#e0e6e8');
-  R(38, 60, 44, 1.5, '#f0f4f5');
+  R(38, 60, 44, 1, '#f0f4f5');
 
   // 脖子
   R(55, 50, 10, 12, PAL.skin);
@@ -2331,20 +2197,17 @@ export function drawPortrait(g, W, H, o = {}) {
   R(64, 26, 6, 28, PAL.skinD);
   R(48, 36, 2, 8, PAL.skin); // 耳
   R(70, 36, 2, 8, PAL.skinD);
-  // 头发
+  // 头发：横条堆出圆顶轮廓 + 两条鬓角，不用曲线
   g.fillStyle = PAL.hair;
-  g.beginPath();
-  g.moveTo(48, 34);
-  g.quadraticCurveTo(48, 18, 60, 18);
-  g.quadraticCurveTo(72, 18, 72, 34);
-  g.lineTo(72, 40);
-  g.lineTo(69, 40);
-  g.lineTo(69, 30);
-  g.lineTo(51, 31);
-  g.lineTo(51, 42);
-  g.lineTo(48, 42);
-  g.closePath();
-  g.fill();
+  for (const [bx, by, bw, bh] of [
+    [54, 16, 12, 2],
+    [51, 18, 18, 2],
+    [49, 20, 22, 3],
+    [48, 23, 24, 8],
+    [48, 31, 3, 11],
+    [69, 30, 3, 10],
+  ])
+    g.fillRect(bx, by, bw, bh);
   g.fillStyle = '#5c452f';
   g.fillRect(52, 20, 12, 3);
   // 乱发
@@ -2352,25 +2215,25 @@ export function drawPortrait(g, W, H, o = {}) {
   g.fillRect(56, 16, 3, 3);
   g.fillRect(64, 17, 2, 3);
   // 眉
-  R(53, 37, 6, 1.6, '#3a2a1e');
-  R(62, 37, 6, 1.6, '#3a2a1e');
+  R(53, 37, 6, 2, '#3a2a1e');
+  R(62, 37, 6, 2, '#3a2a1e');
   // 眼
   R(53, 40, 6, 4, '#e6ecec');
   R(62, 40, 6, 4, '#cdd4d4');
-  R(55, 40.5, 2.6, 3, '#2a3b42');
-  R(64, 40.5, 2.6, 3, '#22323a');
-  R(55, 40.5, 1, 1, '#dff0f2');
-  R(64, 40.5, 1, 1, '#c9dcdf');
+  R(55, 40, 3, 3, '#2a3b42');
+  R(64, 40, 3, 3, '#22323a');
+  R(55, 40, 1, 1, '#dff0f2');
+  R(64, 40, 1, 1, '#c9dcdf');
   // 黑眼圈
   g.fillStyle = 'rgba(60,40,40,0.22)';
-  g.fillRect(53, 44.5, 6, 2);
-  g.fillRect(62, 44.5, 6, 2);
+  g.fillRect(53, 44, 6, 2);
+  g.fillRect(62, 44, 6, 2);
   // 鼻 / 嘴
   R(59, 45, 2, 3, PAL.skinD);
-  R(56, 50, 8, 1.6, '#8a5a4c');
+  R(56, 50, 8, 2, '#8a5a4c');
   // 额头伤口
-  R(52, 32, 5, 1.4, 'rgba(120,36,30,0.75)');
-  R(53, 33.4, 3, 1, 'rgba(90,26,22,0.6)');
+  R(52, 32, 5, 1, 'rgba(120,36,30,0.75)');
+  R(53, 33, 3, 1, 'rgba(90,26,22,0.6)');
   // 胡茬
   g.fillStyle = 'rgba(50,40,32,0.16)';
   g.fillRect(53, 47, 14, 6);
@@ -2396,23 +2259,19 @@ function drawPortraitItem(g, x, y, id, o) {
     g.fillRect(-2, 12, 4, 2);
   } else if (id === 'flashlight') {
     g.fillStyle = '#2f373c';
-    g.fillRect(-3.5, -2, 7, 15);
+    g.fillRect(-4, -2, 7, 15);
     g.fillStyle = '#4c565c';
-    g.fillRect(-3.5, -2, 2.4, 15);
+    g.fillRect(-4, -2, 2, 15);
     g.fillStyle = o.flashOn ? '#fff6d8' : '#8d9490';
-    g.fillRect(-4.5, 13, 9, 3);
+    g.fillRect(-5, 13, 9, 3);
     if (o.flashOn) {
-      const grd = g.createLinearGradient(0, 16, 0, 34);
-      grd.addColorStop(0, 'rgba(255,244,206,0.55)');
-      grd.addColorStop(1, 'rgba(255,244,206,0)');
-      g.fillStyle = grd;
-      g.beginPath();
-      g.moveTo(-4.5, 16);
-      g.lineTo(4.5, 16);
-      g.lineTo(11, 36);
-      g.lineTo(-11, 36);
-      g.closePath();
-      g.fill();
+      // 光锥：逐带展宽的硬边横条，亮度分档递减
+      for (let i = 0; i < 5; i++) {
+        const yy = 16 + i * 4;
+        const hw = 5 + i * 1.4;
+        g.fillStyle = `rgba(255,244,206,${(0.5 - i * 0.1).toFixed(2)})`;
+        g.fillRect(Math.round(-hw), yy, Math.round(hw * 2), 4);
+      }
     }
   }
   g.restore();
@@ -2474,34 +2333,27 @@ export function drawPortraitBust(g, x, y, s) {
   R(-10, 56, 22, 48, 'rgba(0,0,0,0.14)');
   R(15, 58, 46, 1.5, '#eef2f3');
   // 衬衫领口
-  g.fillStyle = '#39464d';
-  g.beginPath();
-  g.moveTo(31, 56);
-  g.lineTo(45, 56);
-  g.lineTo(38, 78);
-  g.closePath();
-  g.fill();
+  pxPoly(g, [
+    [31, 56],
+    [45, 56],
+    [38, 78],
+  ], '#39464d');
   // 大褂翻领
-  g.fillStyle = '#e2e8ea';
-  g.beginPath();
-  g.moveTo(27, 56);
-  g.lineTo(38, 76);
-  g.lineTo(34, 56);
-  g.closePath();
-  g.fill();
-  g.beginPath();
-  g.moveTo(49, 56);
-  g.lineTo(38, 76);
-  g.lineTo(42, 56);
-  g.closePath();
-  g.fill();
-  g.strokeStyle = PAL.coatDark;
-  g.lineWidth = 0.8;
-  g.beginPath();
-  g.moveTo(34, 57);
-  g.lineTo(38, 77);
-  g.lineTo(38, 96);
-  g.stroke();
+  pxPoly(g, [
+    [27, 56],
+    [38, 76],
+    [34, 56],
+  ], '#e2e8ea');
+  pxPoly(g, [
+    [49, 56],
+    [38, 76],
+    [42, 56],
+  ], '#e2e8ea');
+  pxPolyline(g, [
+    [34, 57],
+    [38, 77],
+    [38, 96],
+  ], PAL.coatDark, 1);
   // 血渍
   R(18, 70, 7, 3, 'rgba(74,26,22,0.45)');
   R(20, 73, 4, 2, 'rgba(74,26,22,0.35)');
@@ -2613,7 +2465,7 @@ export function drawMagIcon(g, w, h) {
   g.fillStyle = '#c7a24b';
   g.fillRect(-6, -20, 12, 5);
   g.fillStyle = '#e5c877';
-  g.fillRect(-6, -20, 12, 1.6);
+  g.fillRect(-6, -20, 12, 2);
   g.restore();
 }
 
@@ -2631,18 +2483,12 @@ export function drawBadgeIcon(g, w, h) {
   g.fillRect(-13, -15, 26, 7);
   g.fillStyle = '#48545a';
   g.fillRect(-9, -5, 8, 9);
-  g.fillStyle = '#8d979b';
-  g.beginPath();
-  g.arc(-5, -1, 2.6, 0, 6.3);
-  g.fill();
+  pxEllipse(g, -5, -1, 2.6, 2.6, '#8d979b');
   g.fillStyle = '#7b868a';
-  for (let i = 0; i < 3; i++) g.fillRect(2, -4 + i * 3.4, 9, 1.6);
+  for (let i = 0; i < 3; i++) g.fillRect(2, -4 + i * 3, 9, 2);
   g.fillStyle = '#2a3034';
   g.fillRect(-13, 8, 26, 3);
-  g.fillStyle = 'rgba(74,26,22,0.7)';
-  g.beginPath();
-  g.ellipse(4, 6, 7, 5, 0.4, 0, 6.3);
-  g.fill();
+  pxBlob(g, 4, 6, 7, 5, 'rgba(74,26,22,0.7)');
   g.restore();
 }
 
@@ -2665,29 +2511,54 @@ CH.full = CH.top + CH.cap;
 const CH_RX = CH.r * HW * Math.SQRT2;
 const CH_RY = CH_RX * (HH / HW);
 
-/** 圆柱剪影：下底近半椭圆 + 两侧 + 上底远半椭圆 */
-function cylPath(g, cx, cy, rx, ry, h) {
-  g.beginPath();
-  g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI);
-  g.lineTo(cx - rx, cy - h);
-  g.ellipse(cx, cy - h, rx, ry, 0, Math.PI, Math.PI * 2);
-  g.closePath();
+/**
+ * 圆柱剪影的行半宽：y 是行坐标，cy 是下底中心。直筒段全宽，
+ * 上帽/下帽内按椭圆弧收，帽外返回 0。逐行扫描圆柱全靠它。
+ */
+function cylRowHW(y, cy, rx, ry, h) {
+  let dy = 0;
+  if (y < cy - h) dy = cy - h - y;
+  else if (y > cy) dy = y - cy;
+  if (dy > ry) return 0;
+  return rx * Math.sqrt(Math.max(0, 1 - (dy / ry) ** 2));
+}
+
+/** 像素圆柱：逐行扫描平涂（rowCol(f) 按 0 顶 1 底给色则出横向分带） */
+function pxCylFill(g, cx, cy, rx, ry, h, rowCol) {
+  const X = Math.round(cx);
+  const y0 = Math.round(cy - h - ry);
+  const y1 = Math.round(cy + ry);
+  for (let y = y0; y <= y1; y++) {
+    const hw = Math.round(cylRowHW(y, cy, rx, ry, h));
+    if (!hw) continue;
+    g.fillStyle = typeof rowCol === 'function' ? rowCol((y - y0) / (y1 - y0)) : rowCol;
+    g.fillRect(X - hw, y, hw * 2, 1);
+  }
 }
 
 function ellipseFill(g, cx, cy, rx, ry, fill) {
-  g.fillStyle = fill;
-  g.beginPath();
-  g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-  g.fill();
+  pxEllipse(g, cx, cy, rx, ry, fill);
 }
 
-/** 椭圆的一半：near=true 取靠近镜头的下半 */
+/** 椭圆的一半：near=true 取靠近镜头的下半。逐列扫描的像素弧，台阶间补竖向缺口 */
 function halfArc(g, cx, cy, rx, ry, near, stroke, lw = 1) {
-  g.strokeStyle = stroke;
-  g.lineWidth = lw;
-  g.beginPath();
-  g.ellipse(cx, cy, rx, ry, 0, near ? 0 : Math.PI, near ? Math.PI : Math.PI * 2);
-  g.stroke();
+  const X = Math.round(cx);
+  const Y = Math.round(cy);
+  const RX = Math.round(rx);
+  const th = Math.max(1, Math.round(lw));
+  g.fillStyle = stroke;
+  let last = null;
+  for (let x = -RX; x <= RX; x++) {
+    const arc = Math.round(ry * Math.sqrt(Math.max(0, 1 - (x / rx) ** 2)));
+    const y = near ? Y + arc : Y - arc;
+    if (last !== null && Math.abs(y - last) > 1) {
+      const a = Math.min(y, last);
+      g.fillRect(X + x, a, th, Math.abs(y - last) + th);
+    } else {
+      g.fillRect(X + x, y, th, th);
+    }
+    last = y;
+  }
 }
 
 /**
@@ -2703,61 +2574,57 @@ export function makeChamber(seed = 907) {
     const zBase = CH.base * TILE_Z;
     const zGlass = CH.glass * TILE_Z;
 
-    // 底座：金属圆台
-    const bg = g.createLinearGradient(0, oy - zBase, 0, oy);
-    bg.addColorStop(0, PAL.metalLite);
-    bg.addColorStop(0.5, PAL.metal);
-    bg.addColorStop(1, PAL.metalDark);
-    cylPath(g, ox, oy, CH_RX, CH_RY, zBase);
-    g.fillStyle = bg;
-    g.fill();
+    // 底座：金属圆台。逐行扫描三档硬带（亮/中/暗），交界行棋盘抖动
+    pxCylFill(g, ox, oy, CH_RX, CH_RY, zBase, (f) => (f < 0.3 ? PAL.metalLite : f < 0.6 ? PAL.metal : PAL.metalDark));
+    {
+      const y0 = Math.round(oy - zBase - CH_RY);
+      const y1 = Math.round(oy + CH_RY);
+      for (const [f, dc] of [[0.3, PAL.metalLite], [0.6, PAL.metal]]) {
+        const y = Math.round(y0 + (y1 - y0) * f);
+        const hw = Math.round(cylRowHW(y, oy, CH_RX, CH_RY, zBase));
+        if (hw) pxDither(g, ox - hw, ox + hw, y, dc);
+      }
+    }
     // 底座上的散热槽
     g.fillStyle = 'rgba(0,0,0,0.34)';
     for (let i = -5; i <= 5; i++) {
       const u = (i / 6) * CH_RX;
       const k = Math.sqrt(Math.max(0, 1 - (u / CH_RX) ** 2));
-      g.fillRect(ox + u - 0.6, oy - zBase + 2 + CH_RY * k * 0.5, 1.4, zBase - 4);
+      g.fillRect(Math.round(ox + u - 1), Math.round(oy - zBase + 2 + CH_RY * k * 0.5), 1, Math.round(zBase - 4));
     }
     // 舱内地面
     ellipseFill(g, ox, oy - zBase, CH_RX, CH_RY, '#39433f');
     ellipseFill(g, ox, oy - zBase, CH_RX * 0.86, CH_RY * 0.86, '#232c2b');
     ellipseFill(g, ox, oy - zBase, CH_RX * 0.7, CH_RY * 0.7, 'rgba(121,210,204,0.16)');
-    // 排水格栅
-    g.strokeStyle = 'rgba(0,0,0,0.4)';
-    g.lineWidth = 0.8;
+    // 排水格栅：1px 像素竖条
+    g.fillStyle = 'rgba(0,0,0,0.4)';
     for (let i = -3; i <= 3; i++) {
       const u = (i / 4) * CH_RX * 0.8;
       const k = Math.sqrt(Math.max(0, 1 - (u / (CH_RX * 0.8)) ** 2));
-      g.beginPath();
-      g.moveTo(ox + u, oy - zBase - CH_RY * 0.8 * k);
-      g.lineTo(ox + u, oy - zBase + CH_RY * 0.8 * k);
-      g.stroke();
+      const yv0 = Math.round(oy - zBase - CH_RY * 0.8 * k);
+      const yv1 = Math.round(oy - zBase + CH_RY * 0.8 * k);
+      g.fillRect(Math.round(ox + u), yv0, 1, yv1 - yv0);
     }
 
-    // 舱内空气：底部亮、顶部暗，看起来像充着一层雾
+    // 舱内空气：底部亮、顶部暗。三档硬带 + 交界行棋盘抖动，像素雾
     const gy = oy - zBase;
-    cylPath(g, ox, gy, CH_RX, CH_RY, zGlass);
-    const ig = g.createLinearGradient(0, gy - zGlass, 0, gy);
-    ig.addColorStop(0, 'rgba(14,26,30,0.92)');
-    ig.addColorStop(0.55, 'rgba(20,42,46,0.8)');
-    ig.addColorStop(1, 'rgba(58,116,116,0.55)');
-    g.fillStyle = ig;
-    g.fill();
-    // 远侧内壁的反光
-    g.save();
-    cylPath(g, ox, gy, CH_RX, CH_RY, zGlass);
-    g.clip();
-    g.fillStyle = 'rgba(150,205,205,0.07)';
-    g.fillRect(ox - CH_RX, gy - zGlass, CH_RX * 2, zGlass * 0.34);
-    g.strokeStyle = 'rgba(170,220,215,0.12)';
-    g.lineWidth = 1.2;
-    for (let i = 0; i < 3; i++) {
-      g.beginPath();
-      g.moveTo(ox - CH_RX + 4 + i * 9, gy - zGlass);
-      g.lineTo(ox - CH_RX + 12 + i * 9, gy);
-      g.stroke();
+    pxCylFill(g, ox, gy, CH_RX, CH_RY, zGlass, (f) =>
+      f < 0.42 ? 'rgba(14,26,30,0.92)' : f < 0.78 ? 'rgba(20,42,46,0.8)' : 'rgba(58,116,116,0.55)');
+    {
+      const y0 = Math.round(gy - zGlass - CH_RY);
+      const y1 = Math.round(gy + CH_RY);
+      for (const [f, dc] of [[0.42, 'rgba(14,26,30,0.92)'], [0.78, 'rgba(20,42,46,0.8)']]) {
+        const y = Math.round(y0 + (y1 - y0) * f);
+        const hw = Math.round(cylRowHW(y, gy, CH_RX, CH_RY, zGlass));
+        if (hw) pxDither(g, ox - hw, ox + hw, y, dc);
+      }
     }
-    g.restore();
+    // 远侧内壁的反光：一条平涂带 + 三道像素斜线
+    g.fillStyle = 'rgba(150,205,205,0.07)';
+    g.fillRect(Math.round(ox - CH_RX), Math.round(gy - zGlass), Math.round(CH_RX * 2), Math.round(zGlass * 0.34));
+    for (let i = 0; i < 3; i++) {
+      pxLine(g, ox - CH_RX + 4 + i * 9, gy - zGlass, ox - CH_RX + 12 + i * 9, gy, 'rgba(170,220,215,0.12)', 1);
+    }
     // 底部积雾
     g.save();
     g.globalAlpha = 0.5;
@@ -2773,14 +2640,10 @@ export function makeChamber(seed = 907) {
     for (const u of [-0.55, 0.55]) {
       g.fillRect(ox + u * CH_RX - 1, gy - zGlass, 2, zGlass);
     }
-    // 底座的油污
-    g.save();
-    cylPath(g, ox, oy, CH_RX, CH_RY, zBase);
-    g.clip();
+    // 底座的油污（收进直筒段内，不再需要剪裁）
     g.globalAlpha = 0.35;
-    speckle(g, ox - CH_RX, oy - zBase, CH_RX * 2, zBase + CH_RY, rand, 40, ['#0d1112', PAL.rust, '#6d7377'], 1.3, 1);
+    speckle(g, ox - CH_RX * 0.86, oy - zBase, CH_RX * 1.72, zBase + CH_RY * 0.6, rand, 40, ['#0d1112', PAL.rust, '#6d7377'], 1.3, 1);
     g.globalAlpha = 1;
-    g.restore();
   });
 
   const front = makeProp(foot, foot, CH.full, (g, ox, oy) => {
@@ -2790,61 +2653,42 @@ export function makeChamber(seed = 907) {
     const gy = oy - zBase;
     const ty = gy - zGlass;
 
-    // 玻璃本体：一层很淡的冷色 + 从上到下的反光
-    g.save();
-    cylPath(g, ox, gy, CH_RX, CH_RY, zGlass);
-    g.clip();
-    /* 玻璃只压很淡的一层：再重一点，舱里的东西就看不清了 —— 而那正是
-       这张画面唯一的主角。 */
-    const fg = g.createLinearGradient(0, ty, 0, gy);
-    fg.addColorStop(0, 'rgba(196,226,228,0.1)');
-    fg.addColorStop(0.45, 'rgba(150,196,200,0.03)');
-    fg.addColorStop(1, 'rgba(110,170,175,0.07)');
-    g.fillStyle = fg;
-    g.fillRect(ox - CH_RX, ty, CH_RX * 2, zGlass + CH_RY);
-    // 斜向高光条：只走两侧，中间留给舱里的个体
+    /* 玻璃本体：只压很淡的一层 —— 再重一点，舱里的东西就看不清了，
+       而那正是这张画面唯一的主角。三档硬带按行扫描铺在圆柱剪影内。 */
+    pxCylFill(g, ox, gy, CH_RX, CH_RY, zGlass, (f) =>
+      f < 0.4 ? 'rgba(196,226,228,0.1)' : f < 0.75 ? 'rgba(150,196,200,0.03)' : 'rgba(110,170,175,0.07)');
+    // 斜向高光条：只走两侧，中间留给舱里的个体（台阶斜条，收在直筒段内）
     g.globalAlpha = 0.42;
     for (const [u, w] of [
       [-0.74, 4],
       [-0.55, 2],
       [0.68, 3],
     ]) {
-      g.fillStyle = 'rgba(226,240,238,0.3)';
-      g.beginPath();
-      g.moveTo(ox + u * CH_RX, ty);
-      g.lineTo(ox + u * CH_RX + w, ty);
-      g.lineTo(ox + u * CH_RX + w + 7, gy + CH_RY);
-      g.lineTo(ox + u * CH_RX + 7, gy + CH_RY);
-      g.closePath();
-      g.fill();
+      pxPoly(g, [
+        [ox + u * CH_RX, ty],
+        [ox + u * CH_RX + w, ty],
+        [ox + u * CH_RX + w + 7, gy],
+        [ox + u * CH_RX + 7, gy],
+      ], 'rgba(226,240,238,0.3)');
     }
     g.globalAlpha = 1;
-    // 被从里面撞出来的裂纹
-    g.strokeStyle = 'rgba(232,244,240,0.42)';
-    g.lineWidth = 0.7;
+    // 被从里面撞出来的裂纹：像素放射线
     const cx0 = ox + CH_RX * 0.3;
     const cy0 = gy - zGlass * 0.52;
-    g.beginPath();
     for (let i = 0; i < 7; i++) {
       const a = (i / 7) * 6.28 + rand();
-      g.moveTo(cx0, cy0);
-      g.lineTo(cx0 + Math.cos(a) * (3 + rand() * 11), cy0 + Math.sin(a) * (3 + rand() * 9));
+      pxLine(g, cx0, cy0, cx0 + Math.cos(a) * (3 + rand() * 11), cy0 + Math.sin(a) * (3 + rand() * 9), 'rgba(232,244,240,0.42)', 1);
     }
-    g.stroke();
-    g.restore();
 
     // 近侧的上下金属环
     halfArc(g, ox, gy, CH_RX, CH_RY, true, PAL.metalLite, 2.6);
     halfArc(g, ox, gy + 1.6, CH_RX, CH_RY, true, 'rgba(0,0,0,0.45)', 1.6);
     halfArc(g, ox, ty, CH_RX, CH_RY, true, PAL.metal, 2.4);
 
-    // 玻璃两侧的边光：没有它，圆柱在亮墙前面会整个化掉
-    g.save();
-    cylPath(g, ox, gy, CH_RX, CH_RY, zGlass);
-    g.strokeStyle = 'rgba(198,226,224,0.35)';
-    g.lineWidth = 1.2;
-    g.stroke();
-    g.restore();
+    // 玻璃两侧的边光：没有它，圆柱在亮墙前面会整个化掉（1px 像素竖列）
+    g.fillStyle = 'rgba(198,226,224,0.35)';
+    g.fillRect(Math.round(ox - CH_RX), Math.round(ty), 1, Math.round(zGlass));
+    g.fillRect(Math.round(ox + CH_RX), Math.round(ty), 1, Math.round(zGlass));
 
     // 立柱：左右两根 + 正面一道接缝
     for (const [u, w, col] of [
@@ -2860,28 +2704,31 @@ export function makeChamber(seed = 907) {
       for (let v = 6; v < zGlass; v += 13) g.fillRect(ox + u * CH_RX - w / 2, ty + v, w, 1);
     }
 
-    // 底座近侧：警示条纹 + 控制面板
-    g.save();
-    cylPath(g, ox, oy, CH_RX, CH_RY, zBase);
-    g.clip();
-    for (let i = -14; i < 14; i++) {
-      g.fillStyle = i % 2 === 0 ? '#8a7433' : '#1e2220';
-      g.beginPath();
-      g.moveTo(ox + i * 5, oy);
-      g.lineTo(ox + i * 5 + 3, oy);
-      g.lineTo(ox + i * 5 - 2, oy + CH_RY);
-      g.lineTo(ox + i * 5 - 5, oy + CH_RY);
-      g.closePath();
-      g.fill();
+    /* 底座近侧：警示斜条纹。逐行扫描圆柱前凸的剪影，行内按斜移后的
+       5px 周期分色 —— 不用 clip，台阶天然对齐像素格。 */
+    {
+      const RY = Math.round(CH_RY);
+      for (let dy = 0; dy <= RY; dy++) {
+        const hw = Math.round(CH_RX * Math.sqrt(Math.max(0, 1 - (dy / CH_RY) ** 2)));
+        if (!hw) continue;
+        const y = Math.round(oy) + dy;
+        const shift = Math.round((dy / CH_RY) * 5);
+        for (let x = -hw; x < hw; ) {
+          const idx = Math.floor((x + shift) / 5);
+          const runEnd = Math.min(hw, (idx + 1) * 5 - shift);
+          g.fillStyle = ((idx % 2) + 2) % 2 === 0 ? '#8a7433' : '#1e2220';
+          g.fillRect(Math.round(ox) + x, y, Math.max(1, runEnd - x), 1);
+          x = runEnd;
+        }
+      }
+      g.fillStyle = 'rgba(0,0,0,0.55)';
+      g.fillRect(Math.round(ox - CH_RX), Math.round(oy - zBase - 2), Math.round(CH_RX * 2), 3);
     }
-    g.fillStyle = 'rgba(0,0,0,0.55)';
-    g.fillRect(ox - CH_RX, oy - zBase - 2, CH_RX * 2, 3);
-    g.restore();
     // 控制面板
     g.fillStyle = '#20272a';
     g.fillRect(ox + 6, oy - zBase + 1, 15, 7);
     g.fillStyle = '#39434a';
-    g.fillRect(ox + 6, oy - zBase + 1, 15, 1.4);
+    g.fillRect(ox + 6, oy - zBase + 1, 15, 1);
     for (let i = 0; i < 3; i++) {
       g.fillStyle = ['rgba(121,210,204,0.85)', 'rgba(224,165,82,0.8)', 'rgba(201,74,58,0.7)'][i];
       g.fillRect(ox + 8 + i * 4, oy - zBase + 4, 2, 2);
@@ -2891,12 +2738,8 @@ export function makeChamber(seed = 907) {
        最抢眼的东西，而这一幕的主角在玻璃后面。 */
     const zc = CH.cap * TILE_Z;
     const capR = 1.0;
-    cylPath(g, ox, ty, CH_RX * capR, CH_RY * capR, zc);
-    const cg = g.createLinearGradient(0, ty - zc, 0, ty);
-    cg.addColorStop(0, '#454e51');
-    cg.addColorStop(1, '#232a2c');
-    g.fillStyle = cg;
-    g.fill();
+    // 顶盖筒身：两档硬带
+    pxCylFill(g, ox, ty, CH_RX * capR, CH_RY * capR, zc, (f) => (f < 0.5 ? '#454e51' : '#232a2c'));
     ellipseFill(g, ox, ty - zc, CH_RX * capR, CH_RY * capR, '#39413f');
     ellipseFill(g, ox, ty - zc, CH_RX * 0.78, CH_RY * 0.78, '#2b3234');
     ellipseFill(g, ox, ty - zc, CH_RX * 0.3, CH_RY * 0.3, '#1b2123');
@@ -2906,25 +2749,19 @@ export function makeChamber(seed = 907) {
       const a = (i / 8) * 6.28;
       g.fillRect(ox + Math.cos(a) * CH_RX * 0.9 - 1, ty - zc + Math.sin(a) * CH_RY * 0.9 - 1, 2, 2);
     }
-    // 顶上的软管
-    g.strokeStyle = '#1b2022';
-    g.lineCap = 'round';
+    // 顶上的软管：像素折线（3px 管身 + 1px 受光芯）
     for (const [dx, dy] of [
       [-14, -16],
       [10, -20],
     ]) {
-      g.lineWidth = 3.2;
-      g.beginPath();
-      g.moveTo(ox + dx * 0.3, ty - zc - 1);
-      g.quadraticCurveTo(ox + dx, ty - zc - 8, ox + dx * 1.5, ty - zc + dy);
-      g.stroke();
-      g.strokeStyle = '#333c3e';
-      g.lineWidth = 1.2;
-      g.beginPath();
-      g.moveTo(ox + dx * 0.3, ty - zc - 2);
-      g.quadraticCurveTo(ox + dx, ty - zc - 9, ox + dx * 1.5, ty - zc + dy);
-      g.stroke();
-      g.strokeStyle = '#1b2022';
+      const pts = [
+        [ox + dx * 0.3, ty - zc - 1],
+        [ox + dx * 0.75, ty - zc - 6],
+        [ox + dx * 1.2, ty - zc - 4 + dy * 0.5],
+        [ox + dx * 1.5, ty - zc + dy],
+      ];
+      pxPolyline(g, pts, '#1b2022', 3);
+      pxPolyline(g, pts.map(([px, py]) => [px, py - 1]), '#333c3e', 1);
     }
   });
 
@@ -2967,14 +2804,9 @@ function specimenBody(g, o) {
   const sway = Math.sin(t * 0.47) * 0.02;
   const lean = press * 3.4;
 
-  // 脚下的影子
-  g.save();
-  g.globalAlpha = 0.5;
-  g.fillStyle = '#000';
-  g.beginPath();
-  g.ellipse(0, 0, 10, 3.8, 0, 0, 6.3);
-  g.fill();
-  g.restore();
+  // 脚下的影子：两档像素椭圆
+  pxEllipse(g, 0, 0, 10, 3.8, 'rgba(0,0,0,0.3)');
+  pxEllipse(g, 0, 0, 6.6, 2.5, 'rgba(0,0,0,0.35)');
 
   g.save();
   g.rotate(sway);
@@ -3021,34 +2853,20 @@ function specimenBody(g, o) {
     'rgba(0,0,0,0.3)',
   );
   // 舱内冷光在胸口右缘打出的轮廓光
-  g.strokeStyle = SPEC.rim;
-  g.lineWidth = 1.3;
-  g.beginPath();
-  g.moveTo(8.2, shY - 0.6);
-  g.lineTo(5.4, hipY);
-  g.stroke();
-  // 肋
-  g.strokeStyle = SPEC.vein;
-  g.lineWidth = 1.1;
+  pxLine(g, 8.2, shY - 0.6, 5.4, hipY, SPEC.rim, 1);
+  // 肋：三段像素折线拱出弧度
   for (let i = 0; i < 5; i++) {
     const y = shY + 4.5 + i * 2.9;
-    g.beginPath();
-    g.moveTo(-5.2, y);
-    g.quadraticCurveTo(0, y + 1.8 + br * 0.4, 5.8, y - 0.6);
-    g.stroke();
+    pxPolyline(g, [
+      [-5.2, y],
+      [0, y + 1.2 + br * 0.4],
+      [5.8, y - 0.6],
+    ], SPEC.vein, 1);
   }
   // 缝合痕
-  g.strokeStyle = SPEC.scar;
-  g.lineWidth = 0.9;
-  g.beginPath();
-  g.moveTo(1.6, shY + 3);
-  g.lineTo(1.6, hipY - 1);
-  g.stroke();
+  pxLine(g, 1.6, shY + 3, 1.6, hipY - 1, SPEC.scar, 1);
   for (let i = 0; i < 4; i++) {
-    g.beginPath();
-    g.moveTo(-0.8, shY + 5.5 + i * 3.4);
-    g.lineTo(4, shY + 4.5 + i * 3.4);
-    g.stroke();
+    pxLine(g, -0.8, shY + 5.5 + i * 3.4, 4, shY + 4.5 + i * 3.4, SPEC.scar, 1);
   }
   g.restore();
 
@@ -3090,14 +2908,12 @@ function specimenBody(g, o) {
   );
   // 头顶高光与轮廓光
   g.fillStyle = SPEC.skinHi;
-  g.fillRect(-3, -5, 5.4, 1.4);
-  g.strokeStyle = SPEC.rim;
-  g.lineWidth = 1.2;
-  g.beginPath();
-  g.moveTo(3.8, -5.6);
-  g.lineTo(7, -1.6);
-  g.lineTo(6, 3);
-  g.stroke();
+  g.fillRect(-3, -5, 5, 1);
+  pxPolyline(g, [
+    [3.8, -5.6],
+    [7, -1.6],
+    [6, 3],
+  ], SPEC.rim, 1);
   // 眼窝
   g.fillStyle = '#141c1b';
   g.fillRect(0.4, -3.2, 6.2, 3.8);
@@ -3116,57 +2932,50 @@ function specimenBody(g, o) {
   for (let i = 0; i < 5; i++) g.fillRect(1.4 + i * 1.1, 2.5, 0.8, 1.4);
   g.restore();
 
-  // 眼睛的冷光：位置跟着头走，画在最后免得被颚盖住
+  // 眼睛的冷光：三档同心方块辉光（跟直升机航行灯同一读法）
   const ex = hx + 3.2;
   const ey = hy - 1.4;
   const glow = 0.6 + Math.sin(t * 2.3) * 0.12 + press * 0.35;
   g.save();
   g.globalCompositeOperation = 'lighter';
-  const eg = g.createRadialGradient(ex, ey, 0, ex, ey, 9);
-  eg.addColorStop(0, `rgba(150,240,228,${0.6 * glow})`);
-  eg.addColorStop(1, 'rgba(150,240,228,0)');
-  g.fillStyle = eg;
-  g.fillRect(ex - 9, ey - 9, 18, 18);
+  pxGlow(g, ex, ey, 8, '150,240,228', glow * 0.7);
   g.restore();
   g.fillStyle = '#e6fff8';
-  g.fillRect(ex - 1.8, ey - 0.6, 1.9, 1.9);
-  g.fillRect(ex + 1.8, ey - 1.2, 1.9, 1.9);
+  g.fillRect(Math.round(ex) - 2, Math.round(ey) - 1, 2, 2);
+  g.fillRect(Math.round(ex) + 2, Math.round(ey) - 1, 2, 2);
 
   // 颈环与拖在身后的线缆
   g.fillStyle = '#2c3438';
-  g.fillRect(-1.8, shY - 4, 8.4, 2.8);
+  g.fillRect(-2, shY - 4, 8, 3);
   g.fillStyle = '#5a6469';
-  g.fillRect(-1.8, shY - 4, 8.4, 1);
+  g.fillRect(-2, shY - 4, 8, 1);
   g.fillStyle = 'rgba(224,165,82,0.9)';
-  g.fillRect(5, shY - 3.4, 1.3, 1.3);
-  g.strokeStyle = '#1b2022';
-  g.lineWidth = 1.2;
-  g.beginPath();
-  g.moveTo(-1.6, shY - 2.6);
-  g.quadraticCurveTo(-10, shY + 7, -8, 0);
-  g.stroke();
+  g.fillRect(5, shY - 3, 1, 1);
+  pxPolyline(g, [
+    [-1.6, shY - 2.6],
+    [-7, shY + 3],
+    [-9.4, shY * 0.4 + 3],
+    [-8, 0],
+  ], '#1b2022', 1);
 
   g.restore();
 }
 
 function leg(g, side, hipY, col, t, ph) {
-  const k = Math.sin(t * 0.6 + ph) * 0.6;
-  g.strokeStyle = col;
-  g.lineWidth = 5;
-  g.lineCap = 'round';
-  g.lineJoin = 'round';
-  g.beginPath();
-  g.moveTo(side * 3.6, hipY);
-  g.lineTo(side * 6.2 + k, hipY * 0.45);
-  g.lineTo(side * 4.6 + k * 0.4, -1);
-  g.stroke();
+  const k = qz(Math.sin(t * 0.6 + ph) * 0.6, 1);
+  // 大腿/小腿：4px 像素折线，硬边台阶
+  pxPolyline(g, [
+    [side * 3.6, hipY],
+    [side * 6.2 + k, hipY * 0.45],
+    [side * 4.6 + k * 0.4, -1],
+  ], col, 4);
   // 脚掌
   g.fillStyle = col;
-  g.fillRect(side * 4.6 + k * 0.4 - (side > 0 ? 1 : 5), -1.8, 6, 2.2);
+  g.fillRect(Math.round(side * 4.6 + k * 0.4 - (side > 0 ? 1 : 5)), -2, 6, 2);
 }
 
 function arm(g, side, shY, t, ph, press, col) {
-  const drift = Math.sin(t * 0.8 + ph) * 1.1;
+  const drift = qz(Math.sin(t * 0.8 + ph) * 1.1, 0.5);
   const shx = side * 7.4;
   let ex, ey, hx, hy;
   if (press > 0.02) {
@@ -3181,23 +2990,16 @@ function arm(g, side, shY, t, ph, press, col) {
     hx = shx + side * 2.6 + drift;
     hy = shY + 25 + drift * 0.5;
   }
-  g.strokeStyle = col;
-  g.lineWidth = 3.8;
-  g.lineCap = 'round';
-  g.lineJoin = 'round';
-  g.beginPath();
-  g.moveTo(shx, shY + 1);
-  g.lineTo(ex, ey);
-  g.lineTo(hx, hy);
-  g.stroke();
-  // 三根长指
-  g.lineWidth = 1.2;
+  // 上臂/小臂：3px 像素折线
+  pxPolyline(g, [
+    [shx, shY + 1],
+    [ex, ey],
+    [hx, hy],
+  ], col, 3);
+  // 三根长指：1px 像素线
   const spread = press > 0.02 ? 1 : 0.5;
   for (let i = -1; i <= 1; i++) {
-    g.beginPath();
-    g.moveTo(hx, hy);
-    g.lineTo(hx + i * 2.4 * spread + side * 0.6, hy + (press > 0.02 ? -3.8 : 5));
-    g.stroke();
+    pxLine(g, hx, hy, hx + i * 2.4 * spread + side * 0.6, hy + (press > 0.02 ? -3.8 : 5), col, 1);
   }
 }
 
@@ -3235,14 +3037,9 @@ function staffBody(g, o) {
   const look = kind === 'note' ? Math.max(0, Math.sin(t * 0.42 + seed * 2.1) - 0.75) * 4 : 0;
   const baseY = -shift;
 
-  // 影子
-  g.save();
-  g.globalAlpha = 0.45;
-  g.fillStyle = '#000';
-  g.beginPath();
-  g.ellipse(0, 0, 6, 2.8, 0, 0, 6.3);
-  g.fill();
-  g.restore();
+  // 影子：两档像素椭圆
+  pxEllipse(g, 0, 0, 6, 2.8, 'rgba(0,0,0,0.28)');
+  pxEllipse(g, 0, 0, 4, 1.8, 'rgba(0,0,0,0.3)');
 
   // 腿
   g.fillStyle = tone.pants;
@@ -3305,19 +3102,13 @@ function staffBody(g, o) {
     g.fillRect(hx + 2, hy + 3, 1, 1);
   }
 
-  // 手臂与手上的东西：每种角色一套摆好的姿势
+  // 手臂与手上的东西：每种角色一套摆好的姿势（2px 像素线，硬边）
   const armStroke = (x0, y0, x1, y1, w = 2.4, col = tone.body) => {
-    g.strokeStyle = col;
-    g.lineWidth = w;
-    g.lineCap = 'round';
-    g.beginPath();
-    g.moveTo(x0, y0);
-    g.lineTo(x1, y1);
-    g.stroke();
+    pxLine(g, x0, y0, x1, y1, col, Math.max(1, Math.round(w)));
   };
   const hand = (x, y) => {
     g.fillStyle = PAL.skin;
-    g.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
+    g.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
   };
 
   if (kind === 'note') {
@@ -3325,18 +3116,17 @@ function staffBody(g, o) {
     const bx = dir * 5.2;
     const by = shY + 4;
     armStroke(-dir * 4.2, shY + 2, bx - dir * 1.6, by + 2, 2.4, tone.shade);
-    // 写字板
+    // 写字板：不再旋转 —— 旋转的 fillRect 会被抗锯齿糊掉
     g.save();
-    g.translate(bx, by);
-    g.rotate(dir * 0.22);
+    g.translate(Math.round(bx), Math.round(by));
     g.fillStyle = '#5b6266';
-    g.fillRect(-3.6, -4.6, 7.2, 9.2);
+    g.fillRect(-4, -5, 7, 9);
     g.fillStyle = 'rgba(222,216,200,0.82)';
     g.fillRect(-3, -4, 6, 8);
     g.fillStyle = 'rgba(60,66,68,0.7)';
-    for (let i = 0; i < 5; i++) g.fillRect(-2.2, -2.6 + i * 1.5, 4.4, 0.7);
+    for (let i = 0; i < 4; i++) g.fillRect(-2, -3 + i * 2, 4, 1);
     g.fillStyle = '#3a4145';
-    g.fillRect(-3.6, -5.4, 7.2, 1.4);
+    g.fillRect(-4, -6, 7, 1);
     g.restore();
     // 记录的那只手：笔尖在纸上小幅移动
     const wob = Math.sin(t * 5.2 + seed) * 1.1;
@@ -3344,12 +3134,7 @@ function staffBody(g, o) {
     const py = by - 1 + Math.cos(t * 4.1 + seed) * 0.8;
     armStroke(dir * 4.2, shY + 2, px, py);
     hand(px, py);
-    g.strokeStyle = '#22282a';
-    g.lineWidth = 1;
-    g.beginPath();
-    g.moveTo(px, py);
-    g.lineTo(px + dir * 2.4, py + 2.4);
-    g.stroke();
+    pxLine(g, px, py, px + dir * 2.4, py + 2.4, '#22282a', 1);
   } else if (kind === 'camera') {
     // 一手扶机身，一手在取景器上
     armStroke(-dir * 3.6, shY + 2, dir * 7, shY + 1, 2.4, tone.shade);
@@ -3380,31 +3165,14 @@ export function makeCameraRig(seed = 811) {
   return makeProp(W + 0.5, W + 0.5, H + 0.3, (g, ox, oy) => {
     aoShadow(g, ox, oy, W, W, 0.42);
     const hy = oy - H * TILE_Z;
-    // 三脚架
-    g.strokeStyle = '#2c3236';
-    g.lineWidth = 2;
-    g.lineCap = 'round';
+    // 三脚架：2px 像素腿 + 1px 受光芯
     for (const [dx, dy] of [
       [-9, 4],
       [9, 4],
       [0, -6],
     ]) {
-      g.beginPath();
-      g.moveTo(ox, hy + 4);
-      g.lineTo(ox + dx, oy + dy * 0.4);
-      g.stroke();
-    }
-    g.strokeStyle = '#59636a';
-    g.lineWidth = 0.8;
-    for (const [dx, dy] of [
-      [-9, 4],
-      [9, 4],
-      [0, -6],
-    ]) {
-      g.beginPath();
-      g.moveTo(ox - 0.5, hy + 4);
-      g.lineTo(ox + dx - 0.5, oy + dy * 0.4);
-      g.stroke();
+      pxLine(g, ox, hy + 4, ox + dx, oy + dy * 0.4, '#2c3236', 2);
+      pxLine(g, ox - 1, hy + 4, ox + dx - 1, oy + dy * 0.4, '#59636a', 1);
     }
     // 云台
     g.fillStyle = '#3c4449';
@@ -3452,28 +3220,22 @@ export function drawFlashIcon(g, w, h, on) {
   g.fillRect(-16, -5, 22, 3);
   g.fillStyle = '#262d32';
   g.fillRect(-6, -5, 3, 10);
-  g.fillStyle = '#404a50';
-  g.beginPath();
-  g.moveTo(6, -7);
-  g.lineTo(13, -9);
-  g.lineTo(13, 9);
-  g.lineTo(6, 7);
-  g.closePath();
-  g.fill();
+  pxPoly(g, [
+    [6, -7],
+    [13, -9],
+    [13, 9],
+    [6, 7],
+  ], '#404a50');
   g.fillStyle = on ? '#fff3cf' : '#7b837f';
   g.fillRect(11, -8, 3, 16);
   if (on) {
-    const grd = g.createLinearGradient(14, 0, 30, 0);
-    grd.addColorStop(0, 'rgba(255,240,200,0.75)');
-    grd.addColorStop(1, 'rgba(255,240,200,0)');
-    g.fillStyle = grd;
-    g.beginPath();
-    g.moveTo(14, -8);
-    g.lineTo(30, -16);
-    g.lineTo(30, 16);
-    g.lineTo(14, 8);
-    g.closePath();
-    g.fill();
+    // 光锥：逐带展宽的硬边竖条，亮度分档递减
+    for (let i = 0; i < 4; i++) {
+      const xx = 14 + i * 4;
+      const hh = 9 + i * 2;
+      g.fillStyle = `rgba(255,240,200,${(0.6 - i * 0.14).toFixed(2)})`;
+      g.fillRect(xx, -hh, 4, hh * 2);
+    }
   }
   g.restore();
 }

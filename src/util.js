@@ -192,6 +192,230 @@ export function pixelSprite(g, x, y, box, draw) {
   return { value, dx, dy };
 }
 
+/* ------------------------------------------------------------------ *
+ * 像素绘制助手 —— 直升机段落验证过的那套语言，抽出来给全游戏共用：
+ * 整数网格上的 fillRect、逐行/逐列扫描的轮廓、硬分带 + 棋盘抖动，
+ * 不用 stroke 曲线 / 椭圆 / 渐变。
+ * ------------------------------------------------------------------ */
+
+/** 像素直线：逐格取整落点画 th×th 的方块，代替 stroke（硬边台阶，无抗锯齿） */
+export function pxLine(g, x0, y0, x1, y1, c, th = 1) {
+  const n = Math.max(Math.abs(Math.round(x1) - Math.round(x0)), Math.abs(Math.round(y1) - Math.round(y0)), 1);
+  g.fillStyle = c;
+  let lx = null;
+  let ly = null;
+  for (let i = 0; i <= n; i++) {
+    const xx = Math.round(x0 + ((x1 - x0) * i) / n);
+    const yy = Math.round(y0 + ((y1 - y0) * i) / n);
+    if (xx === lx && yy === ly) continue;
+    g.fillRect(xx, yy, th, th);
+    lx = xx;
+    ly = yy;
+  }
+}
+
+/** 像素折线：一串点用 pxLine 连起来（线缆、裂纹、垂管都走这里） */
+export function pxPolyline(g, pts, c, th = 1) {
+  for (let i = 1; i < pts.length; i++) {
+    pxLine(g, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], c, th);
+  }
+}
+
+/** 棋盘抖动行：两个色带的交界处隔格点上一层，像素画的渐变过渡 */
+export function pxDither(g, x0, x1, y, c) {
+  g.fillStyle = c;
+  const a = Math.round(x0);
+  const b = Math.round(x1);
+  const yy = Math.round(y);
+  for (let x = a + ((a + yy) & 1); x < b; x += 2) g.fillRect(x, yy, 1, 1);
+}
+
+/** 沿任意直线的棋盘抖动：走 pxLine 的落点，但只点棋盘格奇偶的一半 */
+export function pxDitherLine(g, x0, y0, x1, y1, c) {
+  const n = Math.max(Math.abs(Math.round(x1) - Math.round(x0)), Math.abs(Math.round(y1) - Math.round(y0)), 1);
+  g.fillStyle = c;
+  for (let i = 0; i <= n; i++) {
+    const xx = Math.round(x0 + ((x1 - x0) * i) / n);
+    const yy = Math.round(y0 + ((y1 - y0) * i) / n);
+    if ((xx + yy) & 1) g.fillRect(xx, yy, 1, 1);
+  }
+}
+
+/** 棋盘抖动列（竖向的色带交界） */
+export function pxDitherV(g, x, y0, y1, c) {
+  g.fillStyle = c;
+  const a = Math.round(y0);
+  const b = Math.round(y1);
+  const xx = Math.round(x);
+  for (let y = a + ((a + xx) & 1); y < b; y += 2) g.fillRect(xx, y, 1, 1);
+}
+
+/** 沿多段线在 y 处取 x（pts = [[y, x], ...]，y 升序，越界取端点） */
+export function edgeAt(pts, y) {
+  if (y <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    if (y <= pts[i][0]) {
+      const [ya, xa] = pts[i - 1];
+      const [yb, xb] = pts[i];
+      return xa + ((xb - xa) * (y - ya)) / (yb - ya);
+    }
+  }
+  return pts[pts.length - 1][1];
+}
+
+/** 逐行扫描两条边，取整成每行 [xl, xr] —— 像素轮廓的台阶就是这么来的 */
+export function rowScan(L, R, y0, y1) {
+  const rows = [];
+  for (let y = y0; y <= y1; y++) rows.push([Math.round(edgeAt(L, y)), Math.round(edgeAt(R, y))]);
+  return rows;
+}
+
+/**
+ * 凸多边形的逐行扫描填充：每行取整成 [xl, xr] 一条 fillRect。
+ * 代替 beginPath/fill —— 斜边变成硬边台阶而不是抗锯齿的糊线。
+ */
+export function pxPoly(g, pts, fill) {
+  let ty = Infinity;
+  let by = -Infinity;
+  for (const p of pts) {
+    if (p[1] < ty) ty = p[1];
+    if (p[1] > by) by = p[1];
+  }
+  const y0 = Math.round(ty);
+  const y1 = Math.round(by);
+  g.fillStyle = fill;
+  const n = pts.length;
+  for (let y = y0; y <= y1; y++) {
+    const yc = y + 0.5;
+    let xl = Infinity;
+    let xr = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const ax = pts[i][0];
+      const ay = pts[i][1];
+      const bx = pts[(i + 1) % n][0];
+      const by2 = pts[(i + 1) % n][1];
+      if (ay <= yc === by2 <= yc) continue;
+      const x = ax + ((bx - ax) * (yc - ay)) / (by2 - ay);
+      if (x < xl) xl = x;
+      if (x > xr) xr = x;
+    }
+    if (xr < xl) continue;
+    const rl = Math.round(xl);
+    g.fillRect(rl, y, Math.max(1, Math.round(xr) - rl), 1);
+  }
+}
+
+/** 逐行扫描的实心像素椭圆 */
+export function pxEllipse(g, cx, cy, rx, ry, c) {
+  const X = Math.round(cx);
+  const Y = Math.round(cy);
+  const R = Math.max(1, Math.round(ry));
+  g.fillStyle = c;
+  for (let y = -R; y <= R; y++) {
+    const k = 1 - (y / (ry || 1)) ** 2;
+    if (k <= 0) continue;
+    const w = Math.max(1, Math.round(rx * Math.sqrt(k)));
+    g.fillRect(X - w, Y + y, w * 2, 1);
+  }
+}
+
+/** 行扫 + 列扫的像素椭圆环（两遍才不会在圆顶/圆底漏格） */
+export function pxEllipseRing(g, cx, cy, rx, ry, c, th = 1) {
+  const X = Math.round(cx);
+  const Y = Math.round(cy);
+  g.fillStyle = c;
+  const R2 = Math.max(1, Math.round(ry));
+  for (let y = -R2; y <= R2; y++) {
+    const k = Math.max(0, 1 - (y / (ry || 1)) ** 2);
+    const w = Math.round(rx * Math.sqrt(k));
+    g.fillRect(X - w, Y + y, th, 1);
+    g.fillRect(X + w - th + 1, Y + y, th, 1);
+  }
+  const R1 = Math.max(1, Math.round(rx));
+  for (let x = -R1; x <= R1; x++) {
+    const k = Math.max(0, 1 - (x / (rx || 1)) ** 2);
+    const h = Math.round(ry * Math.sqrt(k));
+    g.fillRect(X + x, Y - h, 1, th);
+    g.fillRect(X + x, Y + h - th + 1, 1, th);
+  }
+}
+
+/** 脚下阴影：三档同心的像素椭圆平涂，代替径向渐变 */
+export function pxShadow(g, cx, cy, rx, ry, a = 0.45) {
+  for (const [f, al] of [
+    [1, a * 0.3],
+    [0.66, a * 0.32],
+    [0.36, a * 0.34],
+  ]) {
+    pxEllipse(g, cx, cy, Math.max(1, rx * f), Math.max(1, ry * f), `rgba(0,0,0,${al.toFixed(3)})`);
+  }
+}
+
+/** 洒在地上/墙上的一摊：逐行扫描 + 随机咬边，摊子不会是光滑椭圆 */
+export function pxBlob(g, cx, cy, rx, ry, c, rand) {
+  const X = Math.round(cx);
+  const Y = Math.round(cy);
+  const R = Math.max(1, Math.round(ry));
+  g.fillStyle = c;
+  for (let y = -R; y <= R; y++) {
+    const k = 1 - (y / (ry || 1)) ** 2;
+    if (k <= 0) continue;
+    let w = Math.round(rx * Math.sqrt(k));
+    if (rand) w -= (rand() * 2) | 0;
+    if (w <= 0) continue;
+    const off = rand ? ((rand() * 3) | 0) - 1 : 0;
+    g.fillRect(X - w + off, Y + y, w * 2, 1);
+  }
+}
+
+/** 三档同心方块的辉光（lighter 合成由调用方开）。跟直升机航行灯同一读法 */
+export function pxGlow(g, x, y, r, rgb, k) {
+  if (k <= 0.01) return;
+  for (const [f, a] of [
+    [1, 0.09],
+    [0.5, 0.2],
+    [0.18, 0.8],
+  ]) {
+    const q = Math.max(1, Math.round(r * f));
+    g.fillStyle = `rgba(${rgb},${(k * a).toFixed(3)})`;
+    g.fillRect(Math.round(x) - q, Math.round(y) - q, q * 2, q * 2);
+  }
+}
+
+/* 3×5 像素字模：烘焙层里的小字（门牌、楼层号、警示喷涂）全用它拼，
+   canvas 的 fillText 在这个字号下只是一团糊。 */
+const FONT3 = {
+  A: '010101111101101', B: '110101110101110', C: '011100100100011', D: '110101101101110',
+  E: '111100110100111', F: '111100110100100', G: '011100101101011', H: '101101111101101',
+  I: '111010010010111', J: '001001001101010', K: '101101110101101', L: '100100100100111',
+  M: '101111101101101', N: '110101101101101', O: '010101101101010', P: '110101110100100',
+  Q: '010101101010001', R: '110101110101101', S: '011100010001110', T: '111010010010010',
+  U: '101101101101111', V: '101101101101010', W: '101101101111101', X: '101101010101101',
+  Y: '101101010010010', Z: '111001010100111',
+  0: '111101101101111', 1: '010110010010111', 2: '111001111100111', 3: '111001111001111',
+  4: '101101111001001', 5: '111100111001111', 6: '111100111101111', 7: '111001001010010',
+  8: '111101111101111', 9: '111101111001111',
+  '-': '000000111000000', '=': '000111000111000', '/': '001001010100100', '.': '000000000000010',
+  ':': '000010000010000', ' ': '000000000000000',
+};
+
+/** 手拼像素字。x,y 是左上角，s 是整数放大倍数，字距 1 格 */
+export function pxText(g, x, y, str, c, s = 1) {
+  g.fillStyle = c;
+  let cx = Math.round(x);
+  const cy = Math.round(y);
+  const up = String(str).toUpperCase();
+  for (const ch of up) {
+    const m = FONT3[ch];
+    if (m) {
+      for (let i = 0; i < 15; i++) {
+        if (m[i] === '1') g.fillRect(cx + (i % 3) * s, cy + ((i / 3) | 0) * s, s, s);
+      }
+    }
+    cx += 4 * s;
+  }
+}
+
 /** 闪烁函数：返回 0..1 的亮度系数 */
 export function flicker(t, seed, calm = 0.82) {
   const a = Math.sin(t * 11.3 + seed) * 0.5 + 0.5;
