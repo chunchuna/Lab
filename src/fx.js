@@ -309,7 +309,12 @@ export class Rain {
     if (!v) this.splashes.length = 0;
   }
 
-  update(dt) {
+  /**
+   * onGround(x, y)：可选。判断屏幕坐标（640×360，不含变焦）是否落在真实
+   * 地面上。天台之外是半空，雨丝可以继续下，但没有地面就不该溅起水花。
+   * 不传则保持旧行为（全屏都算地面）。
+   */
+  update(dt, onGround = null) {
     if (!this.on) return;
     this.gustT -= dt;
     if (this.gustT <= 0) {
@@ -327,7 +332,15 @@ export class Rain {
           d.x = Math.random() * (VIEW_W + 200) - 100;
           // 落地水花：只从近景那层生成，数量有限
           if (L.spd > 700 && this.splashes.length < 26) {
-            this.splashes.push({ x: Math.random() * VIEW_W, y: VIEW_H * 0.45 + Math.random() * VIEW_H * 0.5, t: 0 });
+            /* 拒绝采样：随机点不在地面上就重试几次，让屋面上的水花密度
+               不因为屏幕里一大半是天空/楼下深渊而明显变稀。 */
+            for (let tr = 0; tr < 4; tr++) {
+              const x = Math.random() * VIEW_W;
+              const y = VIEW_H * 0.45 + Math.random() * VIEW_H * 0.5;
+              if (onGround && !onGround(x, y)) continue;
+              this.splashes.push({ x, y, t: 0 });
+              break;
+            }
           }
         }
         if (d.x < -100) d.x += VIEW_W + 200;

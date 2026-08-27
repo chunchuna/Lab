@@ -1482,10 +1482,26 @@ function stopStorm() {
   SFX.setRotor(0);
 }
 
+/**
+ * 雨滴的屏幕落点（640×360，不含变焦）是否落在当前区域的可行走地面上。
+ * 反推链路是 render 的正向变换倒着走：屏幕 → 未变焦画布（viewXform 逆变换，
+ * 抖动偏移只有 1~2px，忽略）→ 等距逆投影回世界瓦片坐标，再对地面矩形
+ * [0,w]×[0,h] 判界。天台之外是半空，出了这个范围雨丝照下，但不出水花。
+ */
+function splashOnGround(sx, sy) {
+  const cx = (sx - viewXform.tx) / viewXform.s;
+  const cy = (sy - viewXform.ty) / viewXform.s;
+  const u = (cx - area.cam.x) / HW; // = wx - wy
+  const v = (cy - area.cam.y) / HH; // = wx + wy
+  const wx = (u + v) / 2;
+  const wy = (v - u) / 2;
+  return wx >= 0 && wx <= area.w && wy >= 0 && wy <= area.h;
+}
+
 function updateStorm(dt) {
   const s = game.storm;
   if (!s) return;
-  rain.update(dt);
+  rain.update(dt, splashOnGround);
   s.flash = Math.max(0, s.flash - dt * 3.1);
   s.next -= dt;
   if (s.next <= 0) {
@@ -3861,6 +3877,8 @@ window.__goto = (id, spawn) => enterArea(id, spawn);
 window.__inv = INV;
 window.__pad = pad;
 window.__render = render; // 供性能基准脚本直接测量渲染耗时
+window.__rain = rain; // 冒烟脚本用：断言水花落点都在屋面内
+window.__splashOnGround = splashOnGround;
 /** 跳过主菜单与起床过场，供测试脚本快进（每个页面省 4 秒多） */
 window.__skipIntro = () => {
   leaveMenu();

@@ -40,6 +40,21 @@ await shot('roof');
 await wait(1200);
 await shot('roof2');
 
+// 水花只该出现在屋面内：连续采样几秒，逐个落点过一遍反投影判界
+let sampled = 0;
+let offRoof = 0;
+for (let i = 0; i < 24; i++) {
+  const r = await page.evaluate(() => {
+    const bad = window.__rain.splashes.filter((s) => !window.__splashOnGround(s.x, s.y));
+    return { n: window.__rain.splashes.length, bad: bad.map((s) => [s.x | 0, s.y | 0]) };
+  });
+  sampled += r.n;
+  offRoof += r.bad.length;
+  if (r.bad.length) console.log('  OFF-ROOF splash:', JSON.stringify(r.bad));
+  await wait(250);
+}
+console.log(`splash check: ${sampled} sampled, ${offRoof} off-roof ${offRoof === 0 ? '(PASS)' : '(FAIL)'}`);
+
 await page.evaluate(() => window.__goto('lab'));
 await wait(2200);
 console.log('lab:', await state());
