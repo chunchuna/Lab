@@ -15,7 +15,7 @@ import { FX, Rain } from './fx.js';
 /* art.js 带 ?v= 缓存串：GitHub Pages 只给入口 main.js 加了版本参数，
    子模块会被浏览器长期缓存 —— 直升机这类纯视觉改动全在 art.js 里，
    不加这个串，用户刷新后看到的还是旧绘制。升版本号时同步改这里。 */
-import * as A from './art.js?v=2.0.2';
+import * as A from './art.js?v=2.0.3';
 import { makeNPCs, updateNPCs, npcDrawOpts, stepToward } from './npc.js';
 import { CAMP } from './campareas.js';
 import * as UI from './ui.js';
@@ -3967,51 +3967,39 @@ function applyLighting(g, cam, shx, shy, px, py) {
  * ------------------------------------------------------------------ */
 
 /**
- * 晨光色调：白天区域用它替掉整条光照管线。屏幕空间几档色带 + 右上角
- * 的日光斑 —— 分档平涂，不用平滑渐变，跟像素语言一致。很轻：三次 fillRect
- * 加一个 pxGlow。
+ * 晨光色调：白天区域用它替掉整条光照管线。不做全屏 multiply / 橙色 wash
+ * （那会像滤镜）；暖色只落在天空带、太阳辉光与斜向光柱上，地面素材保持
+ * 本色，靠 morningShadow 与物体级 sunlit 抬亮来读清晨。
  */
 function drawDaylight(g) {
   applyScreen(g);
-  /* 先做一遍 multiply 色阶：太阳在右上，画面从右上的暖金往左下的
-     偏冷压暗。低角度阳光的"金色时刻"主要靠这一步把整帧色温掰到
-     橙 —— 只用 lighter 叠橙的话，素材的灰底压不下去，看着还是阴天。
-     （光照层允许平滑渐变，见 config.js 的像素质感说明。） */
-  g.globalCompositeOperation = 'multiply';
-  const grade = g.createLinearGradient(VIEW_W, 0, VIEW_W * 0.18, VIEW_H);
-  grade.addColorStop(0, 'rgb(255,212,148)');
-  grade.addColorStop(0.5, 'rgb(250,190,128)');
-  grade.addColorStop(1, 'rgb(190,174,190)');
-  g.fillStyle = grade;
-  g.fillRect(0, 0, VIEW_W, VIEW_H);
   g.globalCompositeOperation = 'lighter';
-  // 全屏一层橙色日光底
-  g.fillStyle = 'rgba(255,142,52,0.14)';
-  g.fillRect(0, 0, VIEW_W, VIEW_H);
-  g.fillStyle = 'rgba(255,178,92,0.09)';
-  g.fillRect(0, 0, VIEW_W, VIEW_H * 0.55);
-  // 顶部低阳光柱：画面上方偏右，分带平涂（像素语言）
-  g.fillStyle = 'rgba(255,190,100,0.22)';
+  // 天空一带极轻的晨雾，不盖到画面下半
+  g.fillStyle = 'rgba(255,198,120,0.05)';
+  g.fillRect(0, 0, VIEW_W, VIEW_H * 0.4);
+  // 顶部朝阳光柱：画面上方偏右，分带平涂（像素语言）
+  g.fillStyle = 'rgba(255,210,130,0.20)';
   g.fillRect(0, 0, VIEW_W, 22);
-  g.fillStyle = 'rgba(255,174,82,0.14)';
+  g.fillStyle = 'rgba(255,198,110,0.14)';
   g.fillRect(0, 22, VIEW_W, 28);
-  g.fillStyle = 'rgba(255,158,68,0.08)';
+  g.fillStyle = 'rgba(255,180,90,0.09)';
   g.fillRect(0, 50, VIEW_W, 40);
-  g.fillStyle = 'rgba(255,134,54,0.06)';
-  g.fillRect(VIEW_W * 0.45, 0, VIEW_W * 0.55, 72);
-  // 太阳本体：同心方块辉光，偏右上，压着地平线的一轮橙金
-  pxGlow(g, VIEW_W - 68, 24, 150, '255,152,56', 0.62);
-  pxGlow(g, VIEW_W - 68, 24, 64, '255,210,124', 0.36);
+  g.fillStyle = 'rgba(255,158,72,0.07)';
+  g.fillRect(VIEW_W * 0.38, 0, VIEW_W * 0.62, 82);
+  // 太阳本体：同心方块辉光，偏右上
+  pxGlow(g, VIEW_W - 68, 24, 118, '255,168,72', 0.44);
+  pxGlow(g, VIEW_W - 68, 24, 54, '255,215,140', 0.26);
   g.globalCompositeOperation = 'source-over';
-  // 斜向晨光带：从太阳角扫过画面
-  for (let i = 0; i < 9; i++) {
-    const t = i / 8;
-    const x0 = VIEW_W - 40 - t * (VIEW_W + 80);
-    g.fillStyle = `rgba(255,180,96,${(0.04 - t * 0.022).toFixed(3)})`;
-    g.fillRect(Math.round(x0), 0, 14, VIEW_H);
+  // 斜向晨光带：从太阳角扫过画面上半，像天上打下来的光柱
+  for (let i = 0; i < 11; i++) {
+    const t = i / 10;
+    const x0 = VIEW_W - 36 - t * (VIEW_W + 90);
+    const h = Math.round(VIEW_H * (0.88 - t * 0.12));
+    g.fillStyle = `rgba(255,185,95,${(0.048 - t * 0.026).toFixed(3)})`;
+    g.fillRect(Math.round(x0), 0, 11 + (i % 3), h);
   }
   // 下缘冷影压纵深，跟暖色天形成对比
-  g.fillStyle = 'rgba(44,46,72,0.08)';
+  g.fillStyle = 'rgba(42,48,68,0.07)';
   g.fillRect(0, VIEW_H - 52, VIEW_W, 52);
   applyView(g);
 }
