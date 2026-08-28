@@ -1244,6 +1244,9 @@ function updateCamera() {
  * clamp 在区域包围盒里 —— 地皮画到了包围盒之外（见 campareas），
  * 所以镜头贴边时四角不会露黑。按真实秒缓动，绘制端照常各自取整。
  */
+/** 跟随镜头尾段的恒定收尾速度（逻辑像素/秒），见 updateFollowCam */
+const FOLLOW_TAIL_V = 42;
+
 function updateFollowCam(snapNow) {
   if (!area.follow) {
     game.cam = null;
@@ -1260,17 +1263,26 @@ function updateFollowCam(snapNow) {
   const maxY = -b.y0;
   cx = b.w <= VIEW_W ? (minX + maxX) / 2 : clamp(cx, minX, maxX);
   cy = b.h <= VIEW_H ? (minY + maxY) / 2 : clamp(cy, minY, maxY);
+  /* 目标取整到逻辑像素：停稳后镜头落在跟 area.cam 一样的整数格上，
+     角色（pixelSprite 整数锚点）与静态层（1/N 格）共用同一张网格。 */
+  cx = Math.round(cx);
+  cy = Math.round(cy);
   if (!game.cam || snapNow) {
-    game.cam = { x: snap(cx), y: snap(cy) };
+    game.cam = { x: cx, y: cy };
     return;
   }
-  const k = Math.min(1, game.rdt * 3.6);
-  game.cam.x = lerp(game.cam.x, cx, k);
-  game.cam.y = lerp(game.cam.y, cy, k);
-  if (Math.hypot(game.cam.x - cx, game.cam.y - cy) < 0.2) {
-    game.cam.x = snap(cx);
-    game.cam.y = snap(cy);
-  }
+  /* 指数缓动 + 恒速尾段，有限时间内**精确**落在目标上。
+     纯 lerp 只会无限逼近；以前"距离 < 0.2 就掐到 snap(cx)"的兜底
+     会跟 lerp 打架 —— 掐过去、又被拉回来、再掐 —— 停住后画面每
+     3~4 帧跳一下地抽。现在尾段以恒速走完最后一段，到点即停：
+     起步 / 移动 / 停下全程同一条路径，没有任何一帧的跳变。 */
+  const adv = (cur, tgt) => {
+    const d = tgt - cur;
+    const step = Math.max(Math.abs(d) * Math.min(1, game.rdt * 3.6), FOLLOW_TAIL_V * game.rdt);
+    return Math.abs(d) <= step ? tgt : cur + Math.sign(d) * step;
+  };
+  game.cam.x = adv(game.cam.x, cx);
+  game.cam.y = adv(game.cam.y, cy);
 }
 
 function update(dt) {
@@ -4048,10 +4060,10 @@ function render() {
   const amp = game.shake > 0.05 ? game.shake : 0;
   const shx = amp ? snap((Math.random() - 0.5) * amp) : 0;
   const shy = amp ? snap((Math.random() - 0.5) * amp) : 0;
-  // 跟随镜头的区域用 game.cam（浮点，绘制端各自取整），其余用固定的 area.cam
+  // 跟随镜头的区域用 game.cam（移动中是浮点、停稳后是整数），其余用固定的 area.cam
   const camBase = game.cam || area.cam;
-  /* 跟随镜头用浮点 lerp，但绘制前统一 snap 到像素格 —— 静态层 blit、
-     道具与 pixelSprite 共用同一套取整后的 cam，停住后才不会各层各抖。 */
+  /* 绘制前统一 snap 到像素格 —— 静态层 blit、道具与 pixelSprite
+     共用同一套取整后的 cam，各层才不会各进各的整数格。 */
   const cam = { x: snap(camBase.x + shx), y: snap(camBase.y + shy) };
   const p = game.player;
 
