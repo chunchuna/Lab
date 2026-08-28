@@ -4036,6 +4036,18 @@ function drawHeliShadow(g, cam, h) {
   const k = clamp(1 - h.z / 9, 0.15, 1);
   const w = 34 + 22 * k;
   pxEllipse(g, sx, sy, w, w * 0.3, `rgba(24,20,12,${(0.3 * k).toFixed(3)})`);
+  /* 停稳后的清晨长影：跟营地道具的 morningShadow 同一套约定 ——
+     太阳在屏幕右上，影子往世界 +y（屏幕左下）拖。机身（dir=1 机头朝左）
+     的投影是一条斜四边形 + 旋翼盘的淡椭圆。 */
+  if (area.daylight && h.z < 0.4) {
+    pxPoly(g, [
+      [sx - 58, sy + 3],
+      [sx + 74, sy + 3],
+      [sx + 34, sy + 19],
+      [sx - 98, sy + 19],
+    ], 'rgba(26,24,18,0.16)');
+    pxEllipse(g, sx - 42, sy + 14, 62, 11, 'rgba(26,24,18,0.08)');
+  }
 }
 
 /** 营地的直升机：世界坐标 + 离地高度，旋翼转速由 rotorT 的推进速度决定 */
@@ -4043,7 +4055,7 @@ function drawCampHeli(g, cam, h) {
   const sx = cam.x + (h.x - h.y) * HW;
   const sy = cam.y + (h.x + h.y) * HH - HELI_SKID - h.z * TILE_Z;
   pixelSprite(g, sx, sy, HELI_BOX, (gg, ax, ay) => {
-    A.drawHeli(gg, ax, ay, h.rotorT, { scale: 1, dir: 1 });
+    A.drawHeli(gg, ax, ay, h.rotorT, { scale: 1, dir: 1, sun: area.daylight });
   });
 }
 

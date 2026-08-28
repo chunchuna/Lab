@@ -1481,6 +1481,71 @@ const HP = {
   steelD: '#3a423e',
 };
 
+/* ------------------------------------------------------------------ *
+ * 白天的机体：调色板整体抬亮 + 暖移
+ *
+ * 夜里（天台）机体压得很暗没问题 —— 周围也是暗的；停到清晨的营地里，
+ * 同一套近黑配色贴在亮暖的地皮上，整个剪影就读成了"描着黑边的贴纸"。
+ * 所以 drawHeli 接 o.sun：把每一笔 fillStyle 过一遍暖色抬升（乘性提亮
+ * 为主、加一点暖色底），暗部不再是黑、亮部偏卡其 —— 跟军帐的受光语言
+ * （顶亮偏暖 / 背光橄榄暗）落在同一档。转换按颜色串做缓存，量化后的
+ * 颜色是有限集合，不会越积越多。
+ * ------------------------------------------------------------------ */
+
+const SUN_TINT_CACHE = new Map();
+function sunColor(c) {
+  let v = SUN_TINT_CACHE.get(c);
+  if (v) return v;
+  let r;
+  let gg;
+  let b;
+  let a = null;
+  const hex = /^#([0-9a-f]{6})$/i.exec(c);
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    r = n >> 16;
+    gg = (n >> 8) & 255;
+    b = n & 255;
+  } else {
+    const m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(c);
+    if (!m) {
+      SUN_TINT_CACHE.set(c, c);
+      return c;
+    }
+    r = +m[1];
+    gg = +m[2];
+    b = +m[3];
+    a = m[4] === undefined ? 1 : +m[4];
+  }
+  const R = Math.min(255, Math.round(r * 1.3 + 30));
+  const G = Math.min(255, Math.round(gg * 1.24 + 21));
+  const B = Math.min(255, Math.round(b * 1.02 + 8));
+  v = a === null ? `rgb(${R},${G},${B})` : `rgba(${R},${G},${B},${a})`;
+  SUN_TINT_CACHE.set(c, v);
+  return v;
+}
+
+/** 包一层 ctx：fillStyle 一律过 sunColor，其余读写/方法原样转发 */
+function sunlitCtx(g) {
+  const bound = new Map();
+  return new Proxy(g, {
+    get(t, p) {
+      const v = t[p];
+      if (typeof v !== 'function') return v;
+      let f = bound.get(p);
+      if (!f) {
+        f = v.bind(t);
+        bound.set(p, f);
+      }
+      return f;
+    },
+    set(t, p, v) {
+      t[p] = p === 'fillStyle' && typeof v === 'string' ? sunColor(v) : v;
+      return true;
+    },
+  });
+}
+
 /* 机身侧影（像素坐标，机头在 -x）：逐行 [xl, xr]，行号从 HULL_Y0 起 */
 const HULL_Y0 = -18;
 const HULL_ROWS = rowScan(
@@ -1691,6 +1756,8 @@ export function drawCrew(g, x, y, o = {}) {
 export function drawHeli(g, x, y, t, o = {}) {
   const sc = o.scale === undefined ? 1 : o.scale;
   const dir = o.dir === undefined ? -1 : o.dir;
+  // 白天（营地）：所有颜色过一遍暖色抬升，机体跟晨光里的道具同一档亮度
+  if (o.sun) g = sunlitCtx(g);
   const X = Math.round(x);
   const Y = Math.round(y);
   g.save();
@@ -1942,9 +2009,10 @@ export function drawHeli(g, x, y, t, o = {}) {
   g.fillStyle = HP.steelD;
   g.fillRect(22, -17, 2, 2);
 
-  /* --- 起落滑橇：支柱是像素斜线，横杆是整数条，前端台阶上翘 --- */
+  /* --- 起落滑橇：支柱是像素斜线，横杆是整数条，前端台阶上翘 ---
+     支柱用钢件暗色而不是近黑 —— 近黑的斜线贴在亮地皮上读起来像描边 */
   for (const [sx0, sx1] of [[-17, -21], [16, 20], [-17, -9], [16, 9]]) {
-    pxLine(g, sx0, 13, sx1, 25, '#232b2e', 2);
+    pxLine(g, sx0, 13, sx1, 25, '#2f3833', 2);
   }
   g.fillStyle = '#454f4a';
   g.fillRect(-30, 25, 60, 3);
