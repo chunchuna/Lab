@@ -80,12 +80,14 @@ function campRoster() {
   const F2 = CAMP.fires[1];
   const list = [];
 
-  /* --- 巡逻士兵 --- */
+  /* --- 巡逻士兵 ---
+     路径点都靠人肉对过 campareas 的碰撞盒：NPC 不吃碰撞，
+     线路穿过帐篷/沙袋不会被拦住，只会看起来像穿模。 */
   const soldier = (o) => list.push(npc(rand, { outfit: 'soldier', slung: true, scale: 1.04, ...o }));
-  soldier({ kind: 'patrol', x: 4, y: 3.5, pts: [[4, 3.5], [13, 4.2], [13, 7.4], [4.6, 7.0]], speed: 1.1 });
-  soldier({ kind: 'patrol', x: 21, y: 2.5, pts: [[21, 2.5], [34, 2.5], [34.6, 7.2], [21.6, 7.6]], speed: 1.2 });
-  soldier({ kind: 'patrol', x: 6, y: 22.4, pts: [[6, 22.4], [36, 22.4]], speed: 1.0 });
-  soldier({ kind: 'patrol', x: 37.6, y: 10, pts: [[37.6, 10], [37.6, 20], [35.2, 15]], speed: 0.95 });
+  soldier({ kind: 'patrol', x: 4, y: 3.5, pts: [[4, 3.5], [12.6, 4.2], [12.6, 7.0], [4.6, 7.0]], speed: 1.1 });
+  soldier({ kind: 'patrol', x: 21, y: 1.6, pts: [[21, 1.6], [34, 1.6]], speed: 1.2 });
+  soldier({ kind: 'patrol', x: 6, y: 22.9, pts: [[6, 22.9], [36, 22.9]], speed: 1.0 });
+  soldier({ kind: 'patrol', x: 37.6, y: 10, pts: [[37.6, 10], [37.6, 20], [35.6, 17]], speed: 0.95 });
   // 大门双岗：站着不动，面朝营外
   soldier({ kind: 'stand', x: 2.5, y: 10.4, aim: dirScreen(-1, 0.15), face: -1 });
   soldier({ kind: 'stand', x: 2.5, y: 12.9, aim: dirScreen(-1, -0.15), face: -1 });
@@ -118,12 +120,12 @@ function campRoster() {
   ref({ kind: 'cradle', x: 20.8, y: 19.8, aim: dirScreen(-0.7, 0.6), face: -1 });
   // 大门口往外望的老人
   ref({ kind: 'stand', x: 3.6, y: 11.7, aim: dirScreen(-1, 0.1), face: -1, look: { skin: SKIN_TONES[2], hair: 'bald', hairCol: HAIR_COLORS[3] } });
-  // 溜达的
-  ref({ kind: 'wander', x: 30, y: 19.4, cx: 30, cy: 19.4, r: 2.4, speed: 0.7 });
-  ref({ kind: 'wander', x: 14.5, y: 20.6, cx: 14.5, cy: 20.6, r: 1.8, speed: 0.6 });
-  ref({ kind: 'wander', x: 9.5, y: 14.5, cx: 9.5, cy: 14.5, r: 2.6, speed: 0.75 });
-  // 追着跑的小孩
-  ref({ kind: 'wander', x: 23, y: 19.2, cx: 23, cy: 19.2, r: 3.0, speed: 1.9, scale: 0.78, look: { skin: SKIN_TONES[1], hair: 'short', hairCol: HAIR_COLORS[0] } });
+  // 溜达的（活动半径都收在棚子之间的空地里，别晃进帐篷）
+  ref({ kind: 'wander', x: 30, y: 19.4, cx: 30, cy: 19.4, r: 1.8, speed: 0.7 });
+  ref({ kind: 'wander', x: 12.4, y: 16.8, cx: 12.4, cy: 16.8, r: 1.6, speed: 0.6 });
+  ref({ kind: 'wander', x: 9.5, y: 14.5, cx: 9.5, cy: 14.5, r: 2.0, speed: 0.75 });
+  // 追着跑的小孩：在广场南边的空地上撒欢
+  ref({ kind: 'wander', x: 22.6, y: 15.4, cx: 22.6, cy: 15.4, r: 1.8, speed: 1.9, scale: 0.78, look: { skin: SKIN_TONES[1], hair: 'short', hairCol: HAIR_COLORS[0] } });
 
   return list;
 }
@@ -156,7 +158,8 @@ export function makeNPCs(key) {
  * 更新
  * ------------------------------------------------------------------ */
 
-function stepToward(n, tx, ty, dt) {
+/** 也给 main.js 的护送士兵用：朝目标走一步，顺带把朝向/步态填好 */
+export function stepToward(n, tx, ty, dt) {
   const dx = tx - n.x;
   const dy = ty - n.y;
   const d = Math.hypot(dx, dy);
