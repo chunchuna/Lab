@@ -4,7 +4,8 @@
  *   camp     第一个真正的大室外场景：40×24 瓦片，显著大于视口，
  *            镜头跟随玩家（area.follow）。清晨 8 点：不跑 lighting.finish()
  *            （area.daylight），亮度与长影全部烘进静态层与道具精灵，
- *            运行期只叠一层屏幕空间的暖色晨光（main.js 的 drawDaylight）。
+ *            运行期叠一层锚在世界坐标上的暖色晨光（main.js 的 drawDaylight：
+ *            太阳挂在东北角天际，光柱钉在地面上，全部跟镜头平移）。
  *   campReg  登记帐篷内景：小房间，走常规烘焙光照 —— 布面透光的暖黄
  *            和门口灌进来的白亮日光，跟室外全亮形成对比。
  *
@@ -279,7 +280,7 @@ export function buildCamp() {
   P('cot1', A.makeCot(899), 24.8, 17.9, [0.9, 1.8]);
 
   /* --- 区域旗标 --- */
-  a.daylight = true; // 白天：不跑 lighting.finish()，晨光由屏幕空间叠加
+  a.daylight = true; // 白天：不跑 lighting.finish()，晨光由 drawDaylight 按世界坐标叠加
   a.noMask = true;
   a.safe = true; // 营地里禁止开枪
   a.follow = { yOff: 12 }; // 镜头跟随玩家

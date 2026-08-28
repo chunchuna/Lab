@@ -15,7 +15,7 @@ import { FX, Rain } from './fx.js';
 /* art.js 带 ?v= 缓存串：GitHub Pages 只给入口 main.js 加了版本参数，
    子模块会被浏览器长期缓存 —— 直升机这类纯视觉改动全在 art.js 里，
    不加这个串，用户刷新后看到的还是旧绘制。升版本号时同步改这里。 */
-import * as A from './art.js?v=2.0.4';
+import * as A from './art.js?v=2.0.5';
 import { makeNPCs, updateNPCs, npcDrawOpts, stepToward } from './npc.js';
 import { CAMP } from './campareas.js';
 import * as UI from './ui.js';
@@ -3977,65 +3977,110 @@ function applyLighting(g, cam, shx, shy, px, py) {
    (-21.6, +28.8) 每单位高，光柱取它的反方向，光和影才是同一个太阳。 */
 const RAY_SLANT = 0.75;
 
-/* 光柱排布：[顶边 x, 宽 px, 亮度, 长度占屏高比]。靠太阳一侧亮而密，
-   往左稀而淡；柱间留大段暗隙，方向感靠明暗对比读出来，而不是把整屏
-   刷橙（总覆盖约四分之一屏宽）。头两条顶边在画面外，斜进右下角。 */
+/* 光柱排布：[顶边 x（投影空间，柱顶挂在世界北缘 bounds.y0 的天际线上）,
+   宽 px, 亮度, 长度占 bounds 高度比]。靠太阳一侧（tx≈650）亮而密，往西
+   稀而淡；柱间留大段暗隙，方向感靠明暗对比读出来，而不是把整屏刷橙。
+   横向铺满整个营地投影宽度（含斜率补偿约 -408 ~ 1176）：镜头走到哪儿
+   都有柱子可见，但柱子钉在世界里，跟着地面平移，不粘屏幕。 */
 const RAYS = [
-  [716, 11, 0.085, 1.0],
-  [668, 20, 0.13, 1.0],
-  [612, 27, 0.16, 1.0],
-  [576, 12, 0.10, 0.94],
-  [540, 21, 0.14, 1.0],
-  [498, 9, 0.08, 0.86],
-  [468, 15, 0.11, 0.96],
-  [420, 8, 0.07, 0.8],
-  [372, 14, 0.09, 0.9],
-  [316, 7, 0.06, 0.76],
-  [256, 11, 0.07, 0.84],
-  [178, 8, 0.05, 0.7],
-  [96, 10, 0.05, 0.66],
+  [1176, 12, 0.07, 1.0],
+  [1118, 20, 0.10, 1.0],
+  [1052, 12, 0.08, 1.0],
+  [988, 22, 0.11, 1.0],
+  [920, 10, 0.08, 0.95],
+  [862, 18, 0.12, 1.0],
+  [800, 12, 0.09, 1.0],
+  [744, 24, 0.14, 1.0],
+  [700, 11, 0.09, 1.0],
+  [652, 20, 0.16, 1.0],
+  [596, 27, 0.15, 1.0],
+  [560, 12, 0.10, 0.94],
+  [524, 21, 0.14, 1.0],
+  [482, 9, 0.08, 0.86],
+  [452, 15, 0.11, 0.96],
+  [404, 8, 0.07, 0.8],
+  [356, 14, 0.09, 0.9],
+  [300, 7, 0.06, 0.76],
+  [240, 11, 0.07, 0.84],
+  [162, 8, 0.05, 0.7],
+  [80, 10, 0.05, 0.66],
+  [-10, 8, 0.045, 0.72],
+  [-105, 12, 0.05, 0.8],
+  [-210, 7, 0.04, 0.7],
+  [-320, 10, 0.045, 0.76],
+  [-408, 8, 0.04, 0.68],
 ];
 
-function drawDaylight(g) {
-  applyScreen(g);
+/**
+ * 全部画在世界变换（render 里已生效的 applyView）下：坐标 = cam + 投影
+ * 空间锚点，跟道具、beacons、backdrop 同一套换算。镜头跟随玩家时太阳与
+ * 光柱贴着地面 / 帐篷平移，不再钉在视口上（v2.0.4 及以前是 applyScreen
+ * 的屏幕空间叠加，看起来像画在 HUD 层）。
+ *
+ * 太阳锚在东北角天际：x 贴 bounds 右缘内收 68px，y 从北缘往下 232px ——
+ * 玩家走到营地东侧时它出现在画面右上（跟老版本的屏幕位置重合），往西走
+ * 就跟着地面滑出画面。天空分带同理挂在世界北缘，南缘冷影挂在世界南角。
+ */
+function drawDaylight(g, cam) {
+  const b = area.bounds;
+  const sunX = cam.x + b.x1 - 68;
+  const sunY = cam.y + b.y0 + 232;
+  const skyY = cam.y + b.y0;
+  const wx0 = cam.x + b.x0 - 80;
+  const ww = b.w + 160;
+  /* 可见窗口（绘制坐标系）：世界投影宽 1152px，别每帧整张扫。
+     QTE 变焦时窗口比 640×360 小，从 viewXform 反推。 */
+  const vx0 = -viewXform.tx / viewXform.s;
+  const vx1 = (VIEW_W - viewXform.tx) / viewXform.s;
+  const vy0 = -viewXform.ty / viewXform.s;
+  const vy1 = (VIEW_H - viewXform.ty) / viewXform.s;
+
   g.globalCompositeOperation = 'lighter';
-  // 天空一带极轻的晨雾，不盖到画面下半
+  // 北缘天际线一带的晨雾与朝阳分带（像素分带平涂），只挂在世界顶边
   g.fillStyle = 'rgba(255,198,120,0.05)';
-  g.fillRect(0, 0, VIEW_W, VIEW_H * 0.4);
-  // 顶部朝阳分带：画面上方偏右，分带平涂（像素语言）
+  g.fillRect(wx0, skyY, ww, 144);
   g.fillStyle = 'rgba(255,210,130,0.20)';
-  g.fillRect(0, 0, VIEW_W, 22);
+  g.fillRect(wx0, skyY, ww, 22);
   g.fillStyle = 'rgba(255,198,110,0.14)';
-  g.fillRect(0, 22, VIEW_W, 28);
+  g.fillRect(wx0, skyY + 22, ww, 28);
   g.fillStyle = 'rgba(255,180,90,0.09)';
-  g.fillRect(0, 50, VIEW_W, 40);
+  g.fillRect(wx0, skyY + 50, ww, 40);
+  // 靠太阳一侧再压深一档
   g.fillStyle = 'rgba(255,158,72,0.07)';
-  g.fillRect(VIEW_W * 0.38, 0, VIEW_W * 0.62, 82);
-  // 太阳本体：同心方块辉光，偏右上
-  pxGlow(g, VIEW_W - 68, 24, 118, '255,168,72', 0.44);
-  pxGlow(g, VIEW_W - 68, 24, 54, '255,215,140', 0.26);
+  g.fillRect(sunX - 260, skyY, wx0 + ww - (sunX - 260), 82);
+  // 太阳本体：同心方块辉光
+  pxGlow(g, sunX, sunY, 118, '255,168,72', 0.44);
+  pxGlow(g, sunX, sunY, 54, '255,215,140', 0.26);
   /* 斜向晨光柱：与地面长影反平行的平行光束，lighter 叠加读成"光"而不是
-     "染色"。每条三段递减 alpha（像素分带代替渐变），亮度随晨雾缓慢呼吸。 */
+     "染色"。每条三段递减 alpha（像素分带代替渐变），亮度随晨雾缓慢呼吸。
+     y0/y1 是柱内局部坐标（从柱顶往下），先按可见窗口裁掉屏外的段。 */
   for (let i = 0; i < RAYS.length; i++) {
     const [tx, w, a0, len] = RAYS[i];
+    const rx = cam.x + tx;
+    const h = b.h * len;
+    const clipTop = Math.max(0, vy0 - skyY);
+    const clipBot = Math.min(h, vy1 - skyY);
+    if (clipBot <= clipTop) continue;
+    if (rx + w - RAY_SLANT * clipTop < vx0 || rx - RAY_SLANT * clipBot > vx1) continue;
     const a = a0 * (0.85 + 0.15 * Math.sin(game.rt * 0.35 + i * 1.7));
-    const h = VIEW_H * len;
     for (const [t0, t1, f] of [[0, 0.5, 1], [0.5, 0.8, 0.6], [0.8, 1, 0.32]]) {
-      const y0 = h * t0;
-      const y1 = h * t1;
+      const y0 = Math.max(h * t0, clipTop);
+      const y1 = Math.min(h * t1, clipBot);
+      if (y1 <= y0) continue;
       pxPoly(g, [
-        [tx - RAY_SLANT * y0, y0],
-        [tx + w - RAY_SLANT * y0, y0],
-        [tx + w - RAY_SLANT * y1, y1],
-        [tx - RAY_SLANT * y1, y1],
+        [rx - RAY_SLANT * y0, skyY + y0],
+        [rx + w - RAY_SLANT * y0, skyY + y0],
+        [rx + w - RAY_SLANT * y1, skyY + y1],
+        [rx - RAY_SLANT * y1, skyY + y1],
       ], `rgba(255,196,110,${(a * f).toFixed(3)})`);
     }
   }
   g.globalCompositeOperation = 'source-over';
-  // 下缘冷影压纵深，跟暖色天形成对比
+  // 南缘冷影压纵深：远离朝阳的那头偏冷，锚在世界南角而不是视口底边
+  g.fillStyle = 'rgba(42,48,68,0.04)';
+  g.fillRect(wx0, cam.y + b.y1 - 150, ww, 75);
   g.fillStyle = 'rgba(42,48,68,0.07)';
-  g.fillRect(0, VIEW_H - 52, VIEW_W, 52);
-  applyView(g);
+  g.fillRect(wx0, cam.y + b.y1 - 75, ww, 135);
 }
 
 /** 营地 NPC / 护送士兵：跟玩家同一套 pixelSprite 整数锚点吸附 */
@@ -4234,7 +4279,7 @@ function render() {
     // 白天（营地）：亮度全在素材里，整条光照管线不跑，只叠一层晨光色调。
     // 顺便闭嘴：没有灯管，镇流器的嗡声不该在太阳底下响。
     SFX.setBuzz(0);
-    drawDaylight(ctx);
+    drawDaylight(ctx, cam);
   } else {
     applyLighting(ctx, cam, shx, shy, px, py);
   }
