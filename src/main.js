@@ -3973,34 +3973,45 @@ function applyLighting(g, cam, shx, shy, px, py) {
  */
 function drawDaylight(g) {
   applyScreen(g);
-  g.globalCompositeOperation = 'lighter';
-  // 全屏暖色晨雾：低角度太阳把色温整体抬到橙黄
-  g.fillStyle = 'rgba(255,168,88,0.09)';
+  /* 先做一遍 multiply 色阶：太阳在右上，画面从右上的暖金往左下的
+     偏冷压暗。低角度阳光的"金色时刻"主要靠这一步把整帧色温掰到
+     橙 —— 只用 lighter 叠橙的话，素材的灰底压不下去，看着还是阴天。
+     （光照层允许平滑渐变，见 config.js 的像素质感说明。） */
+  g.globalCompositeOperation = 'multiply';
+  const grade = g.createLinearGradient(VIEW_W, 0, VIEW_W * 0.18, VIEW_H);
+  grade.addColorStop(0, 'rgb(255,212,148)');
+  grade.addColorStop(0.5, 'rgb(250,190,128)');
+  grade.addColorStop(1, 'rgb(190,174,190)');
+  g.fillStyle = grade;
   g.fillRect(0, 0, VIEW_W, VIEW_H);
-  g.fillStyle = 'rgba(255,198,120,0.07)';
+  g.globalCompositeOperation = 'lighter';
+  // 全屏一层橙色日光底
+  g.fillStyle = 'rgba(255,142,52,0.14)';
+  g.fillRect(0, 0, VIEW_W, VIEW_H);
+  g.fillStyle = 'rgba(255,178,92,0.09)';
   g.fillRect(0, 0, VIEW_W, VIEW_H * 0.55);
-  // 顶部朝阳光柱：画面上方偏右，分带平涂（像素语言）
-  g.fillStyle = 'rgba(255,210,130,0.16)';
+  // 顶部低阳光柱：画面上方偏右，分带平涂（像素语言）
+  g.fillStyle = 'rgba(255,190,100,0.22)';
   g.fillRect(0, 0, VIEW_W, 22);
-  g.fillStyle = 'rgba(255,198,110,0.11)';
+  g.fillStyle = 'rgba(255,174,82,0.14)';
   g.fillRect(0, 22, VIEW_W, 28);
-  g.fillStyle = 'rgba(255,180,90,0.06)';
+  g.fillStyle = 'rgba(255,158,68,0.08)';
   g.fillRect(0, 50, VIEW_W, 40);
-  g.fillStyle = 'rgba(255,150,70,0.04)';
+  g.fillStyle = 'rgba(255,134,54,0.06)';
   g.fillRect(VIEW_W * 0.45, 0, VIEW_W * 0.55, 72);
-  // 太阳本体：同心方块辉光，偏右上
-  pxGlow(g, VIEW_W - 68, 24, 108, '255,178,88', 0.38);
-  pxGlow(g, VIEW_W - 68, 24, 52, '255,220,150', 0.22);
+  // 太阳本体：同心方块辉光，偏右上，压着地平线的一轮橙金
+  pxGlow(g, VIEW_W - 68, 24, 150, '255,152,56', 0.62);
+  pxGlow(g, VIEW_W - 68, 24, 64, '255,210,124', 0.36);
   g.globalCompositeOperation = 'source-over';
   // 斜向晨光带：从太阳角扫过画面
   for (let i = 0; i < 9; i++) {
     const t = i / 8;
     const x0 = VIEW_W - 40 - t * (VIEW_W + 80);
-    g.fillStyle = `rgba(255,190,110,${(0.035 - t * 0.02).toFixed(3)})`;
+    g.fillStyle = `rgba(255,180,96,${(0.04 - t * 0.022).toFixed(3)})`;
     g.fillRect(Math.round(x0), 0, 14, VIEW_H);
   }
   // 下缘冷影压纵深，跟暖色天形成对比
-  g.fillStyle = 'rgba(42,48,68,0.07)';
+  g.fillStyle = 'rgba(44,46,72,0.08)';
   g.fillRect(0, VIEW_H - 52, VIEW_W, 52);
   applyView(g);
 }

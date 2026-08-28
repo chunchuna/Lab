@@ -367,19 +367,19 @@ function tentWall(g, len, rand, wallH, opts = {}) {
     const dw = u1 - u0;
     g.fillStyle = '#2c3122';
     g.fillRect(u0 - 3, 6, dw + 6, H - 6);
-    // 洞外的日光：上窄下宽的亮面
+    // 洞外的日光：上窄下宽的亮面（低角度橙阳，跟室外的天一个色温）
     pxPoly(g, [
       [u0 + 2, 8],
       [u1 - 2, 8],
       [u1 + 2, H],
       [u0 - 2, H],
-    ], '#f4e6b6');
+    ], '#f6d69a');
     pxPoly(g, [
       [u0 + dw * 0.3, 8],
       [u1 - 2, 8],
       [u1 + 2, H],
       [u0 + dw * 0.45, H],
-    ], '#fdf4d2');
+    ], '#fcecc0');
     // 卷起系住的门帘
     pxLine(g, u0 - 2, 8, u0 + 4, H - 4, '#5c6245', 4);
     pxLine(g, u1 + 2, 8, u1 - 3, H * 0.55, '#4a5038', 3);
@@ -464,10 +464,11 @@ export function buildCampReg() {
   a.props.push({ id: 'supply', s: A.makeSupplyPile(906), x: 1.3, y: 4.7, col: [1.9, 1.5], occ: [1.9, 1.5, 1.0] });
   a.props.push({ id: 'crate', s: A.makeCrate(0.8, 911), x: 5.4, y: 4.9, col: [0.8, 0.8], occ: [0.8, 0.8, 0.75] });
 
-  /* 光：门口灌进来的白亮日光 + 布面透光的暖黄 + 桌上的台灯。
-     全部烘焙（静态、不闪），室内比外面暗一截，登记桌是最亮的点。 */
-  a.lights.push({ id: 'sun', x: 6.3, y: 0.7, z: 1.1, r: 5.8, color: [255, 236, 186], power: 0.95, seed: 0.4, mode: 5 });
-  a.lights.push({ id: 'canvasGlow', x: 2.6, y: 0.8, z: 1.8, r: 4.6, color: [240, 216, 158], power: 0.42, seed: 1.1, mode: 5 });
+  /* 光：门口灌进来的橙金日光 + 布面透光的暖黄 + 桌上的台灯。
+     全部烘焙（静态、不闪），室内比外面暗一截，登记桌是最亮的点。
+     日光颜色跟营地的低角度橙阳一致（drawDaylight），别一门内外两个太阳。 */
+  a.lights.push({ id: 'sun', x: 6.3, y: 0.7, z: 1.1, r: 5.8, color: [255, 212, 148], power: 0.95, seed: 0.4, mode: 5 });
+  a.lights.push({ id: 'canvasGlow', x: 2.6, y: 0.8, z: 1.8, r: 4.6, color: [244, 204, 138], power: 0.42, seed: 1.1, mode: 5 });
   a.lights.push({ id: 'deskLamp', x: 3.9, y: 2.4, z: 1.0, r: 3.0, color: [244, 220, 156], power: 0.6, seed: 2.2, mode: 1 });
   a.ambient = 'rgba(140,118,80,0.10)';
   a.dark = 'rgba(10,8,5,1)';
