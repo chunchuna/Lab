@@ -15,7 +15,7 @@ import { FX, Rain } from './fx.js';
 /* art.js 带 ?v= 缓存串：GitHub Pages 只给入口 main.js 加了版本参数，
    子模块会被浏览器长期缓存 —— 直升机这类纯视觉改动全在 art.js 里，
    不加这个串，用户刷新后看到的还是旧绘制。升版本号时同步改这里。 */
-import * as A from './art.js?v=2.0.3';
+import * as A from './art.js?v=2.0.4';
 import { makeNPCs, updateNPCs, npcDrawOpts, stepToward } from './npc.js';
 import { CAMP } from './campareas.js';
 import * as UI from './ui.js';
@@ -3971,13 +3971,38 @@ function applyLighting(g, cam, shx, shy, px, py) {
  * （那会像滤镜）；暖色只落在天空带、太阳辉光与斜向光柱上，地面素材保持
  * 本色，靠 morningShadow 与物体级 sunlit 抬亮来读清晨。
  */
+
+/* 斜向晨光柱的斜率：每往下 1px 往左 0.75px。这个数不是拍的 ——
+   morningShadow 把影子往世界 +y 拖 1.2 倍物高，换算到屏幕正好是
+   (-21.6, +28.8) 每单位高，光柱取它的反方向，光和影才是同一个太阳。 */
+const RAY_SLANT = 0.75;
+
+/* 光柱排布：[顶边 x, 宽 px, 亮度, 长度占屏高比]。靠太阳一侧亮而密，
+   往左稀而淡；柱间留大段暗隙，方向感靠明暗对比读出来，而不是把整屏
+   刷橙（总覆盖约四分之一屏宽）。头两条顶边在画面外，斜进右下角。 */
+const RAYS = [
+  [716, 11, 0.085, 1.0],
+  [668, 20, 0.13, 1.0],
+  [612, 27, 0.16, 1.0],
+  [576, 12, 0.10, 0.94],
+  [540, 21, 0.14, 1.0],
+  [498, 9, 0.08, 0.86],
+  [468, 15, 0.11, 0.96],
+  [420, 8, 0.07, 0.8],
+  [372, 14, 0.09, 0.9],
+  [316, 7, 0.06, 0.76],
+  [256, 11, 0.07, 0.84],
+  [178, 8, 0.05, 0.7],
+  [96, 10, 0.05, 0.66],
+];
+
 function drawDaylight(g) {
   applyScreen(g);
   g.globalCompositeOperation = 'lighter';
   // 天空一带极轻的晨雾，不盖到画面下半
   g.fillStyle = 'rgba(255,198,120,0.05)';
   g.fillRect(0, 0, VIEW_W, VIEW_H * 0.4);
-  // 顶部朝阳光柱：画面上方偏右，分带平涂（像素语言）
+  // 顶部朝阳分带：画面上方偏右，分带平涂（像素语言）
   g.fillStyle = 'rgba(255,210,130,0.20)';
   g.fillRect(0, 0, VIEW_W, 22);
   g.fillStyle = 'rgba(255,198,110,0.14)';
@@ -3989,15 +4014,24 @@ function drawDaylight(g) {
   // 太阳本体：同心方块辉光，偏右上
   pxGlow(g, VIEW_W - 68, 24, 118, '255,168,72', 0.44);
   pxGlow(g, VIEW_W - 68, 24, 54, '255,215,140', 0.26);
-  g.globalCompositeOperation = 'source-over';
-  // 斜向晨光带：从太阳角扫过画面上半，像天上打下来的光柱
-  for (let i = 0; i < 11; i++) {
-    const t = i / 10;
-    const x0 = VIEW_W - 36 - t * (VIEW_W + 90);
-    const h = Math.round(VIEW_H * (0.88 - t * 0.12));
-    g.fillStyle = `rgba(255,185,95,${(0.048 - t * 0.026).toFixed(3)})`;
-    g.fillRect(Math.round(x0), 0, 11 + (i % 3), h);
+  /* 斜向晨光柱：与地面长影反平行的平行光束，lighter 叠加读成"光"而不是
+     "染色"。每条三段递减 alpha（像素分带代替渐变），亮度随晨雾缓慢呼吸。 */
+  for (let i = 0; i < RAYS.length; i++) {
+    const [tx, w, a0, len] = RAYS[i];
+    const a = a0 * (0.85 + 0.15 * Math.sin(game.rt * 0.35 + i * 1.7));
+    const h = VIEW_H * len;
+    for (const [t0, t1, f] of [[0, 0.5, 1], [0.5, 0.8, 0.6], [0.8, 1, 0.32]]) {
+      const y0 = h * t0;
+      const y1 = h * t1;
+      pxPoly(g, [
+        [tx - RAY_SLANT * y0, y0],
+        [tx + w - RAY_SLANT * y0, y0],
+        [tx + w - RAY_SLANT * y1, y1],
+        [tx - RAY_SLANT * y1, y1],
+      ], `rgba(255,196,110,${(a * f).toFixed(3)})`);
+    }
   }
+  g.globalCompositeOperation = 'source-over';
   // 下缘冷影压纵深，跟暖色天形成对比
   g.fillStyle = 'rgba(42,48,68,0.07)';
   g.fillRect(0, VIEW_H - 52, VIEW_W, 52);
