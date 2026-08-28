@@ -15,7 +15,7 @@ import { FX, Rain } from './fx.js';
 /* art.js 带 ?v= 缓存串：GitHub Pages 只给入口 main.js 加了版本参数，
    子模块会被浏览器长期缓存 —— 直升机这类纯视觉改动全在 art.js 里，
    不加这个串，用户刷新后看到的还是旧绘制。升版本号时同步改这里。 */
-import * as A from './art.js?v=2.0.2';
+import * as A from './art.js?v=2.1.0';
 import { makeNPCs, updateNPCs, npcDrawOpts, stepToward } from './npc.js';
 import { CAMP } from './campareas.js';
 import * as UI from './ui.js';
@@ -30,7 +30,7 @@ import {
   pad, initControls, setButton, setPadVisible, endFrameControls, screenDirToWorld,
 } from './controls.js';
 import {
-  clamp, flicker, lerp, makeCanvas, pixelSprite, smoothstep, setBase, blit,
+  clamp, flicker, lerp, makeCanvas, pixelSprite, smoothstep, setBase, blit, mulberry32,
   pxLine, pxPolyline, pxEllipse, pxPoly, pxGlow, pxDitherV,
 } from './util.js';
 
@@ -167,6 +167,7 @@ const game = {
   regDone: false, // 入营登记办完没有（没办完出不了登记帐篷）
   camp: null, // 到达营地的过场状态机（见 updateCampCine）
   campHeli: null, // 停在营地的直升机 { x, y(世界), z(离地高度), rotorT, spd }
+  campCast: null, // 营地广播 { t: 距下一条的秒数, i: 轮播序号 }（见 updateCampCast）
   cam: null, // 跟随镜头（area.follow 的区域用），null = 用固定的 area.cam
 };
 
@@ -366,6 +367,13 @@ function enterArea(id, spawnName) {
   // 不经过降落过场也要有那架飞机停在停机坪上（读档 / 调试直达）
   if (id === 'camp' && !game.campHeli) {
     game.campHeli = { x: CAMP.heli.x, y: CAMP.heli.y, z: 0, rotorT: 0, spd: 0 };
+  }
+  // 营地是安全区：一进营地就把手持物收回背包（从登记帐篷出门、读档、
+  // 调试直达都走这里）。HUD 双手槽由 onInvChange 的 syncHUD 自动清空。
+  if (id === 'camp') {
+    INV.stowHands();
+    // 广播喇叭：进营地先安静一小阵再开播，轮播起点随机免得每次读档都同一句
+    game.campCast = { t: 15 + Math.random() * 15, i: (Math.random() * CAMP_CAST.length) | 0 };
   }
   if (id !== 'camp') SFX.setRotor(0);
 
@@ -1477,6 +1485,34 @@ function updateAreaEvents(dt) {
 
   updateRadio(dt);
   if (area.roof) updateRoof(dt);
+  if (area.id === 'camp') updateCampCast(dt);
+}
+
+/* ------------------------------------------------------------------ *
+ * 营地广播：挂在电线杆上的喇叭（makeSpeakerPole），隔一大阵轮播一条
+ * 通知 / 宵禁警告 / 宣传口号。只在 play 状态计时 —— 过场和登记帐篷里
+ * 不响；一条播完等 40~80 秒，别刷屏。
+ * ------------------------------------------------------------------ */
+
+const CAMP_CAST = [
+  { t: '【广播】各区居民注意：饮用水按配给发放，每人每日两升，请到净水塔排队。' },
+  { t: '【广播】宵禁提醒：入夜后平民区断电，未经许可禁止走出帐篷区。', k: 'warn' },
+  { t: '【广播】B 区居民请于午前到登记帐篷补录信息，逾期停发口粮。' },
+  { t: '【广播】禁止靠近铁丝网。警戒哨对翻越者有权直接开枪。', k: 'warn' },
+  { t: '【广播】发现发热、咬伤者，立即上报医务帐篷。瞒报者全帐篷隔离。', k: 'warn' },
+  { t: '【广播】保持营地整洁，垃圾一律送东南焚烧区，禁止在帐篷间堆放。' },
+  { t: '【广播】军方正在恢复秩序。坚持下去，配合管理，就是胜利。' },
+];
+
+function updateCampCast(dt) {
+  const c = game.campCast;
+  if (!c) return;
+  c.t -= dt;
+  if (c.t > 0) return;
+  const L = CAMP_CAST[c.i % CAMP_CAST.length];
+  UI.msg(L.t, L.k || '');
+  c.i++;
+  c.t = 40 + Math.random() * 40;
 }
 
 /* ------------------------------------------------------------------ *
@@ -3967,74 +4003,166 @@ function applyLighting(g, cam, shx, shy, px, py) {
  * ------------------------------------------------------------------ */
 
 /**
- * 晨光色调：白天区域用它替掉整条光照管线。屏幕空间几档色带 + 右上角
- * 的日光斑 —— 分档平涂，不用平滑渐变，跟像素语言一致。很轻：三次 fillRect
- * 加一个 pxGlow。
+ * 晨光色调：白天区域用它替掉整条光照管线。不做全屏 multiply / 橙色 wash
+ * （那会像滤镜）；暖色只落在天空带与斜向光柱上，地面素材保持本色，
+ * 靠 morningShadow 与物体级 sunlit 抬亮来读清晨。
+ * 不画太阳本体：等距俯视营地根本看不到天上的太阳盘，「光从东北打下来」
+ * 全靠光柱方向、天空分带与影子表达。
  */
-function drawDaylight(g) {
-  applyScreen(g);
-  /* 先做一遍 multiply 色阶：太阳在右上，画面从右上的暖金往左下的
-     偏冷压暗。低角度阳光的"金色时刻"主要靠这一步把整帧色温掰到
-     橙 —— 只用 lighter 叠橙的话，素材的灰底压不下去，看着还是阴天。
-     （光照层允许平滑渐变，见 config.js 的像素质感说明。） */
-  g.globalCompositeOperation = 'multiply';
-  const grade = g.createLinearGradient(VIEW_W, 0, VIEW_W * 0.18, VIEW_H);
-  grade.addColorStop(0, 'rgb(255,212,148)');
-  grade.addColorStop(0.5, 'rgb(250,190,128)');
-  grade.addColorStop(1, 'rgb(190,174,190)');
-  g.fillStyle = grade;
-  g.fillRect(0, 0, VIEW_W, VIEW_H);
-  g.globalCompositeOperation = 'lighter';
-  // 全屏一层橙色日光底
-  g.fillStyle = 'rgba(255,142,52,0.14)';
-  g.fillRect(0, 0, VIEW_W, VIEW_H);
-  g.fillStyle = 'rgba(255,178,92,0.09)';
-  g.fillRect(0, 0, VIEW_W, VIEW_H * 0.55);
-  // 顶部低阳光柱：画面上方偏右，分带平涂（像素语言）
-  g.fillStyle = 'rgba(255,190,100,0.22)';
-  g.fillRect(0, 0, VIEW_W, 22);
-  g.fillStyle = 'rgba(255,174,82,0.14)';
-  g.fillRect(0, 22, VIEW_W, 28);
-  g.fillStyle = 'rgba(255,158,68,0.08)';
-  g.fillRect(0, 50, VIEW_W, 40);
-  g.fillStyle = 'rgba(255,134,54,0.06)';
-  g.fillRect(VIEW_W * 0.45, 0, VIEW_W * 0.55, 72);
-  // 太阳本体：同心方块辉光，偏右上，压着地平线的一轮橙金
-  pxGlow(g, VIEW_W - 68, 24, 150, '255,152,56', 0.62);
-  pxGlow(g, VIEW_W - 68, 24, 64, '255,210,124', 0.36);
-  g.globalCompositeOperation = 'source-over';
-  // 斜向晨光带：从太阳角扫过画面
-  for (let i = 0; i < 9; i++) {
-    const t = i / 8;
-    const x0 = VIEW_W - 40 - t * (VIEW_W + 80);
-    g.fillStyle = `rgba(255,180,96,${(0.04 - t * 0.022).toFixed(3)})`;
-    g.fillRect(Math.round(x0), 0, 14, VIEW_H);
+
+/* 斜向晨光柱的斜率：每往下 1px 往左 0.75px。这个数不是拍的 ——
+   morningShadow 把影子往世界 +y 拖 1.2 倍物高，换算到屏幕正好是
+   (-21.6, +28.8) 每单位高，光柱取它的反方向，光和影才是同一个太阳。 */
+const RAY_SLANT = 0.75;
+
+/* 光柱排布：[顶边 x（投影空间，柱顶挂在世界北缘 bounds.y0 的天际线上）,
+   宽 px, 亮度, 长度占 bounds 高度比]。靠太阳一侧（东端）亮而密，往西
+   稀而淡；柱间留大段暗隙，方向感靠明暗对比读出来，而不是把整屏刷橙。
+
+   v2.1.0 起按区域 bounds **程序化生成**（营地扩到 72×44 后手写表铺不满
+   投影宽了）：范围盖住 [x0, x1 + 斜率补偿]，柱子钉在世界里跟地面平移。
+   同一区域只生成一次，分布用固定种子，帧间完全稳定。 */
+let rayCache = null; // { id, list }
+function raysFor(b) {
+  if (rayCache && rayCache.id === area.id) return rayCache.list;
+  const rnd = mulberry32(0xda11);
+  const lo = b.x0 - 60;
+  const hi = b.x1 + RAY_SLANT * b.h + 90;
+  const list = [];
+  let tx = hi;
+  while (tx > lo) {
+    const t = (tx - lo) / (hi - lo); // 1 = 靠太阳一侧
+    const w = Math.round(7 + rnd() * 7 + t * rnd() * 14);
+    const a = 0.04 + t * (0.065 + rnd() * 0.05);
+    const len = Math.min(1, 0.66 + rnd() * 0.2 + t * 0.16);
+    list.push([Math.round(tx), w, a, len]);
+    tx -= 36 + rnd() * 46 + (1 - t) * 55;
   }
-  // 下缘冷影压纵深，跟暖色天形成对比
-  g.fillStyle = 'rgba(44,46,72,0.08)';
-  g.fillRect(0, VIEW_H - 52, VIEW_W, 52);
-  applyView(g);
+  rayCache = { id: area.id, list };
+  return list;
+}
+
+/**
+ * 全部画在世界变换（render 里已生效的 applyView）下：坐标 = cam + 投影
+ * 空间锚点，跟道具、beacons、backdrop 同一套换算。镜头跟随玩家时光柱
+ * 贴着地面 / 帐篷平移，不再钉在视口上（v2.0.4 及以前是 applyScreen
+ * 的屏幕空间叠加，看起来像画在 HUD 层）。
+ *
+ * sunX 只是「太阳在东北方」的天空锚点（bounds 右缘内收 68px），用来把
+ * 靠太阳一侧的天空分带压深一档，不画太阳盘本体。天空分带挂在世界北缘，
+ * 南缘冷影挂在世界南角。
+ */
+function drawDaylight(g, cam) {
+  const b = area.bounds;
+  const sunX = cam.x + b.x1 - 68;
+  const skyY = cam.y + b.y0;
+  const wx0 = cam.x + b.x0 - 80;
+  const ww = b.w + 160;
+  /* 可见窗口（绘制坐标系）：世界投影宽 1152px，别每帧整张扫。
+     QTE 变焦时窗口比 640×360 小，从 viewXform 反推。 */
+  const vx0 = -viewXform.tx / viewXform.s;
+  const vx1 = (VIEW_W - viewXform.tx) / viewXform.s;
+  const vy0 = -viewXform.ty / viewXform.s;
+  const vy1 = (VIEW_H - viewXform.ty) / viewXform.s;
+
+  g.globalCompositeOperation = 'lighter';
+  // 北缘天际线一带的晨雾与朝阳分带（像素分带平涂），只挂在世界顶边
+  g.fillStyle = 'rgba(255,198,120,0.05)';
+  g.fillRect(wx0, skyY, ww, 144);
+  g.fillStyle = 'rgba(255,210,130,0.20)';
+  g.fillRect(wx0, skyY, ww, 22);
+  g.fillStyle = 'rgba(255,198,110,0.14)';
+  g.fillRect(wx0, skyY + 22, ww, 28);
+  g.fillStyle = 'rgba(255,180,90,0.09)';
+  g.fillRect(wx0, skyY + 50, ww, 40);
+  // 靠太阳一侧再压深一档
+  g.fillStyle = 'rgba(255,158,72,0.07)';
+  g.fillRect(sunX - 260, skyY, wx0 + ww - (sunX - 260), 82);
+  /* 斜向晨光柱：与地面长影反平行的平行光束，lighter 叠加读成"光"而不是
+     "染色"。每条三段递减 alpha（像素分带代替渐变），亮度随晨雾缓慢呼吸。
+     y0/y1 是柱内局部坐标（从柱顶往下），先按可见窗口裁掉屏外的段。 */
+  const rays = raysFor(b);
+  for (let i = 0; i < rays.length; i++) {
+    const [tx, w, a0, len] = rays[i];
+    const rx = cam.x + tx;
+    const h = b.h * len;
+    const clipTop = Math.max(0, vy0 - skyY);
+    const clipBot = Math.min(h, vy1 - skyY);
+    if (clipBot <= clipTop) continue;
+    if (rx + w - RAY_SLANT * clipTop < vx0 || rx - RAY_SLANT * clipBot > vx1) continue;
+    const a = a0 * (0.85 + 0.15 * Math.sin(game.rt * 0.35 + i * 1.7));
+    for (const [t0, t1, f] of [[0, 0.5, 1], [0.5, 0.8, 0.6], [0.8, 1, 0.32]]) {
+      const y0 = Math.max(h * t0, clipTop);
+      const y1 = Math.min(h * t1, clipBot);
+      if (y1 <= y0) continue;
+      pxPoly(g, [
+        [rx - RAY_SLANT * y0, skyY + y0],
+        [rx + w - RAY_SLANT * y0, skyY + y0],
+        [rx + w - RAY_SLANT * y1, skyY + y1],
+        [rx - RAY_SLANT * y1, skyY + y1],
+      ], `rgba(255,196,110,${(a * f).toFixed(3)})`);
+    }
+  }
+  g.globalCompositeOperation = 'source-over';
+  // 南缘冷影压纵深：远离朝阳的那头偏冷，锚在世界南角而不是视口底边
+  g.fillStyle = 'rgba(42,48,68,0.04)';
+  g.fillRect(wx0, cam.y + b.y1 - 150, ww, 75);
+  g.fillStyle = 'rgba(42,48,68,0.07)';
+  g.fillRect(wx0, cam.y + b.y1 - 75, ww, 135);
 }
 
 /** 营地 NPC / 护送士兵：跟玩家同一套 pixelSprite 整数锚点吸附 */
 function drawNPC(g, cam, n) {
   const sx = cam.x + (n.x - n.y) * HW;
   const sy = cam.y + (n.x + n.y) * HH;
+  if (n.outfit === 'dog') {
+    // 军犬：四足精灵单独一条绘制路径，drawDog 内部自己吸整数格
+    A.drawDog(g, sx, sy, {
+      face: n.face,
+      moving: n.moving,
+      walk: n.walk,
+      kind: n.kind === 'sit' ? 'sit' : null,
+      t: game.t,
+      seed: n.seed,
+    });
+    return;
+  }
   pixelSprite(g, sx, sy, CHAR_BOX, (gg, ax, ay) => {
     A.drawCharacter(gg, ax, ay, npcDrawOpts(n, game.t, A.OUTFITS));
   });
 }
 
-/** 火塘的火焰。白天火焰压淡一点，靠烟撑存在感 */
+/** 火塘的火焰。白天火焰压淡一点，靠烟撑存在感。
+    f.s 缩放火焰大小（炊灶 0.8 / 焚烧坑 1.5），f.smoky 的烟更浓更频。 */
 function drawCampfire(g, cam, f) {
   const sx = cam.x + (f.x - f.y) * HW;
   const sy = cam.y + (f.x + f.y) * HH;
+  const s = f.s || 1;
   g.save();
   g.globalAlpha = area.daylight ? 0.82 : 1;
-  A.drawFlames(g, sx, sy - 5, 16, 21, game.t, f.x * 3.1);
-  A.drawFlames(g, sx - 6, sy - 3, 10, 13, game.t * 1.25, f.y * 5.3);
+  A.drawFlames(g, sx, sy - 5 * s, 16 * s, 21 * s, game.t, f.x * 3.1);
+  A.drawFlames(g, sx - 6 * s, sy - 3 * s, 10 * s, 13 * s, game.t * 1.25, f.y * 5.3);
   g.restore();
-  if (Math.random() < 0.05) fx.smoke(f.x, f.y, 0.7, 1);
+  if (Math.random() < (f.smoky ? 0.14 : 0.05)) fx.smoke(f.x, f.y, f.smoky ? 1.2 : 0.7, 1);
+}
+
+/**
+ * 苍蝇群：垃圾山 / 旱厕上方绕圈的小黑点（area.flies 布点）。
+ * 每只用两组不同频率的正弦叠出不规则轨迹，帧间连续、无状态。
+ */
+function drawFlies(g, cam, f) {
+  const cx = cam.x + (f.x - f.y) * HW;
+  const cy = cam.y + (f.x + f.y) * HH - 8;
+  const t = game.rt;
+  g.fillStyle = 'rgba(20,18,12,0.85)';
+  for (let i = 0; i < f.n; i++) {
+    const p = i * 2.39996; // 黄金角错相，别让所有苍蝇同步
+    const rx = f.r * HW * (0.35 + 0.3 * Math.sin(t * 1.3 + p * 3));
+    const x = cx + Math.sin(t * (2.1 + (i % 3) * 0.7) + p) * rx;
+    const y = cy + Math.cos(t * (2.9 + (i % 2) * 1.1) + p * 2) * f.r * 4
+      - Math.sin(t * 0.9 + p) * 5;
+    g.fillRect(Math.round(x), Math.round(y), 1, 1);
+  }
 }
 
 /** 机身中心到滑橇底的像素距离（drawHeli 的滑橇横杆画到 y=+28） */
@@ -4144,16 +4272,34 @@ function render() {
   fx.drawDecals(ctx, cam);
 
   /* --- 深度排序 --- */
+  /* 屏外剔除（只在 follow 的大区域做）：营地扩到 72×44 后投影约 1860×930px，
+     可见窗口只有 640×360，四百多个道具 + 百来个 NPC 大半在屏外，先按锚点
+     粗剔再进排序。锚点在脚底：精灵向上延伸（瞭望塔全在锚点上方），所以
+     上不可见判 sy < y0 - 26（留点影子余量），下不可见判 sy > y1 + 整高。 */
+  const cullB = area.follow
+    ? {
+        x0: -viewXform.tx / viewXform.s,
+        x1: (VIEW_W - viewXform.tx) / viewXform.s,
+        y0: -viewXform.ty / viewXform.s,
+        y1: (VIEW_H - viewXform.ty) / viewXform.s,
+      }
+    : null;
+  const vis = (x, y, mx, up) => {
+    if (!cullB) return true;
+    const sx = cam.x + (x - y) * HW;
+    const sy = cam.y + (x + y) * HH;
+    return sx > cullB.x0 - mx && sx < cullB.x1 + mx && sy > cullB.y0 - 26 && sy < cullB.y1 + up;
+  };
   const items = [];
-  for (const pr of area.props) items.push({ k: pr.x + pr.y, pr });
+  for (const pr of area.props) if (vis(pr.x, pr.y, 150, 230)) items.push({ k: pr.x + pr.y, pr });
   for (const z of horde.list) items.push({ k: z.x + z.y - (z.dead ? 0.5 : 0), z });
-  if (area.npcList) for (const n of area.npcList) items.push({ k: n.x + n.y, npc: n });
+  if (area.npcList) for (const n of area.npcList) if (vis(n.x, n.y, 46, 72)) items.push({ k: n.x + n.y, npc: n });
   if (game.camp && game.camp.escort) {
     const e = game.camp.escort;
     items.push({ k: e.x + e.y, npc: e });
   }
   // 火塘的火焰：深度键压过火塘本体一点，火苗才不会被自己的石圈盖住
-  if (area.fires) for (const f of area.fires) items.push({ k: f.x + f.y + 0.05, fire: f });
+  if (area.fires) for (const f of area.fires) if (vis(f.x, f.y, 70, 96)) items.push({ k: f.x + f.y + 0.05, fire: f });
   // 直升机贴地或很低时参与深度排序；还在天上时画在最后（见 drawSky 之后）
   if (campHeli && campHeli.z < 2.2) items.push({ k: campHeli.x + campHeli.y + 1.1, heli: campHeli });
 
@@ -4199,6 +4345,14 @@ function render() {
     }
   }
 
+  // 苍蝇群（垃圾山 / 旱厕）与常燃烟点（发电机排气、炊事蒸汽）：营地布点
+  if (area.flies) for (const f of area.flies) if (vis(f.x, f.y, 60, 60)) drawFlies(ctx, cam, f);
+  if (area.smokes) {
+    for (const s of area.smokes) {
+      if (Math.random() < 0.055 * (s.p || 1)) fx.smoke(s.x, s.y, s.z || 1, 1);
+    }
+  }
+
   // 近侧矮护墙：必须压在道具与角色之上
   if (area.fg) {
     blit(ctx, area.fg.img, snap(cam.x - area.fg.ox), snap(cam.y - area.fg.oy));
@@ -4212,7 +4366,7 @@ function render() {
     // 白天（营地）：亮度全在素材里，整条光照管线不跑，只叠一层晨光色调。
     // 顺便闭嘴：没有灯管，镇流器的嗡声不该在太阳底下响。
     SFX.setBuzz(0);
-    drawDaylight(ctx);
+    drawDaylight(ctx, cam);
   } else {
     applyLighting(ctx, cam, shx, shy, px, py);
   }
