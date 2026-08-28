@@ -15,7 +15,7 @@ import { FX, Rain } from './fx.js';
 /* art.js 带 ?v= 缓存串：GitHub Pages 只给入口 main.js 加了版本参数，
    子模块会被浏览器长期缓存 —— 直升机这类纯视觉改动全在 art.js 里，
    不加这个串，用户刷新后看到的还是旧绘制。升版本号时同步改这里。 */
-import * as A from './art.js?v=2.0.5';
+import * as A from './art.js?v=2.0.6';
 import { makeNPCs, updateNPCs, npcDrawOpts, stepToward } from './npc.js';
 import { CAMP } from './campareas.js';
 import * as UI from './ui.js';
@@ -367,6 +367,9 @@ function enterArea(id, spawnName) {
   if (id === 'camp' && !game.campHeli) {
     game.campHeli = { x: CAMP.heli.x, y: CAMP.heli.y, z: 0, rotorT: 0, spd: 0 };
   }
+  // 营地是安全区：一进营地就把手持物收回背包（从登记帐篷出门、读档、
+  // 调试直达都走这里）。HUD 双手槽由 onInvChange 的 syncHUD 自动清空。
+  if (id === 'camp') INV.stowHands();
   if (id !== 'camp') SFX.setRotor(0);
 
   // 对讲机：进 312 且剧情没走完就自动呼叫；走开就别再喊了。
@@ -3968,8 +3971,10 @@ function applyLighting(g, cam, shx, shy, px, py) {
 
 /**
  * 晨光色调：白天区域用它替掉整条光照管线。不做全屏 multiply / 橙色 wash
- * （那会像滤镜）；暖色只落在天空带、太阳辉光与斜向光柱上，地面素材保持
- * 本色，靠 morningShadow 与物体级 sunlit 抬亮来读清晨。
+ * （那会像滤镜）；暖色只落在天空带与斜向光柱上，地面素材保持本色，
+ * 靠 morningShadow 与物体级 sunlit 抬亮来读清晨。
+ * 不画太阳本体：等距俯视营地根本看不到天上的太阳盘，「光从东北打下来」
+ * 全靠光柱方向、天空分带与影子表达。
  */
 
 /* 斜向晨光柱的斜率：每往下 1px 往左 0.75px。这个数不是拍的 ——
@@ -4013,18 +4018,17 @@ const RAYS = [
 
 /**
  * 全部画在世界变换（render 里已生效的 applyView）下：坐标 = cam + 投影
- * 空间锚点，跟道具、beacons、backdrop 同一套换算。镜头跟随玩家时太阳与
- * 光柱贴着地面 / 帐篷平移，不再钉在视口上（v2.0.4 及以前是 applyScreen
+ * 空间锚点，跟道具、beacons、backdrop 同一套换算。镜头跟随玩家时光柱
+ * 贴着地面 / 帐篷平移，不再钉在视口上（v2.0.4 及以前是 applyScreen
  * 的屏幕空间叠加，看起来像画在 HUD 层）。
  *
- * 太阳锚在东北角天际：x 贴 bounds 右缘内收 68px，y 从北缘往下 232px ——
- * 玩家走到营地东侧时它出现在画面右上（跟老版本的屏幕位置重合），往西走
- * 就跟着地面滑出画面。天空分带同理挂在世界北缘，南缘冷影挂在世界南角。
+ * sunX 只是「太阳在东北方」的天空锚点（bounds 右缘内收 68px），用来把
+ * 靠太阳一侧的天空分带压深一档，不画太阳盘本体。天空分带挂在世界北缘，
+ * 南缘冷影挂在世界南角。
  */
 function drawDaylight(g, cam) {
   const b = area.bounds;
   const sunX = cam.x + b.x1 - 68;
-  const sunY = cam.y + b.y0 + 232;
   const skyY = cam.y + b.y0;
   const wx0 = cam.x + b.x0 - 80;
   const ww = b.w + 160;
@@ -4048,9 +4052,6 @@ function drawDaylight(g, cam) {
   // 靠太阳一侧再压深一档
   g.fillStyle = 'rgba(255,158,72,0.07)';
   g.fillRect(sunX - 260, skyY, wx0 + ww - (sunX - 260), 82);
-  // 太阳本体：同心方块辉光
-  pxGlow(g, sunX, sunY, 118, '255,168,72', 0.44);
-  pxGlow(g, sunX, sunY, 54, '255,215,140', 0.26);
   /* 斜向晨光柱：与地面长影反平行的平行光束，lighter 叠加读成"光"而不是
      "染色"。每条三段递减 alpha（像素分带代替渐变），亮度随晨雾缓慢呼吸。
      y0/y1 是柱内局部坐标（从柱顶往下），先按可见窗口裁掉屏外的段。 */
