@@ -198,9 +198,10 @@ function paintCampGround(a, rand) {
      画在 floorT 之外，finishArt 会把渐变抖成色带。 */
   const b = a.bounds;
   const mist = g.createLinearGradient(0, 0, 0, b.h);
-  mist.addColorStop(0, 'rgba(196,206,190,0.10)');
-  mist.addColorStop(0.3, 'rgba(196,206,190,0.03)');
-  mist.addColorStop(1, 'rgba(30,34,44,0.05)');
+  mist.addColorStop(0, 'rgba(255,196,128,0.14)');
+  mist.addColorStop(0.25, 'rgba(255,180,100,0.06)');
+  mist.addColorStop(0.55, 'rgba(220,200,160,0.02)');
+  mist.addColorStop(1, 'rgba(36,42,58,0.06)');
   g.fillStyle = mist;
   g.fillRect(0, 0, b.w + 20, b.h + 20);
 }

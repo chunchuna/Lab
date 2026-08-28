@@ -1469,9 +1469,8 @@ const CABIN = { x0: 1.5, x1: 13.0, y0: -5.5, y1: 5.5 };
 export const qz = (v, step) => Math.round(v / step) * step;
 export const tick = (t, hz) => Math.floor(t * hz) / hz;
 
-/* 机体调色板：硬分档，不做半透明叠色 */
+/* 机体调色板：硬分档，不做半透明叠色，也不描黑边（跟场景道具统一） */
 const HP = {
-  out: '#10141a', // 轮廓
   hi: '#5c665f', // 机背受光
   mid: '#454f49', // 上侧
   low: '#333b36', // 下侧
@@ -1704,8 +1703,6 @@ export function drawHeli(g, x, y, t, o = {}) {
     const f = (bx - 14) / 68;
     const yT = Math.round(-9 + 3 * f);
     const yB = Math.round(11 - 8 * f);
-    g.fillStyle = HP.out;
-    g.fillRect(bx, yT - 1, 1, yB - yT + 2);
     g.fillStyle = HP.low;
     g.fillRect(bx, yT, 1, yB - yT);
     g.fillStyle = HP.hi;
@@ -1724,10 +1721,6 @@ export function drawHeli(g, x, y, t, o = {}) {
   }
   // 平尾：台阶斜置的薄板
   for (let i = 0; i < 5; i++) {
-    g.fillStyle = HP.out;
-    g.fillRect(57 + i * 4, -3 - i, 6, 4);
-  }
-  for (let i = 0; i < 5; i++) {
     g.fillStyle = HP.low;
     g.fillRect(58 + i * 4, -2 - i, 5, 2);
     g.fillStyle = HP.hi;
@@ -1738,8 +1731,6 @@ export function drawHeli(g, x, y, t, o = {}) {
     const yy = FIN_Y0 + i;
     const [xl, xr] = FIN_ROWS[i];
     if (xr <= xl) continue;
-    g.fillStyle = HP.out;
-    g.fillRect(xl - 1, yy, xr - xl + 2, 1);
     g.fillStyle = HP.low;
     g.fillRect(xl, yy, xr - xl, 1);
     g.fillStyle = HP.mid;
@@ -1757,38 +1748,27 @@ export function drawHeli(g, x, y, t, o = {}) {
     }
   }
   // 尾桨毂
-  g.fillStyle = HP.out;
+  g.fillStyle = HP.steelD;
   g.fillRect(85, -21, 6, 6);
   g.fillStyle = HP.steel;
   g.fillRect(86, -20, 4, 4);
   // 尾桨护环：行扫 + 列扫的像素圆（两遍才不会在圆顶/圆底漏格）
   for (let yy = -16; yy <= 16; yy++) {
     const xw = Math.round(Math.sqrt(16 * 16 - yy * yy));
-    g.fillStyle = HP.out;
-    g.fillRect(88 - xw - 1, -18 + yy, 3, 1);
-    g.fillRect(88 + xw - 1, -18 + yy, 3, 1);
     g.fillStyle = yy < -8 ? HP.steel : HP.steelD;
     g.fillRect(88 - xw, -18 + yy, 1, 1);
     g.fillRect(88 + xw, -18 + yy, 1, 1);
   }
   for (let xx = -16; xx <= 16; xx++) {
     const yw = Math.round(Math.sqrt(16 * 16 - xx * xx));
-    g.fillStyle = HP.out;
-    g.fillRect(88 + xx, -18 - yw - 1, 1, 3);
-    g.fillRect(88 + xx, -18 + yw - 1, 1, 3);
+    g.fillStyle = HP.steelD;
+    g.fillRect(88 + xx, -18 - yw, 1, 1);
+    g.fillRect(88 + xx, -18 + yw, 1, 1);
   }
 
   /* --- 机身：逐行扫描的像素侧影 ---
-     每行 [xl, xr] 来自 HULL_ROWS 的台阶轮廓；先铺 1px 轮廓，再按高度分带
-     平涂（机背亮 / 上侧 / 下侧 / 机腹），交界行用棋盘抖动咬合。 */
+     每行 [xl, xr] 来自 HULL_ROWS；按高度分带平涂，交界行棋盘抖动。 */
   const hulln = HULL_ROWS.length;
-  g.fillStyle = HP.out;
-  for (let i = 0; i < hulln; i++) {
-    const [xl, xr] = HULL_ROWS[i];
-    g.fillRect(xl - 1, HULL_Y0 + i, xr - xl + 2, 1);
-  }
-  g.fillRect(HULL_ROWS[0][0], HULL_Y0 - 1, HULL_ROWS[0][1] - HULL_ROWS[0][0], 1);
-  g.fillRect(HULL_ROWS[hulln - 1][0], HULL_Y0 + hulln, HULL_ROWS[hulln - 1][1] - HULL_ROWS[hulln - 1][0], 1);
   for (let i = 0; i < hulln; i++) {
     const yy = HULL_Y0 + i;
     const [xl, xr] = HULL_ROWS[i];
@@ -1819,24 +1799,20 @@ export function drawHeli(g, x, y, t, o = {}) {
   for (let i = 0; i < 8; i++) g.fillRect(-14 + i * 4, -16, 1, 1);
   for (let i = 0; i < 6; i++) g.fillRect(-10 + i * 4, 13, 1, 1);
   // 机头天线
-  g.fillStyle = HP.out;
+  g.fillStyle = '#5a635c';
   g.fillRect(-26, -19, 1, 6);
   g.fillStyle = '#96a09a';
   g.fillRect(-26, -19, 1, 1);
 
   /* --- 发动机舱与排气 --- */
-  g.fillStyle = HP.out;
-  g.fillRect(-11, -25, 33, 9);
   g.fillStyle = HP.mid;
   g.fillRect(-10, -24, 31, 7);
   g.fillStyle = HP.hi;
   g.fillRect(-10, -24, 31, 2);
   pxDither(g, -10, 21, -22, HP.hi);
-  g.fillStyle = HP.out; // 进气格栅
+  g.fillStyle = HP.seam; // 进气格栅
   for (let i = 0; i < 5; i++) g.fillRect(-6 + i * 5, -22, 2, 4);
   // 排气口：两档平涂的余烬色块
-  g.fillStyle = HP.out;
-  g.fillRect(21, -23, 7, 6);
   g.fillStyle = '#141614';
   g.fillRect(22, -22, 5, 4);
   g.fillStyle = '#8a4630';
@@ -1846,12 +1822,6 @@ export function drawHeli(g, x, y, t, o = {}) {
 
   /* --- 风挡：逐行扫描的玻璃 + 1px 窗框 + 台阶斜带反光 --- */
   for (let i = 0; i < GLASS_ROWS.length; i++) {
-    const [xl, xr] = GLASS_ROWS[i];
-    if (xr <= xl) continue;
-    g.fillStyle = '#454f4a';
-    g.fillRect(xl - 1, GLASS_Y0 + i, xr - xl + 2, 1);
-  }
-  for (let i = 1; i < GLASS_ROWS.length - 1; i++) {
     const [xl, xr] = GLASS_ROWS[i];
     if (xr <= xl) continue;
     g.fillStyle = '#0e181d';
@@ -1952,45 +1922,43 @@ export function drawHeli(g, x, y, t, o = {}) {
       g.fillRect(dx0 + 8, -5, 2, 5);
     }
   }
-  g.fillStyle = HP.out;
-  g.fillRect(dx0, -12, 6, 24);
   g.fillStyle = '#4c5651';
-  g.fillRect(dx0 + 1, -11, 4, 22);
+  g.fillRect(dx0, -12, 6, 24);
   g.fillStyle = '#666f6a';
   g.fillRect(dx0 + 1, -11, 4, 2);
 
   /* --- 绞盘吊臂：像素折线的吊臂 + 方块套方块的滑轮组 --- */
   pxLine(g, 8, -13, 21, -16, HP.steelD, 2);
-  g.fillStyle = HP.out;
+  g.fillStyle = HP.steelD;
   g.fillRect(4, -18, 8, 7);
   g.fillStyle = HP.steel;
   g.fillRect(5, -17, 6, 5);
   g.fillStyle = HP.steelD;
   g.fillRect(5, -14, 6, 2);
-  g.fillStyle = HP.out;
+  g.fillStyle = '#5a6560';
   g.fillRect(19, -20, 8, 8);
   g.fillStyle = '#7f8a84';
   g.fillRect(20, -19, 6, 6);
-  g.fillStyle = HP.out;
+  g.fillStyle = HP.steelD;
   g.fillRect(22, -17, 2, 2);
 
   /* --- 起落滑橇：支柱是像素斜线，横杆是整数条，前端台阶上翘 --- */
   for (const [sx0, sx1] of [[-17, -21], [16, 20], [-17, -9], [16, 9]]) {
     pxLine(g, sx0, 13, sx1, 25, '#232b2e', 2);
   }
-  g.fillStyle = HP.out;
-  g.fillRect(-30, 25, 60, 3);
   g.fillStyle = '#454f4a';
+  g.fillRect(-30, 25, 60, 3);
+  g.fillStyle = '#5a6358';
   g.fillRect(-29, 25, 58, 1);
   for (let i = 1; i <= 4; i++) {
-    g.fillStyle = HP.out;
+    g.fillStyle = '#3a423e';
     g.fillRect(-30 - i, 25 - i, 3, 3);
   }
   g.fillStyle = '#454f4a';
   g.fillRect(-33, 21, 2, 2);
 
   /* --- 机腹探照灯：方形灯罩 + 方形灯口，灯口位置仍对齐 heliLampAt --- */
-  g.fillStyle = HP.out;
+  g.fillStyle = HP.steelD;
   g.fillRect(-32, 8, 13, 10);
   g.fillStyle = HP.steelD;
   g.fillRect(-31, 9, 11, 8);
@@ -2018,10 +1986,8 @@ export function drawHeli(g, x, y, t, o = {}) {
      拖两份分档递暗的像素残影 —— 扫掠感全靠离散的残影段。 --- */
   const mastX = -1;
   const mastY = -28;
-  g.fillStyle = HP.out;
-  g.fillRect(mastX - 3, -26, 8, 4);
   g.fillStyle = HP.steelD;
-  g.fillRect(mastX - 2, -25, 6, 2);
+  g.fillRect(mastX - 3, -26, 8, 4);
   const RSTEP = Math.PI / 5;
   const ra = Math.floor((t * 26) / RSTEP) * RSTEP;
   for (let gh = 2; gh >= 0; gh--) {
@@ -2032,7 +1998,7 @@ export function drawHeli(g, x, y, t, o = {}) {
     }
   }
   // 桨毂盖在桨根上
-  g.fillStyle = HP.out;
+  g.fillStyle = HP.steel;
   g.fillRect(mastX - 4, mastY - 3, 10, 6);
   g.fillStyle = HP.steel;
   g.fillRect(mastX - 3, mastY - 2, 8, 4);

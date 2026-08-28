@@ -1261,12 +1261,16 @@ function updateFollowCam(snapNow) {
   cx = b.w <= VIEW_W ? (minX + maxX) / 2 : clamp(cx, minX, maxX);
   cy = b.h <= VIEW_H ? (minY + maxY) / 2 : clamp(cy, minY, maxY);
   if (!game.cam || snapNow) {
-    game.cam = { x: cx, y: cy };
+    game.cam = { x: snap(cx), y: snap(cy) };
     return;
   }
   const k = Math.min(1, game.rdt * 3.6);
   game.cam.x = lerp(game.cam.x, cx, k);
   game.cam.y = lerp(game.cam.y, cy, k);
+  if (Math.hypot(game.cam.x - cx, game.cam.y - cy) < 0.2) {
+    game.cam.x = snap(cx);
+    game.cam.y = snap(cy);
+  }
 }
 
 function update(dt) {
@@ -3958,22 +3962,34 @@ function applyLighting(g, cam, shx, shy, px, py) {
 function drawDaylight(g) {
   applyScreen(g);
   g.globalCompositeOperation = 'lighter';
-  // 全屏一层极轻的暖：清晨 8 点的低色温
-  g.fillStyle = 'rgba(255,198,124,0.05)';
+  // 全屏暖色晨雾：低角度太阳把色温整体抬到橙黄
+  g.fillStyle = 'rgba(255,168,88,0.09)';
   g.fillRect(0, 0, VIEW_W, VIEW_H);
-  // 顶部的亮雾分带（朝阳在画面上方偏右，晨雾还没散透）
-  g.fillStyle = 'rgba(255,226,170,0.09)';
-  g.fillRect(0, 0, VIEW_W, 26);
-  g.fillStyle = 'rgba(255,226,170,0.05)';
-  g.fillRect(0, 26, VIEW_W, 30);
-  g.fillStyle = 'rgba(255,226,170,0.025)';
-  g.fillRect(0, 56, VIEW_W, 38);
-  // 右上角的日光斑：同心方块辉光
-  pxGlow(g, VIEW_W - 74, 20, 92, '255,224,150', 0.2);
+  g.fillStyle = 'rgba(255,198,120,0.07)';
+  g.fillRect(0, 0, VIEW_W, VIEW_H * 0.55);
+  // 顶部朝阳光柱：画面上方偏右，分带平涂（像素语言）
+  g.fillStyle = 'rgba(255,210,130,0.16)';
+  g.fillRect(0, 0, VIEW_W, 22);
+  g.fillStyle = 'rgba(255,198,110,0.11)';
+  g.fillRect(0, 22, VIEW_W, 28);
+  g.fillStyle = 'rgba(255,180,90,0.06)';
+  g.fillRect(0, 50, VIEW_W, 40);
+  g.fillStyle = 'rgba(255,150,70,0.04)';
+  g.fillRect(VIEW_W * 0.45, 0, VIEW_W * 0.55, 72);
+  // 太阳本体：同心方块辉光，偏右上
+  pxGlow(g, VIEW_W - 68, 24, 108, '255,178,88', 0.38);
+  pxGlow(g, VIEW_W - 68, 24, 52, '255,220,150', 0.22);
   g.globalCompositeOperation = 'source-over';
-  // 画面下缘一档极轻的冷影，把纵深压出来
-  g.fillStyle = 'rgba(30,40,60,0.05)';
-  g.fillRect(0, VIEW_H - 44, VIEW_W, 44);
+  // 斜向晨光带：从太阳角扫过画面
+  for (let i = 0; i < 9; i++) {
+    const t = i / 8;
+    const x0 = VIEW_W - 40 - t * (VIEW_W + 80);
+    g.fillStyle = `rgba(255,190,110,${(0.035 - t * 0.02).toFixed(3)})`;
+    g.fillRect(Math.round(x0), 0, 14, VIEW_H);
+  }
+  // 下缘冷影压纵深，跟暖色天形成对比
+  g.fillStyle = 'rgba(42,48,68,0.07)';
+  g.fillRect(0, VIEW_H - 52, VIEW_W, 52);
   applyView(g);
 }
 
@@ -4034,7 +4050,9 @@ function render() {
   const shy = amp ? snap((Math.random() - 0.5) * amp) : 0;
   // 跟随镜头的区域用 game.cam（浮点，绘制端各自取整），其余用固定的 area.cam
   const camBase = game.cam || area.cam;
-  const cam = { x: camBase.x + shx, y: camBase.y + shy };
+  /* 跟随镜头用浮点 lerp，但绘制前统一 snap 到像素格 —— 静态层 blit、
+     道具与 pixelSprite 共用同一套取整后的 cam，停住后才不会各层各抖。 */
+  const cam = { x: snap(camBase.x + shx), y: snap(camBase.y + shy) };
   const p = game.player;
 
   // 整帧变焦：QTE 近景时把世界层整体放大，光照与几何才不会错位
