@@ -1,5 +1,6 @@
 import { TILE_W, TILE_Z, WALL_H, VIEW_W, VIEW_H } from './config.js';
 import { buildLevel } from './level.js';
+import { buildCamp, buildCampReg } from './campareas.js';
 import * as A from './art.js';
 import {
   newArea, closeArea, paintFloor, wallBase, wallPipes, doorBay,
@@ -1072,6 +1073,9 @@ const BUILDERS = {
   stairRoof: buildStairRoof,
   roof: buildRoof,
   dorm312: buildDorm312,
+  // 第一章 · 难民营地
+  camp: buildCamp,
+  campReg: buildCampReg,
 };
 
 const cache = {};

@@ -397,6 +397,119 @@ body.devcon-on { cursor: default; }
 /* text-indent 抵掉 letter-spacing 在末字后面多出来的一格，否则整行会偏左半格 */
 #ending h2 { font-size: 4.6em; margin: 0; letter-spacing: 0.3em; text-indent: 0.3em; font-weight: 400; }
 
+/* ---------- 章节卡 ---------- */
+/* 跟 #ending 同一套：全黑底 + 大字。区别是多一行副题，
+   淡入淡出都走 opacity，切区域在它背后发生。 */
+#chapter {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 1.8s ease-in-out;
+}
+#chapter.on { opacity: 1; }
+#chapter h2 { font-size: 2em; margin: 0 0 0.9em; letter-spacing: 0.5em; text-indent: 0.5em; font-weight: 400; opacity: 0.55; }
+#chapter p { font-size: 4.6em; margin: 0; letter-spacing: 0.3em; text-indent: 0.3em; }
+
+/* ---------- HUD 丝滑入场 ---------- */
+/* 第一章开场把常驻 HUD 推到屏幕外，登记完成后去掉 hud-off，
+   各元素按自己的方向滑回来。字幕/提示不参与——过场要靠它们说话。 */
+#hands, #ammo, #help {
+  transition: transform 0.85s cubic-bezier(0.16, 0.8, 0.3, 1);
+}
+#hud.hud-off #hands { transform: translateX(-140%); }
+#hud.hud-off #ammo { transform: translateX(140%); }
+#hud.hud-off #help { transform: translateY(-320%); }
+/* 需要瞬间到位（如读档恢复）时挂一帧 hud-snap 关掉过渡 */
+#hud.hud-snap #hands, #hud.hud-snap #ammo, #hud.hud-snap #help { transition: none; }
+
+/* ---------- 入营登记 ---------- */
+#reg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  pointer-events: auto;
+  cursor: default;
+  opacity: 0;
+  transition: opacity 0.45s ease-out;
+}
+#reg.on { opacity: 1; }
+.reg-panel { width: 56em; background: var(--surface); padding: 1em 1.2em 1.2em; }
+.reg-head {
+  display: flex;
+  align-items: baseline;
+  font-size: 1.25em;
+  letter-spacing: 0.16em;
+  padding-bottom: 0.7em;
+}
+.reg-head .reg-no { margin-left: auto; font-size: 0.8em; opacity: 0.5; letter-spacing: 0.22em; }
+.reg-body { display: flex; gap: 1.4em; }
+
+.reg-left { flex: none; display: flex; flex-direction: column; align-items: center; gap: 0.55em; }
+#reg-portrait { display: block; width: 12em; height: 20em; image-rendering: pixelated; }
+.reg-tag { font-size: 0.92em; letter-spacing: 0.16em; opacity: 0.55; }
+
+.reg-form { flex: 1; display: flex; flex-direction: column; gap: 0.55em; }
+.reg-row { display: flex; align-items: center; gap: 1em; }
+.reg-row label { width: 3.6em; flex: none; font-size: 1.15em; letter-spacing: 0.3em; opacity: 0.72; }
+#reg-name {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 1.3em;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  background: rgba(222, 216, 200, 0.1);
+  border: 0;
+  outline: none;
+  padding: 0.32em 0.6em;
+  cursor: text;
+}
+#reg-name::placeholder { color: var(--text); opacity: 0.32; }
+
+.reg-opts { display: flex; flex-wrap: wrap; gap: 0.4em; }
+.reg-opt {
+  border: 0;
+  padding: 0.28em 0.7em;
+  background: rgba(222, 216, 200, 0.12);
+  color: var(--text);
+  font-family: inherit;
+  font-size: inherit; /* button 默认不继承字号 */
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.reg-opt span { font-size: 1.05em; }
+.reg-opt.on { background: var(--text); color: var(--surface); }
+/* 色板按钮：底色就是选项本身，选中画一圈亮框 */
+.reg-opts.sw .reg-opt { width: 2.4em; height: 2.4em; padding: 0; }
+.reg-opts.sw .reg-opt.on { outline: 0.22em solid var(--text); outline-offset: 0.12em; }
+
+.reg-note { font-size: 1em; line-height: 1.7; opacity: 0.55; margin-top: 0.3em; }
+#reg-confirm {
+  margin-top: auto;
+  align-self: flex-end;
+  border: 0;
+  padding: 0.42em 1.4em;
+  background: var(--text);
+  color: var(--surface);
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+#reg-confirm span { font-size: 1.3em; }
+#reg-confirm:hover { opacity: 0.86; }
+/* 登记面板期间显示系统指针（游戏里 cursor:none） */
+body.reg-on { cursor: default; }
+
 /* ---------- 人脸识别终端 ---------- */
 #scan {
   position: absolute;

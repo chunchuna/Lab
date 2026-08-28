@@ -15,7 +15,9 @@ import { FX, Rain } from './fx.js';
 /* art.js 带 ?v= 缓存串：GitHub Pages 只给入口 main.js 加了版本参数，
    子模块会被浏览器长期缓存 —— 直升机这类纯视觉改动全在 art.js 里，
    不加这个串，用户刷新后看到的还是旧绘制。升版本号时同步改这里。 */
-import * as A from './art.js?v=1.9.3';
+import * as A from './art.js?v=2.0.2';
+import { makeNPCs, updateNPCs, npcDrawOpts, stepToward } from './npc.js';
+import { CAMP } from './campareas.js';
 import * as UI from './ui.js';
 import * as SFX from './audio.js';
 import * as INV from './inventory.js';
@@ -78,6 +80,7 @@ function syncPixelGrid() {
   area = getArea(id);
   restoreAreaRuntime(area);
   ensureAreaLights(area);
+  ensureNPCs(area); // 名册跟着区域缓存一起被丢了，重建（站位会回初始点，无妨）
 }
 sizeCanvas();
 renderN = pixelScale();
@@ -153,9 +156,18 @@ const game = {
   tsTarget: 1,
   rdt: 0, // 本帧的真实秒
   rt: 0, // 累计真实秒，只给镜头漂移这类"不该被慢动作拖慢"的东西用
-  endT: 0, // 结束卡片上屏之后的秒数，到点回主菜单
+  endT: 0, // 结束卡片上屏之后的秒数，到点切第一章
   paused: false, // Esc 暂停：整个 update 停住，只有暂停菜单还活着
   spawn: 'start', // 上一次落地的出生点，暂停菜单里手动存档时沿用
+  /* ---- 第一章 · 世界 ---- */
+  chapter: 0, // 0 = 序章，1 = 第一章（难民营地）
+  playerName: '', // 入营登记写下的名字
+  look: null, // 捏脸结果 { skin, hair, hairCol }，null = 默认长相
+  outfit: 'lab', // 穿着（OUTFITS 的**键名**：art.js 有两份模块实例，跨实例传对象会拿错）
+  regDone: false, // 入营登记办完没有（没办完出不了登记帐篷）
+  camp: null, // 到达营地的过场状态机（见 updateCampCine）
+  campHeli: null, // 停在营地的直升机 { x, y(世界), z(离地高度), rotorT, spd }
+  cam: null, // 跟随镜头（area.follow 的区域用），null = 用固定的 area.cam
 };
 
 /** 结束卡片停留多久回主菜单。1.8s 淡入 + 一段静止 */
@@ -174,7 +186,9 @@ function ensureAreaLights(a) {
     L.vis = computeVisibility(L.x, L.y, segs);
     L.tex = lighting.bakeLight({ x: L.x, y: L.y, r: L.r, color: L.color, vis: L.vis, cam: a.cam });
   }
-  a.mask = lighting.bakeMask(a.roomVis, a.cam);
+  /* 白天区域（营地）整条光照管线都不跑，房间轮廓遮罩用不上；而且它的
+     包围盒是视口的好几倍，按区域尺寸烘一张遮罩纯属浪费显存。 */
+  a.mask = a.daylight ? null : lighting.bakeMask(a.roomVis, a.cam);
   /* 露天区域（天台）的天空光：一张只覆盖"房间轮廓以外"的光照贴图。
      没有它的话，屋面以外一律被 area.dark 压成纯黑，远景层等于白画。
      跟静态灯一样是烘焙的，每帧只做一次 drawImage。 */
@@ -214,9 +228,9 @@ initInput(stage, (k) => {
     UI.menuKey(k);
     return;
   }
-  // 结束卡片：不想等淡出就按一下，直接回主菜单
+  // 结束卡片：不想等淡出就按一下，直接进第一章
   if (game.state === 'end') {
-    if (k === 'escape' || k === 'enter' || k === ' ') returnToMenu();
+    if (k === 'escape' || k === 'enter' || k === ' ') startChapterOne();
     return;
   }
   // 暂停菜单开着：键盘整个喂给它，Esc 就是「继续游戏」
@@ -306,9 +320,15 @@ function transAlpha() {
     : Math.max(0, 1 - tr.t / TRANS_IN);
 }
 
+/** 区域的 NPC 名册在首次进入时生成，之后缓存在区域对象上（巡逻位置得以延续） */
+function ensureNPCs(a) {
+  if (a.npcs && !a.npcList) a.npcList = makeNPCs(a.npcs);
+}
+
 function enterArea(id, spawnName) {
   area = getArea(id);
   ensureAreaLights(area);
+  ensureNPCs(area);
   const sp = area.spawns[spawnName] || area.spawns.start || { x: area.w / 2, y: area.h / 2 };
   game.player.x = sp.x;
   game.player.y = sp.y;
@@ -340,6 +360,14 @@ function enterArea(id, spawnName) {
   game.player.shrink = 0;
   game.player.nudge = null;
   game.player.hidden = false;
+  // 跟随镜头：进有 follow 的区域直接落到位，不从上个区域的镜头飘过来
+  game.cam = null;
+  if (area.follow) updateFollowCam(true);
+  // 不经过降落过场也要有那架飞机停在停机坪上（读档 / 调试直达）
+  if (id === 'camp' && !game.campHeli) {
+    game.campHeli = { x: CAMP.heli.x, y: CAMP.heli.y, z: 0, rotorT: 0, spd: 0 };
+  }
+  if (id !== 'camp') SFX.setRotor(0);
 
   // 对讲机：进 312 且剧情没走完就自动呼叫；走开就别再喊了。
   // 注意别每次进 312 都把进度打回起点，只有天台失败重生才重置（见 respawn）。
@@ -424,6 +452,18 @@ function resetRun() {
   game.heli = null;
   game.cine = null;
   game.fight = null;
+  game.chapter = 0;
+  game.playerName = '';
+  game.look = null;
+  game.outfit = 'lab';
+  game.regDone = false;
+  game.camp = null;
+  game.campHeli = null;
+  game.cam = null;
+  INV.setPortraitStyle('lab', null, '');
+  UI.hideReg();
+  UI.hideChapter();
+  UI.setHudHidden(false, true);
   game.areaT = 0;
   game.hordeReleased = false;
   game.doomed = 0;
@@ -506,8 +546,11 @@ function startWake() {
  * spawn 省略时沿用上一次落地的出生点：暂停菜单里手动存档时，玩家可能已经
  * 在区域里走了一段，但序章只需要"回到这个区域的入口"就能安全恢复。
  */
-function saveProgress(spawn) {
+function saveProgress(spawn, force) {
   if (game.state === 'end') return false;
+  // 过场中途的 enterArea 不落盘（营地降落/护送那几步没法安全恢复），
+  // 到达营地那一刻由 startChapterOne 用 force 显式写一次。
+  if (game.state === 'cine' && !force) return false;
   if (spawn) game.spawn = spawn;
   const items = ['pistol', 'flashlight', 'badge'].filter((id) => INV.has(id));
   const ok = SAVE.writeSave({
@@ -521,6 +564,11 @@ function saveProgress(spawn) {
     doorBroken: game.door.broken,
     radioDone: game.radio.done,
     checkpoint: game.checkpoint,
+    chapter: game.chapter,
+    regDone: game.regDone,
+    name: game.playerName,
+    look: game.look,
+    outfit: game.outfit,
   });
   UI.setMenuSave(SAVE.saveLabel(SAVE.readSave()));
   return ok;
@@ -548,10 +596,31 @@ function loadProgress() {
   game.spawn = s.spawn || 'start';
   game.gun.mag = MAG_SIZE;
   game.player.hp = PLAYER_HP;
+
+  // 第一章：名字 / 捏脸 / 换装 / 登记开关
+  game.chapter = s.chapter || 0;
+  game.playerName = s.name || '';
+  game.look = s.look || null;
+  game.outfit = s.outfit || 'lab';
+  game.regDone = !!s.regDone;
+  INV.setPortraitStyle(game.outfit, game.look, game.playerName);
+
+  // 存档停在「到达营地但还没登记」：从降落过场整段重来（那是唯一的安全恢复点）
+  if (game.chapter >= 1 && !game.regDone) {
+    leaveMenu();
+    game.phase = 9;
+    game.fade = 0;
+    game.fadeOff = false;
+    syncHUD();
+    startChapterOne(true);
+    return true;
+  }
+
   game.state = 'play';
   game.phase = 9;
   game.fade = 0;
   game.fadeOff = false;
+  UI.setHudHidden(false, true);
   syncHUD();
 
   leaveMenu();
@@ -679,6 +748,10 @@ function currentInteract() {
     if (dist(p.x, p.y, lk.x, lk.y) > lk.r) continue;
     // 天台楼梯的门：对讲机剧情走完前锁着，只给提示不给按键
     if (lk.needsRadio && !game.radio.done) {
+      return { id: 'locked', hint: true, text: lk.lockedText || '这扇门锁着', anchor: lk.anchor };
+    }
+    // 登记帐篷的门帘：手续没办完不放人
+    if (lk.needsReg && !game.regDone) {
       return { id: 'locked', hint: true, text: lk.lockedText || '这扇门锁着', anchor: lk.anchor };
     }
     return { id: 'link', link: lk, text: lk.text, short: lk.short, anchor: lk.anchor, target: lk.target };
@@ -863,6 +936,13 @@ function fire() {
   const g = game.gun;
   const p = game.player;
   if (!handOf('pistol') || g.reload > 0 || g.cool > 0) return;
+  // 营地是安全区：士兵满地都是，不许开枪
+  if (area.safe) {
+    g.cool = 0.7;
+    UI.msg('这里不能开枪。到处都是士兵。', 'warn');
+    SFX.sfxDryFire();
+    return;
+  }
   if (g.mag <= 0) {
     SFX.sfxDryFire();
     g.cool = 0.3;
@@ -1099,7 +1179,8 @@ function updateAim() {
     const w = screenDirToWorld(pad.aim.x, pad.aim.y);
     p.aim = Math.atan2(w.y, w.x);
   } else {
-    const w = toWorld(mouse.x - area.cam.x, mouse.y - area.cam.y + AIM_Z * TILE_Z);
+    const bc = game.cam || area.cam;
+    const w = toWorld(mouse.x - bc.x, mouse.y - bc.y + AIM_Z * TILE_Z);
     p.aim = Math.atan2(w.y - p.y, w.x - p.x);
     // 吸附：光标压在某只丧尸的身体上时直接瞄准它。等距下屏幕纵向 1 像素
     // 对应世界里很大一段距离，只靠反投影的话瞄头或瞄脚都会打空。
@@ -1111,7 +1192,7 @@ function updateAim() {
 
 /** 找光标屏幕位置附近的丧尸，返回它的世界坐标 */
 function snapTarget() {
-  const cam = area.cam;
+  const cam = game.cam || area.cam;
   let best = null;
   let bestD = 18; // 像素：从脚底到头顶整个身体都能吸附
   for (const z of horde.list) {
@@ -1155,6 +1236,55 @@ function updateCamera() {
   game.zoomAtCur.z = lerp(game.zoomAtCur.z, game.zoomAt.z || 0, k);
 }
 
+/**
+ * 跟随镜头（第一章的室外营地）。
+ *
+ * 序章的区域都是单屏全显，area.cam 是固定的；营地比视口大好几倍，
+ * 区域标了 follow 之后镜头就跟着玩家走（过场时跟 game.camp.focus），
+ * clamp 在区域包围盒里 —— 地皮画到了包围盒之外（见 campareas），
+ * 所以镜头贴边时四角不会露黑。按真实秒缓动，绘制端照常各自取整。
+ */
+/** 跟随镜头尾段的恒定收尾速度（逻辑像素/秒），见 updateFollowCam */
+const FOLLOW_TAIL_V = 42;
+
+function updateFollowCam(snapNow) {
+  if (!area.follow) {
+    game.cam = null;
+    return;
+  }
+  const p = game.player;
+  const f = (game.camp && game.camp.focus) || p;
+  const b = area.bounds;
+  let cx = VIEW_W / 2 - (f.x - f.y) * HW;
+  let cy = VIEW_H / 2 - (f.x + f.y) * HH + (area.follow.yOff || 0);
+  const minX = VIEW_W - b.x1;
+  const maxX = -b.x0;
+  const minY = VIEW_H - b.y1;
+  const maxY = -b.y0;
+  cx = b.w <= VIEW_W ? (minX + maxX) / 2 : clamp(cx, minX, maxX);
+  cy = b.h <= VIEW_H ? (minY + maxY) / 2 : clamp(cy, minY, maxY);
+  /* 目标取整到逻辑像素：停稳后镜头落在跟 area.cam 一样的整数格上，
+     角色（pixelSprite 整数锚点）与静态层（1/N 格）共用同一张网格。 */
+  cx = Math.round(cx);
+  cy = Math.round(cy);
+  if (!game.cam || snapNow) {
+    game.cam = { x: cx, y: cy };
+    return;
+  }
+  /* 指数缓动 + 恒速尾段，有限时间内**精确**落在目标上。
+     纯 lerp 只会无限逼近；以前"距离 < 0.2 就掐到 snap(cx)"的兜底
+     会跟 lerp 打架 —— 掐过去、又被拉回来、再掐 —— 停住后画面每
+     3~4 帧跳一下地抽。现在尾段以恒速走完最后一段，到点即停：
+     起步 / 移动 / 停下全程同一条路径，没有任何一帧的跳变。 */
+  const adv = (cur, tgt) => {
+    const d = tgt - cur;
+    const step = Math.max(Math.abs(d) * Math.min(1, game.rdt * 3.6), FOLLOW_TAIL_V * game.rdt);
+    return Math.abs(d) <= step ? tgt : cur + Math.sign(d) * step;
+  };
+  game.cam.x = adv(game.cam.x, cx);
+  game.cam.y = adv(game.cam.y, cy);
+}
+
 function update(dt) {
   // 暂停：连时间都不推进，画面停在按下 Esc 的那一帧
   if (game.paused) return;
@@ -1169,6 +1299,7 @@ function update(dt) {
   game.hurtFlash = Math.max(0, game.hurtFlash - dt * 2.2);
   game.player.invuln = Math.max(0, game.player.invuln - dt);
   updateCamera();
+  updateFollowCam(false);
   updateStorm(dt);
 
   // 实验室墙面破损处的电火花
@@ -1183,16 +1314,19 @@ function update(dt) {
     }
   }
 
-  /* 序章结束卡片：淡进来、停一会儿，然后回主菜单。第一章还没有，
-     把玩家留在天台上没有任何事可做。按 Esc / 回车 / 空格可以直接跳过等待。 */
+  /* 序章结束卡片：淡进来、停一会儿，然后切第一章。
+     按 Esc / 回车 / 空格可以直接跳过等待。 */
   if (game.state === 'end') {
     game.endT += dt;
-    if (game.endT > END_HOLD) returnToMenu();
+    if (game.endT > END_HOLD) startChapterOne();
     return;
   }
 
   if (game.state === 'cine') {
-    updateCine(dt);
+    // 天台逃脱与营地到达是两套过场：前者挂 game.cine，后者挂 game.camp
+    if (game.camp) updateCampCine(dt);
+    else updateCine(dt);
+    if (area.npcList) updateNPCs(area.npcList, dt);
     horde.update(dt, game.player, blocked, area);
     return;
   }
@@ -1261,6 +1395,7 @@ function update(dt) {
   movePlayer(dt);
   updateAreaEvents(dt);
   horde.update(dt, game.player, blocked, area);
+  if (area.npcList) updateNPCs(area.npcList, dt);
 
   const g = game.gun;
   g.cool = Math.max(0, g.cool - dt);
@@ -1489,10 +1624,11 @@ function stopStorm() {
  * [0,w]×[0,h] 判界。天台之外是半空，出了这个范围雨丝照下，但不出水花。
  */
 function splashOnGround(sx, sy) {
+  const bc = game.cam || area.cam;
   const cx = (sx - viewXform.tx) / viewXform.s;
   const cy = (sy - viewXform.ty) / viewXform.s;
-  const u = (cx - area.cam.x) / HW; // = wx - wy
-  const v = (cy - area.cam.y) / HH; // = wx + wy
+  const u = (cx - bc.x) / HW; // = wx - wy
+  const v = (cy - bc.y) / HH; // = wx + wy
   const wx = (u + v) / 2;
   const wy = (v - u) / 2;
   return wx >= 0 && wx <= area.w && wy >= 0 && wy <= area.h;
@@ -2817,6 +2953,279 @@ function updateCine(dt) {
 }
 
 /* ------------------------------------------------------------------ *
+ * 第一章 · 到达营地
+ *
+ * 「序章完」→ 章节卡全黑 → 卡片背后切到营地 → 直升机从东边飞进，缓缓
+ * 落到停机坪 → 玩家跳下机，士兵领着走到登记帐篷 → 切帐篷内景，走到
+ * 桌前 → 登记面板（名字 + 捏脸，DOM）→ 签字：换装、HUD 滑入、自由活动。
+ *
+ * 全程 state = 'cine'（WASD 与开火锁死），登记面板是 DOM，键鼠照常。
+ * 天台那套过场（updateCine）挂在 game.cine 上，这里挂 game.camp，互不相干。
+ * ------------------------------------------------------------------ */
+
+const CAMP_CINE = {
+  card: 2.4, // 章节卡全黑多久后在背后切区域
+  reveal: 3.4, // 卡片开始淡出的时刻
+  fly: 7.0, // 进场飞行时长
+  settle: 2.8, // 垂直降落时长
+  out: 2.0, // 落地到玩家跳下机的间隔
+};
+
+/**
+ * 序章结束 → 第一章。fromLoad = 读档「到营未登记」直接从这里重来。
+ * 到达那一刻就强制写一次存档：中途关页面，下次读档回到这段过场的开头。
+ */
+function startChapterOne(fromLoad) {
+  if (game.camp) return;
+  /* 天台过场的残留一次扫干净：game.cine 不清的话 skyPlayer() 一直为真，
+     玩家在营地永远画不出来；game.heli 不清的话登记帐篷的光照管线里
+     还挂着那盏探照灯。 */
+  game.cine = null;
+  game.heli = null;
+  game.rope = null;
+  game.zoom = 1;
+  game.zoomTarget = 1;
+  game.zoomAt = null;
+  game.chapter = 1;
+  game.state = 'cine';
+  game.camp = { phase: 'card', t: 0, focus: null, escort: null, lines: null, switched: false };
+  UI.setHudHidden(true, true);
+  UI.setPrompt(null);
+  game.lastPrompt = '';
+  UI.hideQTE();
+  setPadVisible(false);
+  UI.showCursor(false);
+  game.curShown = false;
+  UI.showChapter('第一章', '世界');
+  if (!fromLoad) SFX.sfxThud();
+}
+
+/** 过场里给玩家用的走路：朝目标挪一步，把朝向与步态一起填了 */
+function cineWalk(p, tx, ty, dt, speed) {
+  const dx = tx - p.x;
+  const dy = ty - p.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 0.07) {
+    p.moving = false;
+    return true;
+  }
+  const s = Math.min(d, speed * dt);
+  p.x += (dx / d) * s;
+  p.y += (dy / d) * s;
+  p.aim = Math.atan2(dy, dx);
+  p.aimScreen = normScreenDir(p.aim);
+  p.moving = speed > 0.4;
+  p.walk += dt * 4.8 * Math.min(1, speed / 2.2);
+  return false;
+}
+
+function updateCampCine(dt) {
+  const c = game.camp;
+  const p = game.player;
+  c.t += dt;
+
+  // 台词队列：到点弹一条
+  if (c.lines && c.lines.length && c.t >= c.lines[0].at) {
+    const L = c.lines.shift();
+    UI.msg(L.t, L.k || '');
+  }
+
+  if (c.phase === 'card') {
+    // 章节卡全黑之后，才在它背后把世界切到营地
+    if (!c.switched && c.t >= CAMP_CINE.card) {
+      c.switched = true;
+      enterArea('camp', 'heli');
+      p.hidden = true; // 人还在机舱里
+      game.campHeli = { x: CAMP.heli.x + 30, y: CAMP.heli.y - 6, z: 8.5, rotorT: 0, spd: 1 };
+      c.focus = { x: game.campHeli.x, y: game.campHeli.y };
+      updateFollowCam(true);
+      SFX.setRotor(0.35);
+      saveProgress('heli', true); // 「到达营地」检查点
+    }
+    if (c.t >= CAMP_CINE.reveal) {
+      UI.fadeChapter();
+      c.phase = 'fly';
+      c.t = 0;
+      c.lines = [
+        { at: 1.4, t: '（天亮了。下面就是他们说的安置点。）' },
+        { at: 4.8, t: '（铁丝网、帐篷、排队的人……还活着的人。）' },
+      ];
+    }
+    return;
+  }
+
+  // 旋翼：spd 1 = 全速。落地后慢慢收，读起来是发动机在惰转
+  const h = game.campHeli;
+  if (h) h.rotorT += dt * Math.max(0.05, h.spd);
+
+  if (c.phase === 'fly') {
+    const k = smoothstep(clamp(c.t / CAMP_CINE.fly, 0, 1));
+    h.x = lerp(CAMP.heli.x + 30, CAMP.heli.x, k);
+    h.y = lerp(CAMP.heli.y - 6, CAMP.heli.y, k);
+    // 进场的大位移平滑走，叠加的颠簸按 8fps 定格（跟天台那段同一套读法）
+    h.z = lerp(8.5, 2.3, k) + Math.sin(tick(c.t, 8) * 1.7) * 0.1;
+    h.spd = 1;
+    SFX.setRotor(0.35 + 0.45 * k);
+    c.focus = { x: h.x, y: h.y };
+    if (c.t >= CAMP_CINE.fly) {
+      c.phase = 'settle';
+      c.t = 0;
+    }
+    return;
+  }
+
+  if (c.phase === 'settle') {
+    const k = smoothstep(clamp(c.t / CAMP_CINE.settle, 0, 1));
+    h.x = CAMP.heli.x;
+    h.y = CAMP.heli.y;
+    h.z = lerp(2.3, 0, k);
+    c.focus = { x: h.x, y: h.y };
+    // 旋翼下洗卷起的尘土：越低越猛
+    if (Math.random() < 0.35 + k * 0.45) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = 1.2 + Math.random() * 2.2;
+      fx.dust(h.x + Math.cos(a) * rr, h.y + Math.sin(a) * rr, 0.04, 2);
+    }
+    if (c.t >= CAMP_CINE.settle) {
+      c.phase = 'out';
+      c.t = 0;
+      h.z = 0;
+      game.shake = 2.2;
+      SFX.sfxThud();
+      fx.dust(h.x, h.y + 1.2, 0.05, 10);
+      c.lines = [{ at: 0.6, t: '（落地了。旋翼还没停，就有人朝这边跑过来。）' }];
+    }
+    return;
+  }
+
+  if (c.phase === 'out') {
+    h.spd = Math.max(0.1, h.spd - dt * 0.45);
+    SFX.setRotor(Math.max(0.12, 0.8 - c.t * 0.3));
+    c.focus = { x: h.x, y: h.y };
+    if (c.t >= CAMP_CINE.out) {
+      c.phase = 'walk';
+      c.t = 0;
+      // 玩家跳下机
+      p.hidden = false;
+      p.x = h.x + 1.3;
+      p.y = h.y + 1.5;
+      p.z = 0;
+      fx.dust(p.x, p.y, 0.03, 5);
+      SFX.sfxThud();
+      /* 护送士兵：从旗杆那边小跑过来接人。结构跟 npc.js 的名册一致，
+         绘制走同一条 drawNPC 深度排序，会被帐篷正常遮挡。 */
+      c.escort = {
+        x: 14.0, y: 4.6, outfit: 'soldier', slung: true, scale: 1.04, seed: 3,
+        look: { skin: A.SKIN_TONES[0], hair: 'buzz', hairCol: A.HAIR_COLORS[1] },
+        aim: { x: -1, y: 0.3 }, face: -1, walk: 0, moving: false, speed: 2.0,
+      };
+      // 领路的路径点：绕登记帐篷北侧，从东边的门帘进（帐篷碰撞盒挡着直穿）
+      c.wp = [
+        [10.8, 7.6],
+        [13.0, 6.4],
+        [17.6, 6.8],
+        [19.6, 8.2],
+        [18.7, 9.0],
+      ];
+      c.wi = 0;
+      c.lines = [
+        { at: 0.5, t: '「跟我来。所有新来的都要先登记。」' },
+        { at: 3.6, t: '「别乱看，也别碰围栏。走这边。」' },
+      ];
+    }
+    return;
+  }
+
+  if (c.phase === 'walk') {
+    h.spd = Math.max(0.05, h.spd - dt * 0.3);
+    SFX.setRotor(Math.max(0.06, 0.4 - c.t * 0.1));
+    const e = c.escort;
+    e.moving = false;
+    if (c.wi < c.wp.length) {
+      const [tx, ty] = c.wp[c.wi];
+      if (stepToward(e, tx, ty, dt)) c.wi++;
+    }
+    // 玩家吊在士兵身后一步半：距离越远走得越快，不会追尾也不会跟丢
+    const d = dist(p.x, p.y, e.x, e.y);
+    const spd = clamp((d - 1.05) * 2.4, 0, 2.8);
+    if (spd > 0.05) cineWalk(p, e.x, e.y, dt, spd);
+    else {
+      p.moving = false;
+      p.walk = lerp(p.walk, 0, Math.min(1, dt * 8));
+    }
+    c.focus = { x: p.x, y: p.y };
+    if (c.wi >= c.wp.length && dist(p.x, p.y, CAMP.regDoor.x + 0.6, CAMP.regDoor.y) < 2.1) {
+      c.phase = 'toReg';
+      c.t = 0;
+      SFX.sfxClick();
+    }
+    return;
+  }
+
+  if (c.phase === 'toReg') {
+    // 掀帘进帐篷：黑一下，切内景
+    p.moving = false;
+    game.fade = Math.min(1, c.t / 0.45);
+    if (c.t >= 0.6) {
+      c.phase = 'desk';
+      c.t = 0;
+      c.atDesk = false;
+      c.formUp = false;
+      c.escort = null;
+      SFX.setRotor(0);
+      enterArea('campReg', 'enter');
+      c.lines = [{ at: 1.0, t: '「新来的？站到桌子前面来。」' }];
+    }
+    return;
+  }
+
+  if (c.phase === 'desk') {
+    game.fade = Math.max(0, 1 - c.t / 0.6);
+    const arrived = cineWalk(p, area.regDesk.x, area.regDesk.y, dt, 1.9);
+    if (arrived && !c.atDesk) {
+      c.atDesk = true;
+      c.deskT = c.t;
+      // 面向登记官
+      p.aim = Math.atan2(2.7 - p.y, 2.45 - p.x);
+      p.aimScreen = normScreenDir(p.aim);
+      c.lines = [
+        { at: c.t + 0.6, t: '「名字。……想不起来？那就现在起一个。」' },
+        { at: c.t + 3.4, t: '「登记完领一套工装。你那身白大褂，看着瘆人。」' },
+      ];
+    }
+    if (c.atDesk && !c.formUp && c.t >= c.deskT + 4.8) {
+      c.formUp = true;
+      UI.showReg({ name: game.playerName, look: game.look });
+    }
+    return;
+  }
+}
+
+/** 登记面板「签字」：换装、HUD 滑入、写存档，玩家开始自由活动 */
+function finishRegistration(data) {
+  if (!game.camp || game.camp.phase !== 'desk') return;
+  game.playerName = data.name;
+  game.look = data.look;
+  game.outfit = 'camp';
+  game.regDone = true;
+  INV.setPortraitStyle('camp', game.look, game.playerName);
+  UI.hideReg();
+  game.camp = null;
+  game.state = 'play';
+  keys.clear();
+  syncHUD();
+  UI.setHudHidden(false);
+  setPadVisible(true);
+  UI.msg('「好了，' + game.playerName + '。以后这里就是你的地方。」');
+  setTimeout(() => {
+    if (game.state === 'play' && area.id === 'campReg') {
+      UI.msg('（工装是粗帆布的，还带着太阳晒过的味道。出去看看。）');
+    }
+  }, 3200);
+  saveProgress('enter');
+}
+
+/* ------------------------------------------------------------------ *
  * 渲染
  * ------------------------------------------------------------------ */
 
@@ -2882,10 +3291,13 @@ function drawPlayerSprite(g, cam, px, py, zOff, bodyRot, off) {
       scale: playerScale(),
       aim: aimS,
       walk: p.walk,
-      moving: p.moving && game.state === 'play',
+      // 营地过场里玩家是被脚本牵着走的，走路动画照常播
+      moving: p.moving && (game.state === 'play' || !!game.camp),
       leftItem,
       rightItem,
       flashOn: inv.flashOn,
+      outfit: A.OUTFITS[game.outfit] || A.OUTFITS.lab,
+      look: game.look || undefined,
       eyesShut: game.state === 'wake' && game.phase < 1.5,
       pose:
         (game.fight && game.fight.pose) ||
@@ -3450,122 +3862,9 @@ function skyPlayer() {
   return !!(game.cine || (game.rope && game.rope.hold));
 }
 
-function render() {
-  // 主菜单：另一幕独立的画面，跟游戏世界不共用相机与光照
-  if (game.state === 'menu') {
-    drawMenuScene(ctx, game.rt);
-    return;
-  }
-
-  /* 镜头抖动对**所有层**用同一套已取整的偏移。以前 shx/shy 是浮点，静态层与
-     道具各自 Math.round，烘焙光贴图又按浮点画，几层各进各的整数格，相对错开
-     1px —— 那就是"换场景后有些物件在抖"的真正原因。 */
-  const amp = game.shake > 0.05 ? game.shake : 0;
-  const shx = amp ? snap((Math.random() - 0.5) * amp) : 0;
-  const shy = amp ? snap((Math.random() - 0.5) * amp) : 0;
-  const cam = { x: area.cam.x + shx, y: area.cam.y + shy };
+/** 夜里/室内的光照管线：从 render 里原样搬出来的，白天区域整段跳过 */
+function applyLighting(g, cam, shx, shy, px, py) {
   const p = game.player;
-
-  // 整帧变焦：QTE 近景时把世界层整体放大，光照与几何才不会错位
-  const zm = game.zoom || 1;
-  if (zm > 1.001) {
-    const za = game.zoomAtCur || game.zoomAt;
-    /* QTE 期间焦点再往下压一点，两个角色就落在画面中上部 —— 键帽面板在下面
-       三分之一，两者不再叠在一起。焦点被 clamp 夹住时这一下会自动打折。 */
-    const lift = game.qte ? 20 : 0;
-    const f = za
-      ? {
-          x: area.cam.x + (za.x - za.y) * HW,
-          y: area.cam.y + (za.x + za.y) * HH - 14 - (za.z || 0) * TILE_Z + lift,
-        }
-      : { x: VIEW_W / 2, y: VIEW_H / 2 };
-    /* 围着焦点慢慢摇一点。用 game.rt（真实秒）而不是 game.t —— 慢动作时
-       世界几乎静止，镜头却应该继续走，这正是"电影感"的来源。
-       幅度跟变焦量挂钩：不放大就完全不摇。 */
-    if (game.qte) {
-      const sw = (zm - 1) * 7;
-      f.x += Math.sin(game.rt * 0.63) * sw;
-      f.y += Math.sin(game.rt * 0.47 + 1.9) * sw * 0.55;
-    }
-    // 夹住焦点：视窗跑到 640×360 之外的话，那块没有光照贴图会变成一片死白
-    const hw = VIEW_W / (2 * zm);
-    const hh = VIEW_H / (2 * zm);
-    const fxp = clamp(f.x, hw, VIEW_W - hw);
-    const fyp = clamp(f.y, hh, VIEW_H - hh);
-    viewXform.s = zm;
-    viewXform.tx = VIEW_W / 2 - fxp * zm;
-    viewXform.ty = VIEW_H / 2 - fyp * zm;
-  } else {
-    viewXform.s = 1;
-    viewXform.tx = 0;
-    viewXform.ty = 0;
-  }
-
-  applyScreen(ctx);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  applyView(ctx);
-
-  /* 远景背景层（露天区域才有）：夜空、云、三层城市剪影、楼下的街区。
-     它在世界之外，不参与等距排序，也不走墙面那套画法 —— 直接一张
-     屏幕空间贴图铺在最底下，跟着镜头抖动与变焦一起走。 */
-  if (area.backdrop) blit(ctx, area.backdrop, shx, shy);
-
-  // 静态图层
-  blit(ctx, area.statics.img, snap(cam.x - area.statics.ox), snap(cam.y - area.statics.oy));
-  if (area.id === 'lab' && game.door.hits > 0) drawDoorDamage(ctx, cam);
-  fx.drawDecals(ctx, cam);
-
-  /* --- 深度排序 --- */
-  const items = [];
-  for (const pr of area.props) items.push({ k: pr.x + pr.y, pr });
-  for (const z of horde.list) items.push({ k: z.x + z.y - (z.dead ? 0.5 : 0), z });
-
-  let px = p.x;
-  let py = p.y;
-  let zOff = 0;
-  let bodyRot = 0;
-
-  if (game.state === 'wake') {
-    const w = wakePose(game.phase);
-    px = w.x;
-    py = w.y;
-    zOff = w.z * TILE_Z;
-    bodyRot = w.rot;
-  } else {
-    zOff = (p.z || 0) * TILE_Z;
-  }
-
-  // 在床上时深度键要压过床本身，否则人会被床挡住
-  const onBed = game.state === 'wake' && zOff > 2;
-  items.push({ k: px + py + (onBed ? 0.7 : 0), player: true });
-
-  // 吊在绳上/被拽进舱那一段由 drawSky 负责画，世界层这里跳过，否则会有两个人
-  const cabinPlayer = skyPlayer();
-
-  items.sort((a, b) => a.k - b.k);
-  for (const it of items) {
-    if (it.pr) {
-      const sx = cam.x + (it.pr.x - it.pr.y) * HW;
-      const sy = cam.y + (it.pr.x + it.pr.y) * HH - (it.pr.zOff || 0) * TILE_Z;
-      blit(ctx, it.pr.s.img, snap(sx - it.pr.s.ox), snap(sy - it.pr.s.oy));
-    } else if (it.z) {
-      const zs = { x: cam.x + (it.z.x - it.z.y) * HW, y: cam.y + (it.z.x + it.z.y) * HH };
-      drawZombiePix(ctx, zs.x, zs.y, it.z);
-    } else if (!p.hidden && !cabinPlayer) {
-      drawPlayerSprite(ctx, cam, px, py, zOff, bodyRot);
-    }
-  }
-
-  // 近侧矮护墙：必须压在道具与角色之上
-  if (area.fg) {
-    blit(ctx, area.fg.img, snap(cam.x - area.fg.ox), snap(cam.y - area.fg.oy));
-  }
-
-  fx.draw(ctx, cam);
-  if (area.fire) drawFire(ctx, cam);
-
-  /* --- 光照 --- */
   const litX = px;
   const litY = py;
   const pvis = computeVisibility(litX, litY, area.segments);
@@ -3659,7 +3958,263 @@ function render() {
         : game.noBake
           ? area.roomVis
           : { tex: area.mask, dx: shx, dy: shy };
-    lighting.finish(ctx, mask, cam, area.dark);
+    lighting.finish(g, mask, cam, area.dark);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 第一章：营地的白天绘制件
+ * ------------------------------------------------------------------ */
+
+/**
+ * 晨光色调：白天区域用它替掉整条光照管线。屏幕空间几档色带 + 右上角
+ * 的日光斑 —— 分档平涂，不用平滑渐变，跟像素语言一致。很轻：三次 fillRect
+ * 加一个 pxGlow。
+ */
+function drawDaylight(g) {
+  applyScreen(g);
+  /* 先做一遍 multiply 色阶：太阳在右上，画面从右上的暖金往左下的
+     偏冷压暗。低角度阳光的"金色时刻"主要靠这一步把整帧色温掰到
+     橙 —— 只用 lighter 叠橙的话，素材的灰底压不下去，看着还是阴天。
+     （光照层允许平滑渐变，见 config.js 的像素质感说明。） */
+  g.globalCompositeOperation = 'multiply';
+  const grade = g.createLinearGradient(VIEW_W, 0, VIEW_W * 0.18, VIEW_H);
+  grade.addColorStop(0, 'rgb(255,212,148)');
+  grade.addColorStop(0.5, 'rgb(250,190,128)');
+  grade.addColorStop(1, 'rgb(190,174,190)');
+  g.fillStyle = grade;
+  g.fillRect(0, 0, VIEW_W, VIEW_H);
+  g.globalCompositeOperation = 'lighter';
+  // 全屏一层橙色日光底
+  g.fillStyle = 'rgba(255,142,52,0.14)';
+  g.fillRect(0, 0, VIEW_W, VIEW_H);
+  g.fillStyle = 'rgba(255,178,92,0.09)';
+  g.fillRect(0, 0, VIEW_W, VIEW_H * 0.55);
+  // 顶部低阳光柱：画面上方偏右，分带平涂（像素语言）
+  g.fillStyle = 'rgba(255,190,100,0.22)';
+  g.fillRect(0, 0, VIEW_W, 22);
+  g.fillStyle = 'rgba(255,174,82,0.14)';
+  g.fillRect(0, 22, VIEW_W, 28);
+  g.fillStyle = 'rgba(255,158,68,0.08)';
+  g.fillRect(0, 50, VIEW_W, 40);
+  g.fillStyle = 'rgba(255,134,54,0.06)';
+  g.fillRect(VIEW_W * 0.45, 0, VIEW_W * 0.55, 72);
+  // 太阳本体：同心方块辉光，偏右上，压着地平线的一轮橙金
+  pxGlow(g, VIEW_W - 68, 24, 150, '255,152,56', 0.62);
+  pxGlow(g, VIEW_W - 68, 24, 64, '255,210,124', 0.36);
+  g.globalCompositeOperation = 'source-over';
+  // 斜向晨光带：从太阳角扫过画面
+  for (let i = 0; i < 9; i++) {
+    const t = i / 8;
+    const x0 = VIEW_W - 40 - t * (VIEW_W + 80);
+    g.fillStyle = `rgba(255,180,96,${(0.04 - t * 0.022).toFixed(3)})`;
+    g.fillRect(Math.round(x0), 0, 14, VIEW_H);
+  }
+  // 下缘冷影压纵深，跟暖色天形成对比
+  g.fillStyle = 'rgba(44,46,72,0.08)';
+  g.fillRect(0, VIEW_H - 52, VIEW_W, 52);
+  applyView(g);
+}
+
+/** 营地 NPC / 护送士兵：跟玩家同一套 pixelSprite 整数锚点吸附 */
+function drawNPC(g, cam, n) {
+  const sx = cam.x + (n.x - n.y) * HW;
+  const sy = cam.y + (n.x + n.y) * HH;
+  pixelSprite(g, sx, sy, CHAR_BOX, (gg, ax, ay) => {
+    A.drawCharacter(gg, ax, ay, npcDrawOpts(n, game.t, A.OUTFITS));
+  });
+}
+
+/** 火塘的火焰。白天火焰压淡一点，靠烟撑存在感 */
+function drawCampfire(g, cam, f) {
+  const sx = cam.x + (f.x - f.y) * HW;
+  const sy = cam.y + (f.x + f.y) * HH;
+  g.save();
+  g.globalAlpha = area.daylight ? 0.82 : 1;
+  A.drawFlames(g, sx, sy - 5, 16, 21, game.t, f.x * 3.1);
+  A.drawFlames(g, sx - 6, sy - 3, 10, 13, game.t * 1.25, f.y * 5.3);
+  g.restore();
+  if (Math.random() < 0.05) fx.smoke(f.x, f.y, 0.7, 1);
+}
+
+/** 机身中心到滑橇底的像素距离（drawHeli 的滑橇横杆画到 y=+28） */
+const HELI_SKID = 28;
+
+/** 降落中的机身影子：贴地椭圆，越低越实。画在静态层之后、深度排序之前 */
+function drawHeliShadow(g, cam, h) {
+  const sx = cam.x + (h.x - h.y) * HW;
+  const sy = cam.y + (h.x + h.y) * HH;
+  const k = clamp(1 - h.z / 9, 0.15, 1);
+  const w = 34 + 22 * k;
+  pxEllipse(g, sx, sy, w, w * 0.3, `rgba(24,20,12,${(0.3 * k).toFixed(3)})`);
+  /* 停稳后的清晨长影：跟营地道具的 morningShadow 同一套约定 ——
+     太阳在屏幕右上，影子往世界 +y（屏幕左下）拖。机身（dir=1 机头朝左）
+     的投影是一条斜四边形 + 旋翼盘的淡椭圆。 */
+  if (area.daylight && h.z < 0.4) {
+    pxPoly(g, [
+      [sx - 58, sy + 3],
+      [sx + 74, sy + 3],
+      [sx + 34, sy + 19],
+      [sx - 98, sy + 19],
+    ], 'rgba(26,24,18,0.16)');
+    pxEllipse(g, sx - 42, sy + 14, 62, 11, 'rgba(26,24,18,0.08)');
+  }
+}
+
+/** 营地的直升机：世界坐标 + 离地高度，旋翼转速由 rotorT 的推进速度决定 */
+function drawCampHeli(g, cam, h) {
+  const sx = cam.x + (h.x - h.y) * HW;
+  const sy = cam.y + (h.x + h.y) * HH - HELI_SKID - h.z * TILE_Z;
+  pixelSprite(g, sx, sy, HELI_BOX, (gg, ax, ay) => {
+    A.drawHeli(gg, ax, ay, h.rotorT, { scale: 1, dir: 1, sun: area.daylight });
+  });
+}
+
+function render() {
+  // 主菜单：另一幕独立的画面，跟游戏世界不共用相机与光照
+  if (game.state === 'menu') {
+    drawMenuScene(ctx, game.rt);
+    return;
+  }
+
+  /* 镜头抖动对**所有层**用同一套已取整的偏移。以前 shx/shy 是浮点，静态层与
+     道具各自 Math.round，烘焙光贴图又按浮点画，几层各进各的整数格，相对错开
+     1px —— 那就是"换场景后有些物件在抖"的真正原因。 */
+  const amp = game.shake > 0.05 ? game.shake : 0;
+  const shx = amp ? snap((Math.random() - 0.5) * amp) : 0;
+  const shy = amp ? snap((Math.random() - 0.5) * amp) : 0;
+  // 跟随镜头的区域用 game.cam（移动中是浮点、停稳后是整数），其余用固定的 area.cam
+  const camBase = game.cam || area.cam;
+  /* 绘制前统一 snap 到像素格 —— 静态层 blit、道具与 pixelSprite
+     共用同一套取整后的 cam，各层才不会各进各的整数格。 */
+  const cam = { x: snap(camBase.x + shx), y: snap(camBase.y + shy) };
+  const p = game.player;
+
+  // 整帧变焦：QTE 近景时把世界层整体放大，光照与几何才不会错位
+  const zm = game.zoom || 1;
+  if (zm > 1.001) {
+    const za = game.zoomAtCur || game.zoomAt;
+    /* QTE 期间焦点再往下压一点，两个角色就落在画面中上部 —— 键帽面板在下面
+       三分之一，两者不再叠在一起。焦点被 clamp 夹住时这一下会自动打折。 */
+    const lift = game.qte ? 20 : 0;
+    const f = za
+      ? {
+          x: camBase.x + (za.x - za.y) * HW,
+          y: camBase.y + (za.x + za.y) * HH - 14 - (za.z || 0) * TILE_Z + lift,
+        }
+      : { x: VIEW_W / 2, y: VIEW_H / 2 };
+    /* 围着焦点慢慢摇一点。用 game.rt（真实秒）而不是 game.t —— 慢动作时
+       世界几乎静止，镜头却应该继续走，这正是"电影感"的来源。
+       幅度跟变焦量挂钩：不放大就完全不摇。 */
+    if (game.qte) {
+      const sw = (zm - 1) * 7;
+      f.x += Math.sin(game.rt * 0.63) * sw;
+      f.y += Math.sin(game.rt * 0.47 + 1.9) * sw * 0.55;
+    }
+    // 夹住焦点：视窗跑到 640×360 之外的话，那块没有光照贴图会变成一片死白
+    const hw = VIEW_W / (2 * zm);
+    const hh = VIEW_H / (2 * zm);
+    const fxp = clamp(f.x, hw, VIEW_W - hw);
+    const fyp = clamp(f.y, hh, VIEW_H - hh);
+    viewXform.s = zm;
+    viewXform.tx = VIEW_W / 2 - fxp * zm;
+    viewXform.ty = VIEW_H / 2 - fyp * zm;
+  } else {
+    viewXform.s = 1;
+    viewXform.tx = 0;
+    viewXform.ty = 0;
+  }
+
+  applyScreen(ctx);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  applyView(ctx);
+
+  /* 远景背景层（露天区域才有）：夜空、云、三层城市剪影、楼下的街区。
+     它在世界之外，不参与等距排序，也不走墙面那套画法 —— 直接一张
+     屏幕空间贴图铺在最底下，跟着镜头抖动与变焦一起走。 */
+  if (area.backdrop) blit(ctx, area.backdrop, shx, shy);
+
+  // 静态图层
+  blit(ctx, area.statics.img, snap(cam.x - area.statics.ox), snap(cam.y - area.statics.oy));
+  if (area.id === 'lab' && game.door.hits > 0) drawDoorDamage(ctx, cam);
+  // 营地直升机的地面影子：贴地，画在所有立起来的东西之前
+  const campHeli = area.id === 'camp' ? game.campHeli : null;
+  if (campHeli) drawHeliShadow(ctx, cam, campHeli);
+  fx.drawDecals(ctx, cam);
+
+  /* --- 深度排序 --- */
+  const items = [];
+  for (const pr of area.props) items.push({ k: pr.x + pr.y, pr });
+  for (const z of horde.list) items.push({ k: z.x + z.y - (z.dead ? 0.5 : 0), z });
+  if (area.npcList) for (const n of area.npcList) items.push({ k: n.x + n.y, npc: n });
+  if (game.camp && game.camp.escort) {
+    const e = game.camp.escort;
+    items.push({ k: e.x + e.y, npc: e });
+  }
+  // 火塘的火焰：深度键压过火塘本体一点，火苗才不会被自己的石圈盖住
+  if (area.fires) for (const f of area.fires) items.push({ k: f.x + f.y + 0.05, fire: f });
+  // 直升机贴地或很低时参与深度排序；还在天上时画在最后（见 drawSky 之后）
+  if (campHeli && campHeli.z < 2.2) items.push({ k: campHeli.x + campHeli.y + 1.1, heli: campHeli });
+
+  let px = p.x;
+  let py = p.y;
+  let zOff = 0;
+  let bodyRot = 0;
+
+  if (game.state === 'wake') {
+    const w = wakePose(game.phase);
+    px = w.x;
+    py = w.y;
+    zOff = w.z * TILE_Z;
+    bodyRot = w.rot;
+  } else {
+    zOff = (p.z || 0) * TILE_Z;
+  }
+
+  // 在床上时深度键要压过床本身，否则人会被床挡住
+  const onBed = game.state === 'wake' && zOff > 2;
+  items.push({ k: px + py + (onBed ? 0.7 : 0), player: true });
+
+  // 吊在绳上/被拽进舱那一段由 drawSky 负责画，世界层这里跳过，否则会有两个人
+  const cabinPlayer = skyPlayer();
+
+  items.sort((a, b) => a.k - b.k);
+  for (const it of items) {
+    if (it.pr) {
+      const sx = cam.x + (it.pr.x - it.pr.y) * HW;
+      const sy = cam.y + (it.pr.x + it.pr.y) * HH - (it.pr.zOff || 0) * TILE_Z;
+      blit(ctx, it.pr.s.img, snap(sx - it.pr.s.ox), snap(sy - it.pr.s.oy));
+    } else if (it.z) {
+      const zs = { x: cam.x + (it.z.x - it.z.y) * HW, y: cam.y + (it.z.x + it.z.y) * HH };
+      drawZombiePix(ctx, zs.x, zs.y, it.z);
+    } else if (it.npc) {
+      drawNPC(ctx, cam, it.npc);
+    } else if (it.fire) {
+      drawCampfire(ctx, cam, it.fire);
+    } else if (it.heli) {
+      drawCampHeli(ctx, cam, it.heli);
+    } else if (it.player && !p.hidden && !cabinPlayer) {
+      drawPlayerSprite(ctx, cam, px, py, zOff, bodyRot);
+    }
+  }
+
+  // 近侧矮护墙：必须压在道具与角色之上
+  if (area.fg) {
+    blit(ctx, area.fg.img, snap(cam.x - area.fg.ox), snap(cam.y - area.fg.oy));
+  }
+
+  fx.draw(ctx, cam);
+  if (area.fire) drawFire(ctx, cam);
+
+  /* --- 光照 --- */
+  if (area.daylight) {
+    // 白天（营地）：亮度全在素材里，整条光照管线不跑，只叠一层晨光色调。
+    // 顺便闭嘴：没有灯管，镇流器的嗡声不该在太阳底下响。
+    SFX.setBuzz(0);
+    drawDaylight(ctx);
+  } else {
+    applyLighting(ctx, cam, shx, shy, px, py);
   }
 
   /* --- 灯具：外壳 + 亮着的灯管 --- */
@@ -3673,6 +4228,8 @@ function render() {
   if (area.id === 'lab') drawEmissive(ctx, cam);
   drawAreaGlow(ctx, cam);
   drawSky(ctx, cam, px, py, zOff);
+  // 营地直升机还在天上时画在世界之上（它不参与等距排序，跟天台那架同理）
+  if (campHeli && campHeli.z >= 2.2) drawCampHeli(ctx, cam, campHeli);
 
   // 火花闪光的额外辉光
   if (area.id === 'lab' && game.sparkPower > 0.02) {
@@ -3793,6 +4350,7 @@ function render() {
  * ------------------------------------------------------------------ */
 
 UI.initUI();
+UI.initReg({ onConfirm: finishRegistration });
 INV.initInventory();
 initDevcon(runDevCommand);
 initControls(doAction);
@@ -3944,13 +4502,49 @@ window.__toRadio = () => {
   enterArea('dorm312', 'enter');
 };
 
+/* ---- 第一章的快进钩子 ---- */
+
+/** 完整演一遍「到达营地」：章节卡 → 降落 → 护送 → 登记 */
+window.__toArrive = () => {
+  window.__skipIntro();
+  window.__arm();
+  startChapterOne(true);
+};
+
+/** 跳到登记桌前：帐篷内景，走两步就弹登记表单 */
+window.__toReg = () => {
+  window.__skipIntro();
+  window.__arm();
+  game.chapter = 1;
+  game.state = 'cine';
+  game.camp = { phase: 'desk', t: 0, focus: null, escort: null, lines: null, atDesk: false, formUp: false };
+  UI.setHudHidden(true, true);
+  enterArea('campReg', 'enter');
+};
+
+/** 直接站到营地里（视为已登记、已换装） */
+window.__toCamp = () => {
+  window.__skipIntro();
+  window.__arm();
+  game.chapter = 1;
+  game.regDone = true;
+  game.outfit = 'camp';
+  if (!game.playerName) game.playerName = '测试员';
+  INV.setPortraitStyle('camp', game.look, game.playerName);
+  UI.setHudHidden(false, true);
+  enterArea('camp', 'fromReg');
+};
+
 const DEV_HELP = [
   'roof              上天台（补装备、跳过对讲机）',
   'cine              直接演收尾过场（序章完 → 主菜单）',
   'radio / 312       进 312 听对讲机',
+  'arrive            第一章开场：降落营地全过场',
+  'reg               跳到登记桌前（弹登记表单）',
+  'camp              直接站进营地（视为已登记）',
   'arm               补装备并解锁天台门',
   'skip              跳过标题与起床',
-  'lab corr2 stair corr3 corr1 stairroof',
+  'lab corr2 stair corr3 corr1 stairroof campreg',
   'goto <区域> [出生点]   例如 goto roof fromStair',
   'where             当前区域',
   'clear             清屏',
@@ -3967,6 +4561,7 @@ const AREA_ALIAS = {
   roof: ['roof', 'fromStair'],
   '312': ['dorm312', 'enter'],
   dorm312: ['dorm312', 'enter'],
+  campreg: ['campReg', 'enter'],
 };
 
 function runDevCommand(line) {
@@ -4000,6 +4595,21 @@ function runDevCommand(line) {
     closeDevcon();
     return '→ 312';
   }
+  if (cmd === 'arrive') {
+    window.__toArrive();
+    closeDevcon();
+    return '→ 第一章开场';
+  }
+  if (cmd === 'reg') {
+    window.__toReg();
+    closeDevcon();
+    return '→ 登记帐篷';
+  }
+  if (cmd === 'camp') {
+    window.__toCamp();
+    closeDevcon();
+    return '→ 营地';
+  }
   if (cmd === 'where') {
     const p = game.player;
     return (area.id || '?') + '  ' + p.x.toFixed(1) + ',' + p.y.toFixed(1);
@@ -4009,7 +4619,7 @@ function runDevCommand(line) {
     const id = a === 'stairroof' ? 'stairRoof' : a === '312' ? 'dorm312' : a;
     if (!AREA_ALIAS[id.toLowerCase()] && !AREA_ALIAS[id]) {
       // 允许正式 id
-      const ok = ['lab', 'corr2', 'corr3', 'corr1', 'stair', 'stairRoof', 'roof', 'dorm312'];
+      const ok = ['lab', 'corr2', 'corr3', 'corr1', 'stair', 'stairRoof', 'roof', 'dorm312', 'camp', 'campReg'];
       if (ok.indexOf(id) < 0) return '? 没有区域 ' + a;
     }
     enterArea(id, b || undefined);

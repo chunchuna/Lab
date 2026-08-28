@@ -1,4 +1,7 @@
-import { drawPistolIcon, drawFlashIcon, drawPortraitBust, PORTRAIT_BUST } from './art.js';
+import {
+  drawPistolIcon, drawFlashIcon, drawPortraitBust, PORTRAIT_BUST,
+  drawPortrait, OUTFITS, HAIR_STYLES, HAIR_NAMES, HAIR_COLORS, SKIN_TONES, DEFAULT_LOOK,
+} from './art.js';
 import { pxLine } from './util.js';
 import { MAG_SIZE } from './config.js';
 import * as SFX from './audio.js';
@@ -46,6 +49,9 @@ export function initUI() {
   el.qteCaption = $('#qte-caption');
   el.qteMash = $('#qte-mash-fill');
   el.ending = $('#ending');
+  el.chapter = $('#chapter');
+  el.chapterT = $('#chapter-t');
+  el.chapterS = $('#chapter-s');
   el.buildVer = $('#build-ver');
   if (el.buildVer) el.buildVer.textContent = 'v' + VERSION;
 
@@ -536,6 +542,152 @@ export function fadeEnding() {
   if (el.ending.classList.contains('hidden')) return;
   el.ending.classList.remove('on');
   setTimeout(() => el.ending.classList.add('hidden'), 1900);
+}
+
+/* ---------------- 章节卡 ---------------- *
+ *
+ * 「序章完」→ 全黑里浮出「第一章 · 世界」→ 淡出接直升机进场。
+ * 卡片全黑不透明，切区域就在它背后发生。
+ */
+
+let chapterHideTimer = 0;
+
+export function showChapter(title, sub) {
+  clearTimeout(chapterHideTimer);
+  el.chapterT.textContent = title;
+  el.chapterS.textContent = sub || '';
+  el.chapter.classList.remove('hidden');
+  requestAnimationFrame(() => el.chapter.classList.add('on'));
+  // 结束卡片在章节卡上屏后就没用了；它挂着 menu-on 会把字幕一起藏掉
+  setTimeout(() => {
+    hideEnding();
+    el.hud.classList.remove('menu-on');
+  }, 650);
+}
+
+export function fadeChapter() {
+  el.chapter.classList.remove('on');
+  chapterHideTimer = setTimeout(() => el.chapter.classList.add('hidden'), 1900);
+}
+
+/** 立即藏掉章节卡（回主菜单时用，不等淡出） */
+export function hideChapter() {
+  clearTimeout(chapterHideTimer);
+  el.chapter.classList.remove('on');
+  el.chapter.classList.add('hidden');
+}
+
+/* ---------------- HUD 丝滑入场 ---------------- *
+ *
+ * 第一章开场把双手/弹药/按键提示整个推到屏幕外（hud-off），
+ * 登记完成后去掉这个类，元素按各自的 transition 滑回来。
+ * 字幕（#messages）不参与：过场里要靠它说话。
+ */
+
+export function setHudHidden(hidden, snap) {
+  if (snap) {
+    el.hud.classList.add('hud-snap');
+    el.hud.classList.toggle('hud-off', hidden);
+    void el.hud.offsetWidth; // 先让无过渡的状态落地，下一帧再恢复动画
+    el.hud.classList.remove('hud-snap');
+  } else {
+    el.hud.classList.toggle('hud-off', hidden);
+  }
+}
+
+/* ---------------- 入营登记（第一章） ---------------- *
+ *
+ * DOM 面板：名字 + 发型/发色/肤色。立绘预览是 canvas（drawPortrait 直接
+ * 复用），穿的是登记后配发的营地工装 —— 玩家在面板里看到的就是换装结果。
+ */
+
+const reg = {
+  hooks: {},
+  look: { ...DEFAULT_LOOK },
+  ctx: null,
+};
+
+/** hooks = { onConfirm({ name, look }) } */
+export function initReg(hooks) {
+  reg.hooks = hooks || {};
+  el.reg = $('#reg');
+  el.regName = $('#reg-name');
+  el.regConfirm = $('#reg-confirm');
+  el.regPortrait = $('#reg-portrait');
+  reg.ctx = el.regPortrait.getContext('2d');
+  reg.ctx.imageSmoothingEnabled = false;
+
+  const opt = (parent, label, style, onPick) => {
+    const b = document.createElement('button');
+    b.className = 'reg-opt';
+    if (label) b.innerHTML = '<span>' + label + '</span>';
+    if (style) b.style.background = style;
+    b.addEventListener('click', () => {
+      onPick();
+      SFX.sfxBeep(880, 0.04, 0.06);
+      syncRegOpts();
+      drawRegPreview();
+    });
+    parent.appendChild(b);
+    return b;
+  };
+
+  el.regHair = HAIR_STYLES.map((h) =>
+    opt($('#reg-hair'), HAIR_NAMES[h] || h, null, () => (reg.look.hair = h)));
+  el.regHairCol = HAIR_COLORS.map((c) =>
+    opt($('#reg-haircol'), '', c, () => (reg.look.hairCol = c)));
+  el.regSkin = SKIN_TONES.map((c) =>
+    opt($('#reg-skin'), '', c, () => (reg.look.skin = c)));
+
+  const confirm = () => {
+    const name = (el.regName.value || '').trim();
+    SFX.sfxClick();
+    if (reg.hooks.onConfirm) {
+      reg.hooks.onConfirm({ name: name || '无名', look: { ...reg.look } });
+    }
+  };
+  el.regConfirm.addEventListener('click', confirm);
+  // 输入框里按回车＝签字。input.js 对 INPUT 里的按键一律放行，这里自己接
+  el.regName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirm();
+    }
+  });
+}
+
+function syncRegOpts() {
+  HAIR_STYLES.forEach((h, i) => el.regHair[i].classList.toggle('on', reg.look.hair === h));
+  HAIR_COLORS.forEach((c, i) => el.regHairCol[i].classList.toggle('on', reg.look.hairCol === c));
+  SKIN_TONES.forEach((c, i) => el.regSkin[i].classList.toggle('on', reg.look.skin === c));
+}
+
+function drawRegPreview() {
+  drawPortrait(reg.ctx, el.regPortrait.width, el.regPortrait.height, {
+    outfit: OUTFITS.camp,
+    look: reg.look,
+  });
+}
+
+export function showReg(init = {}) {
+  reg.look = { ...DEFAULT_LOOK, ...(init.look || {}) };
+  el.regName.value = init.name || '';
+  syncRegOpts();
+  drawRegPreview();
+  document.body.classList.add('reg-on'); // 面板外的黑边上也要看得见系统指针
+  el.reg.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    el.reg.classList.add('on');
+    el.regName.focus();
+  });
+}
+
+export function hideReg() {
+  if (!el.reg) return;
+  document.body.classList.remove('reg-on');
+  el.regName.blur();
+  el.reg.classList.remove('on');
+  el.reg.classList.add('hidden');
 }
 
 /* ---------------- 准星 ---------------- */

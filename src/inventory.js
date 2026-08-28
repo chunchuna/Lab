@@ -1,4 +1,7 @@
-import { drawPistolIcon, drawFlashIcon, drawMagIcon, drawBadgeIcon, drawPortrait, PORTRAIT_HANDS } from './art.js';
+import {
+  drawPistolIcon, drawFlashIcon, drawMagIcon, drawBadgeIcon, drawPortrait, PORTRAIT_HANDS,
+  OUTFITS,
+} from './art.js';
 
 export const ITEMS = {
   pistol: {
@@ -352,6 +355,22 @@ function setInfo(id) {
  * 渲染
  * ------------------------------------------------------------------ */
 
+/* 立绘的穿着与长相。outfit 存**键名**（art.js 有带 ?v= 与不带两份模块实例，
+   传对象跨实例可能拿错），绘制时用本模块自己的 OUTFITS 解析。 */
+const style = { outfit: 'lab', look: null, name: '' };
+
+/** 登记完成 / 读档 / 回主菜单时由 main.js 调：换装 + 改立绘下的名字 */
+export function setPortraitStyle(outfit, look, name) {
+  style.outfit = outfit || 'lab';
+  style.look = look || null;
+  style.name = name || '';
+  const label = document.querySelector('.portrait-name');
+  if (label) {
+    label.childNodes[0].textContent = style.name ? style.name + ' · 已登记' : '研究员 · 未知身份';
+  }
+  render();
+}
+
 function paintSlot(node, item) {
   const cv = node.querySelector('canvas');
   const g = cv.getContext('2d');
@@ -375,6 +394,8 @@ export function render() {
     left: inv.left && inv.left.id,
     right: inv.right && inv.right.id,
     flashOn: inv.flashOn,
+    outfit: OUTFITS[style.outfit] || OUTFITS.lab,
+    look: style.look || undefined,
   });
 }
 

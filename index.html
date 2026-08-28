@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>LAB 7 — 隔离实验室</title>
 <link rel="icon" href="data:," />
-<link rel="stylesheet" href="style.css?v=1.9.3" />
+<link rel="stylesheet" href="style.css?v=2.0.2" />
 </head>
 <body>
   <div id="stage">
@@ -68,6 +68,39 @@
       <!-- 序章结束 -->
       <div id="ending" class="hidden">
         <h2>序章完</h2>
+      </div>
+
+      <!-- 章节卡：序章结束后切入第一章 -->
+      <div id="chapter" class="hidden">
+        <h2 id="chapter-t">第一章</h2>
+        <p id="chapter-s">世界</p>
+      </div>
+
+      <!-- 入营登记：名字 + 简单捏脸（DOM UI，立绘预览是 canvas） -->
+      <div id="reg" class="hidden">
+        <div class="reg-panel">
+          <div class="reg-head">
+            <span class="reg-title">临时安置点 · 入营登记</span>
+            <span class="reg-no">FORM 07-A</span>
+          </div>
+          <div class="reg-body">
+            <div class="reg-left">
+              <canvas id="reg-portrait" width="240" height="400"></canvas>
+              <div class="reg-tag">登记后配发 · 营地工装</div>
+            </div>
+            <div class="reg-form">
+              <div class="reg-row">
+                <label for="reg-name">姓名</label>
+                <input id="reg-name" type="text" maxlength="8" placeholder="想不起来就先编一个" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="reg-row"><label>发型</label><div class="reg-opts" id="reg-hair"></div></div>
+              <div class="reg-row"><label>发色</label><div class="reg-opts sw" id="reg-haircol"></div></div>
+              <div class="reg-row"><label>肤色</label><div class="reg-opts sw" id="reg-skin"></div></div>
+              <div class="reg-note">籍贯、职业、病史……全都想不起来。只记得实验室的白灯，和天台上那场雨。</div>
+              <button id="reg-confirm"><span>签字 · 完成登记</span></button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 背包 -->
@@ -207,8 +240,8 @@
     </div>
   </div>
 
-  <div id="build"><span id="build-ver">v1.9.3</span></div>
+  <div id="build"><span id="build-ver">v2.0.2</span></div>
 
-  <script type="module" src="src/main.js?v=1.9.3"></script>
+  <script type="module" src="src/main.js?v=2.0.2"></script>
 </body>
 </html>
