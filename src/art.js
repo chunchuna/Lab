@@ -1033,6 +1033,15 @@ function drawHeldItem(g, ax, ay, a, item, o) {
     // 灯头
     g.fillStyle = o.flashOn ? '#fff6d8' : '#8d9490';
     g.fillRect(Math.round(X + ca * 5) - 1, Math.round(Y + sa * 5) - 2, 3, 4);
+  } else if (item === 'book') {
+    // 翻开的旧书：不随瞄准角转，手怎么摆书就怎么摊着
+    g.fillStyle = '#d6ccaa';
+    g.fillRect(X - 3, Y - 3, 7, 5);
+    g.fillStyle = '#5a4630';
+    g.fillRect(X, Y - 3, 1, 5);
+    g.fillStyle = 'rgba(0,0,0,0.28)';
+    g.fillRect(X - 2, Y - 1, 2, 1);
+    g.fillRect(X + 1, Y - 2, 2, 1);
   }
 }
 
@@ -5106,4 +5115,594 @@ export function drawDog(g, sx, sy, o = {}) {
   const wag = o.moving ? step : Math.round(Math.sin(t * 2.3) * 1);
   g.fillStyle = DOG.coatD;
   pxLine(g, F(-7), Y - 8 + breathe, F(-10), Y - 5 + wag, DOG.coatD, 2);
+}
+
+/* ------------------------------------------------------------------ *
+ * 第一章 · 宿舍帐篷与铺位（v2.2.0）
+ *
+ * 宿舍帐篷跟功能帐篷（makeArmyTent 的 A 字脊帐：登记 / 指挥 / 医务）
+ * **刻意做成两种轮廓**：功能帐是尖脊，宿舍帐是钢箍撑起来的半圆拱棚。
+ * 站在营地里扫一眼就能分出哪排是住人的，不用读牌子。
+ * ------------------------------------------------------------------ */
+
+/** 平民宿舍帐篷的四种旧帆布配色：[受光, 中间, 背光, 下摆] */
+const DORM_PALS = [
+  ['#9a8a63', '#7e7050', '#5f553a', '#463e2a'], // 土黄
+  ['#7f8b96', '#626d78', '#48525a', '#353c43'], // 灰蓝
+  ['#8e7458', '#705b44', '#54402f', '#3d2f23'], // 褐
+  ['#7d8768', '#616a4e', '#474e39', '#343929'], // 墨绿
+];
+/** 军用宿舍帐篷：制式橄榄绿，配迷彩斑与白色喷涂编号 */
+const DORM_PAL_MIL = ['#77835b', '#5c6644', '#434a30', '#313623'];
+
+/**
+ * 宿舍帐篷。门在 +x 端的拱形端墙上，门头挂编号牌（军用是直接喷的号）。
+ * opts = { variant 0..3, military, label }
+ */
+export function makeDormTent(seed = 1001, opts = {}) {
+  const rand = mulberry32(seed);
+  const mil = !!opts.military;
+  const RX = mil ? 2.85 : 2.6; // 半长（沿 x）
+  const RY = mil ? 1.7 : 1.8; // 半宽（沿 y）
+  const H = mil ? 1.95 : 2.15; // 拱顶高
+  const [lit, mid, dark, hem] = mil ? DORM_PAL_MIL : DORM_PALS[(opts.variant || 0) % DORM_PALS.length];
+  /* θ=0 是远侧着地，π/2 是拱顶，π 是近侧着地。θ < TH0 那一小段布面背对
+     镜头、又被拱自己挡住，不必画 —— 画了也只是多一圈描不出的边。 */
+  const TH0 = 0.42;
+  const BANDS = 10;
+  // 晨光来自 -y 与上方（跟 morningShadow 同一个太阳）：远侧上半最亮，近侧下摆最暗
+  const bandCol = (th) => {
+    const k = 0.55 * Math.cos(th) + 0.83 * Math.sin(th);
+    return k > 0.74 ? lit : k > 0.5 ? mid : k > 0.2 ? dark : hem;
+  };
+  const arc = (ox, oy, x, th) => P(ox, oy, x, -RY * Math.cos(th), H * Math.sin(th));
+  const dY = mil ? 0.62 : 0.66; // 门半宽
+  const dZ = mil ? 1.32 : 1.42; // 门高
+
+  return makeProp(RX * 2 + 1.4, RY * 2 + 3.0, H + 0.5, (g, ox, oy) => {
+    morningShadow(g, ox, oy, RX * 2, RY * 1.8, H * 1.15, 0.2);
+    aoShadow(g, ox, oy, RX * 2, RY * 2, 0.34);
+
+    // 拱面：沿 θ 切成横带，一带一个色阶，交界处抖动咬合
+    let prev = null;
+    for (let i = 0; i < BANDS; i++) {
+      const t0 = TH0 + ((Math.PI - TH0) * i) / BANDS;
+      const t1 = TH0 + ((Math.PI - TH0) * (i + 1)) / BANDS;
+      const c = bandCol((t0 + t1) / 2);
+      const a0 = arc(ox, oy, -RX, t0);
+      const b0 = arc(ox, oy, RX, t0);
+      pxPoly(g, [a0, b0, arc(ox, oy, RX, t1), arc(ox, oy, -RX, t1)], c);
+      if (prev && prev !== c) pxDitherLine(g, a0[0], a0[1], b0[0], b0[1], prev);
+      prev = c;
+    }
+
+    // 钢箍：布面底下透出来的骨架
+    const ribs = Math.max(3, Math.round(RX * 1.8));
+    for (let r = 1; r < ribs; r++) {
+      const rx = -RX + (RX * 2 * r) / ribs;
+      const pts = [];
+      for (let i = 0; i <= 10; i++) pts.push(arc(ox, oy, rx, TH0 + ((Math.PI - TH0) * i) / 10));
+      pxPolyline(g, pts, 'rgba(0,0,0,0.16)', 1);
+    }
+    // 纵向布幅接缝
+    for (const th of [0.85, 1.5, 2.2, 2.72]) {
+      const a = arc(ox, oy, -RX, th);
+      const b = arc(ox, oy, RX, th);
+      pxLine(g, a[0], a[1], b[0], b[1], 'rgba(0,0,0,0.12)', 1);
+    }
+
+    if (mil) {
+      // 迷彩斑
+      for (let i = 0; i < 10; i++) {
+        const p = arc(ox, oy, -RX + rand() * RX * 2, TH0 + rand() * (Math.PI - TH0) * 0.88);
+        pxBlob(g, p[0], p[1], 3 + rand() * 6, 2 + rand() * 4, i & 1 ? 'rgba(52,58,38,0.5)' : 'rgba(96,88,58,0.3)', rand);
+      }
+    } else {
+      // 补丁：缝上去的异色方布，下沿一道针脚影
+      for (let i = 0; i < 3; i++) {
+        const p = arc(ox, oy, -RX + rand() * RX * 1.7, 1.1 + rand() * 1.2);
+        const pw = 5 + ((rand() * 5) | 0);
+        const ph = 4 + ((rand() * 3) | 0);
+        g.fillStyle = ['rgba(126,116,92,0.85)', 'rgba(92,102,110,0.85)', 'rgba(118,94,72,0.85)'][i % 3];
+        g.fillRect(Math.round(p[0]), Math.round(p[1]), pw, ph);
+        g.fillStyle = 'rgba(0,0,0,0.24)';
+        g.fillRect(Math.round(p[0]), Math.round(p[1]) + ph, pw, 1);
+      }
+    }
+    // 旧渍
+    g.globalAlpha = 0.22;
+    for (let i = 0; i < 7; i++) {
+      const p = arc(ox, oy, -RX + rand() * RX * 2, 1.6 + rand() * 1.4);
+      pxBlob(g, p[0], p[1], 2 + rand() * 5, 1 + rand() * 3, '#2c3122', rand);
+    }
+    g.globalAlpha = 1;
+
+    // 近侧下摆：压边绳 + 压边石
+    const h0 = arc(ox, oy, -RX, Math.PI);
+    const h1 = arc(ox, oy, RX, Math.PI);
+    pxLine(g, h0[0], h0[1], h1[0], h1[1], shade(hem, -0.35), 2);
+    for (let i = 0; i < 5; i++) {
+      const t = 0.1 + rand() * 0.8;
+      g.fillStyle = ['#5d5d58', '#4c4c48'][i & 1];
+      g.fillRect(Math.round(h0[0] + (h1[0] - h0[0]) * t), Math.round(h0[1] + (h1[1] - h0[1]) * t) - 1, 2 + ((rand() * 2) | 0), 2);
+    }
+
+    /* +x 端墙：拱形端面。它是近端，整面朝着镜头，门就开在这上面。 */
+    const cap = [];
+    for (let i = 0; i <= 16; i++) cap.push(arc(ox, oy, RX, (Math.PI * i) / 16));
+    pxPoly(g, cap, mid);
+    const capLit = [];
+    for (let i = 3; i <= 13; i++) capLit.push(arc(ox, oy, RX, (Math.PI * i) / 16));
+    pxPoly(g, capLit, shade(mid, 0.16));
+    pxDitherLine(g, capLit[0][0], capLit[0][1], capLit[capLit.length - 1][0], capLit[capLit.length - 1][1], mid);
+    // 端墙的加固边
+    pxPolyline(g, cap, shade(dark, -0.15), 1);
+
+    // 门洞 + 门里露出的一小块地面（真能走进去，不是画上去的洞）
+    pxPoly(g, [
+      P(ox, oy, RX, -dY, 0),
+      P(ox, oy, RX, -dY, dZ * 0.72),
+      P(ox, oy, RX, -dY * 0.5, dZ),
+      P(ox, oy, RX, dY * 0.5, dZ),
+      P(ox, oy, RX, dY, dZ * 0.72),
+      P(ox, oy, RX, dY, 0),
+    ], '#12160f');
+    pxPoly(g, [
+      P(ox, oy, RX, -dY * 0.82, 0),
+      P(ox, oy, RX, dY * 0.82, 0),
+      P(ox, oy, RX - 0.55, dY * 0.7, 0),
+      P(ox, oy, RX - 0.55, -dY * 0.7, 0),
+    ], '#2b2c23');
+    // 掀起来系住的门帘
+    const f0 = P(ox, oy, RX, -dY, dZ * 0.72);
+    const f1 = P(ox, oy, RX, -dY - 0.24, 0.12);
+    pxLine(g, f0[0], f0[1], f1[0], f1[1], shade(mid, -0.14), 4);
+    const rl = P(ox, oy, RX, dY * 0.5, dZ * 0.99);
+    g.fillStyle = shade(lit, -0.18);
+    g.fillRect(Math.round(rl[0]) - 7, Math.round(rl[1]) - 2, 14, 4);
+    g.fillStyle = 'rgba(0,0,0,0.28)';
+    g.fillRect(Math.round(rl[0]) - 7, Math.round(rl[1]) + 1, 14, 1);
+
+    /* 门牌只烘"空白牌子"，编号由 main.js 的 drawDormPlates 运行期写上去：
+       三十顶帐篷共享这五张精灵，编号一旦烘进来就得一顶一张画布，
+       4K 下那是几十兆的浪费。军用帐篷没有牌子，号直接喷在布面上。 */
+    if (!mil) {
+      const lp = P(ox, oy, RX, 0, dZ + 0.4);
+      g.fillStyle = '#3a3428';
+      g.fillRect(lp[0] - 10, lp[1] - 5, 20, 10);
+      g.fillStyle = '#c9c2a6';
+      g.fillRect(lp[0] - 9, lp[1] - 4, 18, 8);
+      g.fillStyle = 'rgba(0,0,0,0.22)';
+      g.fillRect(lp[0] - 9, lp[1] + 2, 18, 2);
+    }
+
+    // 烟囱：帐篷里烧的取暖炉，管子从拱顶斜插出来
+    const sp = arc(ox, oy, -RX * 0.45, 1.34);
+    pxLine(g, sp[0], sp[1], sp[0] + 3, sp[1] - 13, '#4a4a44', 2);
+    g.fillStyle = '#5c5c54';
+    g.fillRect(sp[0] + 1, sp[1] - 16, 6, 3);
+
+    // 拉绳：近侧下摆两根斜拉到地钉
+    for (const s of [-0.72, 0.72]) {
+      const a = arc(ox, oy, s * RX, 2.7);
+      const b = P(ox, oy, s * RX + Math.sign(s) * 0.35, RY + 0.62, 0);
+      pxLine(g, a[0], a[1], b[0], b[1], 'rgba(205,210,188,0.4)', 1);
+      g.fillStyle = '#5d645c';
+      g.fillRect(b[0] - 1, b[1] - 2, 2, 3);
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * 上下铺
+ *
+ * 拆成 low / high 两个精灵：睡在下铺的人要能夹在两层中间画，
+ * 否则不是人被上铺床板压住，就是人盖住了整个床架。
+ * 两部分共用同一套足迹与 makeProp 尺寸，锚点一致，同坐标贴上去严丝合缝。
+ * ------------------------------------------------------------------ */
+
+export const BUNK = {
+  W: 0.86, // 床宽（沿 x）
+  D: 2.0, // 床长（沿 y，头在 -y）
+  LOW: 0.42, // 下铺床面高
+  HIGH: 1.3, // 上铺床面高
+  POST: 1.66, // 立柱顶
+  SPLIT: 0.62, // low / high 的分界：下铺躺着的人画在这两层之间
+  LADDER: 0.3, // 梯子伸出床尾多远（+y）
+};
+
+const BUNK_C = {
+  tube: '#5b625d',
+  tubeD: '#3c433f',
+  tubeL: '#79817b',
+  board: '#6b6250',
+  matt: '#8a8674',
+  mattD: '#68655a',
+  sheet: '#9a9784',
+  pillow: '#b0ad9a',
+  blanket: '#5d6b5e',
+  blanketD: '#47543f',
+};
+
+/**
+ * @param part 'low' 立柱下段 + 下铺；'high' 立柱上段 + 上铺 + 梯子
+ * @param opts { made: 铺得整齐（军用叠豆腐块）, no: 床位编号 }
+ */
+export function makeBunk(seed = 1101, part = 'low', opts = {}) {
+  const rand = mulberry32(seed + (part === 'high' ? 77 : 0));
+  const { W, D, LOW, HIGH, POST, SPLIT, LADDER } = BUNK;
+  const posts = [
+    [-W / 2, -D / 2],
+    [W / 2 - 0.1, -D / 2],
+    [-W / 2, D / 2 - 0.1],
+    [W / 2 - 0.1, D / 2 - 0.1],
+  ];
+  const C = BUNK_C;
+
+  /** 一层铺：床板 + 床垫 + 床单褶 + 枕头 + 脚头叠着的毯子 */
+  const deck = (g, ox, oy, z, made) => {
+    isoBox(g, ox, oy, -W / 2, -D / 2, z - 0.09, W, D, 0.09, C.board, shade(C.board, -0.22), shade(C.board, -0.36));
+    isoBox(g, ox, oy, -W / 2 + 0.04, -D / 2 + 0.05, z, W - 0.08, D - 0.1, 0.15, C.matt, shade(C.matt, -0.2), C.mattD);
+    // 床单：顶面的横褶
+    faceTop(g, ox, oy, z + 0.15);
+    g.fillStyle = C.sheet;
+    g.fillRect((-W / 2 + 0.05) * TILE_W, (-D / 2 + 0.18) * TILE_W, (W - 0.1) * TILE_W, (D - 0.36) * TILE_W);
+    g.fillStyle = 'rgba(0,0,0,0.12)';
+    const folds = made ? 3 : 6;
+    for (let i = 1; i <= folds; i++) {
+      const fy = (-D / 2 + 0.2 + ((D - 0.4) * i) / (folds + 1)) * TILE_W + (made ? 0 : (rand() - 0.5) * 3);
+      g.fillRect((-W / 2 + 0.06) * TILE_W, fy, (W - 0.12) * TILE_W, 1);
+    }
+    if (!made) {
+      // 睡乱的褶：几块深浅不一的斑
+      for (let i = 0; i < 5; i++) {
+        pxBlob(g, (-W / 2 + 0.1 + rand() * (W - 0.2)) * TILE_W, (-D / 2 + 0.3 + rand() * (D - 0.6)) * TILE_W, 3 + rand() * 6, 2 + rand() * 4, 'rgba(0,0,0,0.08)', rand);
+      }
+    }
+    resetT(g);
+    // 枕头
+    isoBox(g, ox, oy, -W / 2 + 0.09, -D / 2 + 0.12, z + 0.15, W - 0.18, 0.46, 0.11, C.pillow, shade(C.pillow, -0.2), shade(C.pillow, -0.32));
+    // 脚头叠着的毯子
+    const bz = made ? 0.13 : 0.16;
+    isoBox(g, ox, oy, -W / 2 + 0.07, D / 2 - (made ? 0.52 : 0.6), z + 0.15, W - 0.14, made ? 0.44 : 0.52, bz, C.blanket, shade(C.blanket, -0.18), C.blanketD);
+    if (made) {
+      // 豆腐块：叠得见棱见角，压两道白边
+      const bp = P(ox, oy, 0, D / 2 - 0.3, z + 0.15 + bz);
+      g.fillStyle = 'rgba(220,216,196,0.35)';
+      g.fillRect(bp[0] - 7, bp[1] - 1, 14, 1);
+    }
+  };
+
+  return makeProp(W + 0.6, D + LADDER * 2 + 0.7, POST + 0.35, (g, ox, oy) => {
+    if (part === 'low') {
+      aoShadow(g, ox, oy, W, D, 0.42);
+      for (const [lx, ly] of posts) isoBox(g, ox, oy, lx, ly, 0, 0.1, 0.1, SPLIT, C.tubeL, C.tube, C.tubeD);
+      // 下铺两侧的边框管
+      for (const sx of [-W / 2, W / 2 - 0.06]) isoBox(g, ox, oy, sx, -D / 2, LOW - 0.12, 0.06, D, 0.05, C.tubeL, C.tube, C.tubeD);
+      deck(g, ox, oy, LOW, !!opts.made);
+      // 床底下塞的东西：一双鞋 + 一只搪瓷盆
+      const sh = P(ox, oy, W * 0.1, D * 0.28, 0);
+      g.fillStyle = '#3a332a';
+      g.fillRect(sh[0] - 5, sh[1] - 3, 4, 3);
+      g.fillRect(sh[0], sh[1] - 1, 4, 3);
+      const bs = P(ox, oy, -W * 0.15, -D * 0.24, 0);
+      pxEllipse(g, bs[0], bs[1], 5, 3, '#8d938e');
+      pxEllipseRing(g, bs[0], bs[1], 5, 3, '#5f6560', 1);
+      // 床位编号铁牌：钉在床头立柱上
+      if (opts.no) {
+        const np = P(ox, oy, -W / 2 + 0.05, -D / 2 + 0.05, SPLIT - 0.06);
+        const tw = String(opts.no).length * 4 - 1;
+        g.fillStyle = '#b9b3a0';
+        g.fillRect(np[0] - 1, np[1] - 8, tw + 3, 7);
+        pxText(g, np[0], np[1] - 7, String(opts.no), '#33322a', 1);
+      }
+      return;
+    }
+
+    // --- high ---
+    for (const [lx, ly] of posts) isoBox(g, ox, oy, lx, ly, SPLIT, 0.1, 0.1, POST - SPLIT, C.tubeL, C.tube, C.tubeD);
+    // 上铺两侧的边框管
+    for (const sx of [-W / 2, W / 2 - 0.06]) isoBox(g, ox, oy, sx, -D / 2, HIGH - 0.12, 0.06, D, 0.05, C.tubeL, C.tube, C.tubeD);
+    deck(g, ox, oy, HIGH, !!opts.made);
+    // 上铺近侧的防跌护栏：两根横管，中段留出上下的缺口
+    for (const [y0, len] of [[-D / 2 + 0.05, D * 0.34], [D / 2 - 0.05 - D * 0.3, D * 0.3]]) {
+      isoBox(g, ox, oy, W / 2 - 0.08, y0, HIGH + 0.15, 0.06, len, 0.05, C.tubeL, C.tube, C.tubeD);
+      isoBox(g, ox, oy, W / 2 - 0.08, y0, HIGH + 0.3, 0.06, len, 0.05, C.tubeL, C.tube, C.tubeD);
+      isoBox(g, ox, oy, W / 2 - 0.08, y0, HIGH + 0.15, 0.05, 0.05, 0.2, C.tube, C.tubeD, C.tubeD);
+      isoBox(g, ox, oy, W / 2 - 0.08, y0 + len - 0.05, HIGH + 0.15, 0.05, 0.05, 0.2, C.tube, C.tubeD, C.tubeD);
+    }
+    // 顶栏：把两根立柱在顶上连起来
+    isoBox(g, ox, oy, -W / 2, D / 2 - 0.1, POST - 0.06, W, 0.08, 0.06, C.tubeL, C.tube, C.tubeD);
+    isoBox(g, ox, oy, -W / 2, -D / 2, POST - 0.06, W, 0.08, 0.06, C.tubeL, C.tube, C.tubeD);
+
+    /* 梯子：立在床尾（+y），玩家爬上去时面朝床头，整个动作都在镜头这一侧。
+       主循环的爬梯动画就是沿它往上走（见 main.js 的 bunkAnim）。 */
+    const lx0 = -0.16;
+    for (const rx of [lx0, lx0 + 0.34]) {
+      isoBox(g, ox, oy, rx, D / 2 + LADDER - 0.06, 0, 0.07, 0.07, POST - 0.1, C.tubeL, C.tube, C.tubeD);
+    }
+    for (let i = 0; i < 4; i++) {
+      const rz = 0.24 + i * 0.34;
+      isoBox(g, ox, oy, lx0, D / 2 + LADDER - 0.05, rz, 0.41, 0.05, 0.05, C.tubeL, C.tube, C.tubeD);
+    }
+    // 梯顶两根斜撑接回床架
+    for (const rx of [lx0, lx0 + 0.34]) {
+      const a = P(ox, oy, rx + 0.03, D / 2 + LADDER - 0.03, POST - 0.1);
+      const b = P(ox, oy, rx + 0.03, D / 2 - 0.05, HIGH + 0.1);
+      pxLine(g, a[0], a[1], b[0], b[1], C.tube, 2);
+    }
+    // 挂在护栏上的毛巾：一眼看出上铺有人住
+    if (!opts.made) {
+      const tp = P(ox, oy, W / 2 - 0.05, -D / 2 + 0.5, HIGH + 0.3);
+      g.fillStyle = '#8d9a86';
+      g.fillRect(tp[0] - 1, tp[1], 4, 9);
+      g.fillStyle = '#74806e';
+      g.fillRect(tp[0] - 1, tp[1] + 6, 4, 3);
+    }
+  });
+}
+
+/**
+ * 躺在铺上睡着的人。不走 drawCharacter：那是站姿人形，转过来还要再解决
+ * "被子盖在身上"的图层顺序 —— 直接画"枕头上的头 + 隆起的被子"反而更像。
+ * o = { look, t, seed, blanket }
+ */
+export function drawSleeper(g, sx, sy, o = {}) {
+  const lk = o.look || DEFAULT_LOOK;
+  const skin = lk.skin || PAL.skin;
+  const hairCol = lk.hairCol || PAL.hair;
+  const bl = o.blanket || '#5d6b5e';
+  const p = (dx, dy, dz) => [sx + (dx - dy) * HW, sy + (dx + dy) * HH - dz * TILE_Z];
+  // 呼吸：被子整体起伏 1px 一档，跟角色的定格动画同一个读法
+  const br = qz(Math.sin((o.t || 0) * 0.9 + (o.seed || 0)) * 0.7, 1);
+
+  // 被子：从肩盖到脚，一个压扁的等距长条
+  const bz = 0.2 + br * 0.02;
+  const q = [p(-0.3, -0.32, bz), p(0.3, -0.32, bz), p(0.3, 0.8, bz), p(-0.3, 0.8, bz)];
+  pxPoly(g, q, bl);
+  pxPoly(g, [p(0.3, -0.32, bz), p(0.3, 0.8, bz), p(0.3, 0.8, 0), p(0.3, -0.32, 0)], shade(bl, -0.22));
+  pxPoly(g, [p(0.3, 0.8, bz), p(-0.3, 0.8, bz), p(-0.3, 0.8, 0), p(0.3, 0.8, 0)], shade(bl, -0.34));
+  // 被面的褶：横着几道压暗，中间鼓起一条身体的线
+  for (let i = 1; i < 5; i++) {
+    const a = p(-0.28, -0.3 + i * 0.22, bz);
+    const b = p(0.28, -0.3 + i * 0.22, bz);
+    pxLine(g, a[0], a[1], b[0], b[1], 'rgba(0,0,0,0.14)', 1);
+  }
+  const r0 = p(-0.02, -0.3, bz);
+  const r1 = p(-0.02, 0.72, bz);
+  pxLine(g, r0[0], r0[1], r1[0], r1[1], shade(bl, 0.16), 2);
+
+  // 头：枕在 -y 那头，侧着睡
+  const hp = p(-0.02, -0.62, 0.2);
+  const hx = Math.round(hp[0]) - 3;
+  const hy = Math.round(hp[1]) - 5 + br;
+  g.fillStyle = skin;
+  g.fillRect(hx, hy + 1, 6, 5);
+  g.fillStyle = shade(skin, -0.24);
+  g.fillRect(hx + 4, hy + 1, 2, 5);
+  g.fillStyle = hairCol;
+  if ((lk.hair || 'messy') === 'bald') {
+    g.fillStyle = shade(skin, 0.08);
+    g.fillRect(hx, hy, 6, 1);
+  } else {
+    g.fillRect(hx - 1, hy - 1, 8, 3);
+    g.fillRect(hx - 1, hy - 1, 2, 4);
+  }
+  // 闭着的眼
+  g.fillStyle = '#1a1a1a';
+  g.fillRect(hx + 3, hy + 3, 2, 1);
+  // 露在被子外的一只手
+  const ap = p(0.26, -0.24, bz);
+  g.fillStyle = skin;
+  g.fillRect(Math.round(ap[0]) - 1, Math.round(ap[1]) - 1 + br, 3, 2);
+}
+
+/* ------------------------------------------------------------------ *
+ * 宿舍里的生活家什
+ * ------------------------------------------------------------------ */
+
+/** 立柜：铁皮衣柜，一扇门虚掩着，柜顶堆着杂物。室友就靠在这看书 */
+export function makeDormLocker(seed = 1121) {
+  const rand = mulberry32(seed);
+  const W = 1.0;
+  const D = 0.64;
+  const H = 1.72;
+  return makeProp(W + 0.5, D + 0.5, H + 0.45, (g, ox, oy) => {
+    aoShadow(g, ox, oy, W, D, 0.44);
+    isoBox(g, ox, oy, -W / 2, -D / 2, 0, W, D, H, '#6f6656', '#514a3c', '#3b362b');
+    // +x 正面：两扇门
+    faceRight(g, ox, oy, W / 2);
+    const u0 = -(D / 2) * TILE_W;
+    const uw = D * TILE_W;
+    const h = H * TILE_Z;
+    g.fillStyle = '#5d5546';
+    g.fillRect(u0 + 2, -h + 3, uw - 4, h - 6);
+    g.fillStyle = 'rgba(0,0,0,0.42)';
+    g.fillRect(u0 + uw / 2 - 1, -h + 3, 2, h - 6);
+    // 门板的压筋
+    g.fillStyle = 'rgba(255,255,255,0.05)';
+    for (const v of [-h * 0.78, -h * 0.42]) g.fillRect(u0 + 3, v, uw - 6, 1);
+    // 把手与挂锁扣
+    g.fillStyle = '#9aa0a2';
+    g.fillRect(u0 + uw / 2 - 6, -h * 0.5, 3, 7);
+    g.fillRect(u0 + uw / 2 + 4, -h * 0.5, 3, 7);
+    // 贴在门上的照片与便签
+    g.fillStyle = 'rgba(214,206,182,0.75)';
+    g.fillRect(u0 + 5, -h * 0.86, 7, 6);
+    g.fillStyle = 'rgba(96,108,110,0.7)';
+    g.fillRect(u0 + 6, -h * 0.85, 5, 4);
+    g.fillStyle = 'rgba(200,192,168,0.6)';
+    g.fillRect(u0 + uw - 13, -h * 0.7, 6, 8);
+    // 锈与磕碰
+    g.globalAlpha = 0.3;
+    speckle(g, u0 + 2, -h + 4, uw - 4, h - 8, rand, 26, [PAL.rust, '#2b271f'], 1.4, 1.2);
+    g.globalAlpha = 1;
+    resetT(g);
+    // 柜顶：叠着的衣服 + 铁皮盒 + 蜡烛头
+    isoBox(g, ox, oy, -W / 2 + 0.12, -D / 2 + 0.1, H, 0.44, 0.4, 0.12, '#7d7462', '#5f5849', '#47423a');
+    isoBox(g, ox, oy, 0.06, -D / 2 + 0.14, H, 0.3, 0.3, 0.16, '#6a7278', '#4e5459', '#3a3f43');
+    const cp = P(ox, oy, 0.3, 0.14, H);
+    g.fillStyle = '#d8cfa8';
+    g.fillRect(cp[0] - 1, cp[1] - 6, 3, 6);
+    g.fillStyle = '#3a3428';
+    g.fillRect(cp[0], cp[1] - 8, 1, 2);
+    // 侧面挂的外套
+    const kp = P(ox, oy, -W / 2 - 0.02, D / 2 - 0.16, H - 0.18);
+    g.fillStyle = '#5b5340';
+    g.fillRect(kp[0] - 2, kp[1], 7, 14);
+    g.fillStyle = '#463f31';
+    g.fillRect(kp[0] - 2, kp[1] + 10, 7, 4);
+  });
+}
+
+/** 宿舍小方桌：木板面 + 煤油灯 + 两只搪瓷缸 + 一副扑克 */
+export function makeDormTable(seed = 1131) {
+  const rand = mulberry32(seed);
+  const W = 1.15;
+  const D = 0.95;
+  const H = 0.7;
+  return makeProp(W + 0.4, D + 0.4, H + 0.6, (g, ox, oy) => {
+    aoShadow(g, ox, oy, W, D, 0.4);
+    for (const [lx, ly] of [
+      [-W / 2 + 0.08, -D / 2 + 0.08],
+      [W / 2 - 0.18, -D / 2 + 0.08],
+      [-W / 2 + 0.08, D / 2 - 0.18],
+      [W / 2 - 0.18, D / 2 - 0.18],
+    ]) isoBox(g, ox, oy, lx, ly, 0, 0.1, 0.1, H - 0.07, '#5f5340', '#463d2e', '#332d22');
+    isoBox(g, ox, oy, -W / 2, -D / 2, H - 0.07, W, D, 0.07, '#8a7856', '#6c5d42', '#4d422e');
+    // 桌面：木纹 + 杯印
+    faceTop(g, ox, oy, H);
+    g.fillStyle = 'rgba(0,0,0,0.14)';
+    for (let i = 1; i < 5; i++) g.fillRect((-W / 2 + 0.05) * TILE_W, (-D / 2 + (i * D) / 5) * TILE_W, (W - 0.1) * TILE_W, 1);
+    g.globalAlpha = 0.3;
+    for (let i = 0; i < 5; i++) {
+      pxEllipseRing(g, (-W / 2 + 0.2 + rand() * (W - 0.4)) * TILE_W, (-D / 2 + 0.2 + rand() * (D - 0.4)) * TILE_W, 4, 4, '#4a3c26', 1);
+    }
+    g.globalAlpha = 1;
+    // 扑克：摊开的几张
+    g.fillStyle = '#cec7ac';
+    for (let i = 0; i < 4; i++) g.fillRect(-0.1 * TILE_W + i * 3, 0.14 * TILE_W + (i & 1) * 2, 5, 7);
+    resetT(g);
+    // 煤油灯：白天不点，玻璃罩里是空的
+    const lp = P(ox, oy, -W * 0.26, -D * 0.2, H);
+    g.fillStyle = '#6a7278';
+    g.fillRect(lp[0] - 4, lp[1] - 3, 8, 3);
+    g.fillStyle = 'rgba(206,214,206,0.5)';
+    g.fillRect(lp[0] - 3, lp[1] - 11, 6, 8);
+    g.fillStyle = 'rgba(240,246,236,0.35)';
+    g.fillRect(lp[0] - 3, lp[1] - 11, 2, 8);
+    g.fillStyle = '#4e565b';
+    g.fillRect(lp[0] - 4, lp[1] - 13, 8, 2);
+    // 两只搪瓷缸
+    for (const [cx, cy] of [[W * 0.24, -D * 0.16], [W * 0.3, D * 0.2]]) {
+      const cp = P(ox, oy, cx, cy, H);
+      g.fillStyle = '#b9bdb2';
+      g.fillRect(cp[0] - 3, cp[1] - 7, 6, 7);
+      g.fillStyle = '#8f948b';
+      g.fillRect(cp[0] + 1, cp[1] - 7, 2, 7);
+      g.fillStyle = '#8f948b';
+      g.fillRect(cp[0] + 3, cp[1] - 5, 2, 3);
+      pxEllipse(g, cp[0], cp[1] - 7, 3, 1.6, '#d2d5cb');
+    }
+  });
+}
+
+/** 木凳：宿舍里坐人的东西，四条腿一块板 */
+export function makeStool(seed = 1141) {
+  const rand = mulberry32(seed);
+  const S = 0.46;
+  const H = 0.44;
+  return makeProp(S + 0.3, S + 0.3, H + 0.15, (g, ox, oy) => {
+    aoShadow(g, ox, oy, S, S, 0.36);
+    for (const [lx, ly] of [
+      [-S / 2 + 0.04, -S / 2 + 0.04],
+      [S / 2 - 0.12, -S / 2 + 0.04],
+      [-S / 2 + 0.04, S / 2 - 0.12],
+      [S / 2 - 0.12, S / 2 - 0.12],
+    ]) isoBox(g, ox, oy, lx, ly, 0, 0.08, 0.08, H - 0.06, '#5c4f3c', '#443a2c', '#322b21');
+    isoBox(g, ox, oy, -S / 2, -S / 2, H - 0.06, S, S, 0.06, '#82704e', '#63553b', '#473d2a');
+    void rand;
+  });
+}
+
+/** 床尾的行李箱：捆着皮带的旧木箱，上面搭件衣服 */
+export function makeFootlocker(seed = 1151) {
+  const rand = mulberry32(seed);
+  const W = 0.92;
+  const D = 0.5;
+  const H = 0.42;
+  return makeProp(W + 0.3, D + 0.3, H + 0.25, (g, ox, oy) => {
+    aoShadow(g, ox, oy, W, D, 0.4);
+    isoBox(g, ox, oy, -W / 2, -D / 2, 0, W, D, H, '#7a6647', '#5c4c34', '#413626');
+    // 捆箱皮带两道
+    faceRight(g, ox, oy, W / 2);
+    g.fillStyle = '#39322a';
+    for (const u of [-0.16, 0.1]) g.fillRect(u * TILE_W, -H * TILE_Z, 3, H * TILE_Z);
+    g.fillStyle = '#9aa0a2';
+    g.fillRect(-0.16 * TILE_W, -H * TILE_Z * 0.5, 3, 2);
+    resetT(g);
+    faceTop(g, ox, oy, H);
+    g.fillStyle = '#39322a';
+    for (const v of [-0.16, 0.1]) g.fillRect(v * TILE_W, (-D / 2) * TILE_W, 3, D * TILE_W);
+    g.fillStyle = 'rgba(0,0,0,0.16)';
+    for (let i = 0; i < 6; i++) g.fillRect((-W / 2 + rand() * W) * TILE_W, (-D / 2 + rand() * D) * TILE_W, 3, 2);
+    resetT(g);
+    // 搭在箱上的衣服
+    const cp = P(ox, oy, -W * 0.18, -D * 0.1, H);
+    pxPoly(g, [
+      [cp[0] - 8, cp[1] - 1],
+      [cp[0] + 6, cp[1] - 5],
+      [cp[0] + 10, cp[1] + 1],
+      [cp[0] - 4, cp[1] + 5],
+    ], '#6b6350');
+    pxDitherLine(g, cp[0] - 8, cp[1] - 1, cp[0] + 6, cp[1] - 5, '#7d7561');
+  });
+}
+
+/** 水桶：宿舍门口打水用的，桶沿有提梁 */
+export function makeBucket(seed = 1161, water = true) {
+  const R = 0.24;
+  const H = 0.4;
+  return makeProp(R * 2 + 0.2, R * 2 + 0.2, H + 0.25, (g, ox, oy) => {
+    aoShadow(g, ox, oy, R * 2, R * 2, 0.36);
+    isoBox(g, ox, oy, -R, -R, 0, R * 2, R * 2, H, '#79807c', '#5b625e', '#454b48');
+    const tp = P(ox, oy, 0, 0, H);
+    pxEllipse(g, tp[0], tp[1], R * HW * 1.5, R * HH * 1.5, water ? '#4d5f5c' : '#3d423f');
+    pxEllipseRing(g, tp[0], tp[1], R * HW * 1.5, R * HH * 1.5, '#9aa19c', 1);
+    if (water) pxEllipse(g, tp[0] - 2, tp[1] - 1, 3, 1.4, 'rgba(190,214,208,0.4)');
+    // 提梁
+    pxPolyline(g, [
+      [tp[0] - R * HW * 1.4, tp[1] - 1],
+      [tp[0], tp[1] - 8],
+      [tp[0] + R * HW * 1.4, tp[1] - 1],
+    ], '#8d938e', 1);
+  });
+}
+
+/** 军用宿舍的枪架：三支卡宾枪立在木架上 */
+export function makeRifleRack(seed = 1171) {
+  const W = 1.25;
+  const D = 0.42;
+  const H = 1.15;
+  return makeProp(W + 0.3, D + 0.35, H + 0.2, (g, ox, oy) => {
+    aoShadow(g, ox, oy, W, D, 0.38);
+    // 架子：两根立柱 + 上下两道横梁
+    for (const lx of [-W / 2, W / 2 - 0.1]) isoBox(g, ox, oy, lx, -D / 2 + 0.06, 0, 0.1, 0.1, H, '#5c4f3c', '#443a2c', '#322b21');
+    for (const z of [H - 0.12, 0.18]) isoBox(g, ox, oy, -W / 2, -D / 2 + 0.08, z, W, 0.08, 0.08, '#6d5c43', '#4f4331', '#3a3125');
+    // 三支枪：斜靠在架上
+    for (let i = 0; i < 3; i++) {
+      const gx = -W / 2 + 0.22 + i * 0.34;
+      const a = P(ox, oy, gx, D / 2 - 0.14, 0);
+      const b = P(ox, oy, gx, -D / 2 + 0.14, H - 0.06);
+      pxLine(g, a[0], a[1], b[0], b[1], '#20241d', 2);
+      pxLine(g, a[0] + 1, a[1] - 1, b[0] + 1, b[1] - 1, '#39412f', 1);
+      // 弹匣与枪托
+      g.fillStyle = '#15181a';
+      g.fillRect(Math.round((a[0] + b[0]) / 2) - 1, Math.round((a[1] + b[1]) / 2), 3, 4);
+      g.fillStyle = '#2f3527';
+      g.fillRect(Math.round(a[0]) - 2, Math.round(a[1]) - 4, 4, 4);
+    }
+    // 架下的弹药箱
+    isoBox(g, ox, oy, -W / 2 + 0.1, -D / 2 + 0.1, 0, 0.42, 0.26, 0.2, '#4d5540', '#3a4130', '#2b3024');
+  });
 }

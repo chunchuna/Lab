@@ -114,6 +114,38 @@ html, body {
 
 #prompt.nokey .kbd { display: none; }
 
+/* ---------- 回家指引 ---------- */
+/* 帐篷在画面里：浮在帐篷上方，只有一块小牌子。
+   帐篷出了画面：贴到屏幕边缘，牌子前面多一个指方向的箭头。
+   定位与箭头角度由 main.js 每帧写 transform / --a。 */
+#guide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.2em 0.6em;
+  background: var(--surface);
+  font-size: 1.15em;
+  white-space: nowrap;
+  will-change: transform;
+  opacity: 0.92;
+}
+#guide .g-tag { letter-spacing: 0.08em; }
+#guide .g-dist { opacity: 0.6; font-size: 0.85em; }
+/* 箭头：一个用 border 拼出来的实心三角，绕自身中心转到目标方向 */
+#guide .g-arrow {
+  display: none;
+  width: 0;
+  height: 0;
+  border: 0.42em solid transparent;
+  border-left-color: var(--text);
+  transform: rotate(var(--a, 0deg));
+}
+#guide.edge .g-arrow { display: block; }
+#guide.near { opacity: 0.45; }
+
 /* 键帽：亮底暗字的小方块，只用两个颜色表现"这是一个键" */
 .kbd {
   display: inline-block;
@@ -662,6 +694,7 @@ body.reg-on { cursor: default; }
 #hud.menu-on #help,
 #hud.menu-on #ammo,
 #hud.menu-on #messages,
+#hud.menu-on #guide,
 #hud.menu-on #prompt { display: none !important; }
 /* 菜单期间要看得见系统指针（游戏里是 cursor:none + 自绘准星） */
 body.menu-on { cursor: default; }
