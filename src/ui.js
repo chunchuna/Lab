@@ -19,6 +19,9 @@ export function initUI() {
   el.messages = $('#messages');
   el.prompt = $('#prompt');
   el.promptText = $('#prompt-text');
+  el.guide = $('#guide');
+  el.guideTag = $('#guide-tag');
+  el.guideDist = $('#guide-dist');
   el.handL = $('#hand-left');
   el.handR = $('#hand-right');
   el.ammo = $('#ammo');
@@ -103,6 +106,34 @@ export function setPromptAt(x, y, stageW, stageH) {
   px = Math.max(m, Math.min(stageW - w - m, px));
   py = Math.max(m, Math.min(stageH - h - m, py));
   el.prompt.style.transform = `translate(${Math.round(px)}px, ${Math.round(py)}px)`;
+}
+
+/**
+ * 回自己帐篷的指引。
+ *
+ * @param x,y   舞台内的 CSS 像素位置（锚点是牌子的中心）
+ * @param ang   贴边时的箭头角度（度）；null = 帐篷就在画面里，不画箭头
+ * @param tag   帐篷编号
+ * @param dist  还有多远（格），只做个粗略的数字
+ * @param near  已经走到跟前了：压暗，别挡住门口的互动提示
+ */
+export function setGuide(x, y, ang, tag, dist, near) {
+  const g = el.guide;
+  if (!g) return;
+  g.classList.remove('hidden');
+  g.classList.toggle('edge', ang !== null);
+  g.classList.toggle('near', !!near);
+  if (el.guideTag.textContent !== tag) el.guideTag.textContent = tag;
+  const d = dist >= 1 ? Math.round(dist) + ' 步' : '';
+  if (el.guideDist.textContent !== d) el.guideDist.textContent = d;
+  if (ang !== null) g.style.setProperty('--a', ang.toFixed(0) + 'deg');
+  const w = g.offsetWidth;
+  const h = g.offsetHeight;
+  g.style.transform = `translate(${Math.round(x - w / 2)}px, ${Math.round(y - h / 2)}px)`;
+}
+
+export function hideGuide() {
+  if (el.guide) el.guide.classList.add('hidden');
 }
 
 export function toggleHelp() {

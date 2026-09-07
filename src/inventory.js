@@ -137,6 +137,20 @@ export function quickEquip(id) {
   return hand;
 }
 
+/** 把双手上的物品全部收回背包（营地这类安全区进门时调）。背包满则留在手上。 */
+export function stowHands() {
+  let moved = false;
+  for (const hand of ['left', 'right']) {
+    if (!inv[hand]) continue;
+    const i = inv.bag.indexOf(null);
+    if (i < 0) break;
+    inv.bag[i] = inv[hand];
+    inv[hand] = null;
+    moved = true;
+  }
+  if (moved) changed();
+}
+
 export function toggleFlash() {
   inv.flashOn = !inv.flashOn;
   changed();

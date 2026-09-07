@@ -1,6 +1,6 @@
 import { TILE_W, TILE_Z, WALL_H, VIEW_W, VIEW_H } from './config.js';
 import { buildLevel } from './level.js';
-import { buildCamp, buildCampReg } from './campareas.js';
+import { buildCamp, buildCampReg, buildCampDorm, buildCampDormMil } from './campareas.js';
 import * as A from './art.js';
 import {
   newArea, closeArea, paintFloor, wallBase, wallPipes, doorBay,
@@ -1076,6 +1076,9 @@ const BUILDERS = {
   // 第一章 · 难民营地
   camp: buildCamp,
   campReg: buildCampReg,
+  // 宿舍帐篷内景：三十顶帐篷共用这两份，进门时由 main.js 指定是哪一顶
+  campDorm: buildCampDorm,
+  campDormMil: buildCampDormMil,
 };
 
 const cache = {};

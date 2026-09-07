@@ -48,6 +48,33 @@ await page.evaluate(() => {
 await wait(1400);
 await shot('plaza');
 
+// v2.1.0 扩建区：食堂（长桌 + 打饭棚 + 排队）
+await page.evaluate(() => {
+  const g = window.__game;
+  g.player.x = 33;
+  g.player.y = 15;
+});
+await wait(1400);
+await shot('mess');
+
+// 卫生区（浴室 + 旱厕）
+await page.evaluate(() => {
+  const g = window.__game;
+  g.player.x = 61;
+  g.player.y = 18;
+});
+await wait(1400);
+await shot('hygiene');
+
+// 焚烧区（垃圾山 + 火 + 苍蝇）与东南角帐篷海
+await page.evaluate(() => {
+  const g = window.__game;
+  g.player.x = 60;
+  g.player.y = 35;
+});
+await wait(1400);
+await shot('dump');
+
 // 镜头停止抖动:按 d 走 1 秒，松开后逐帧记录 cam
 await page.keyboard.down('d');
 await wait(1000);

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>LAB 7 — 隔离实验室</title>
 <link rel="icon" href="data:," />
-<link rel="stylesheet" href="style.css?v=2.0.2" />
+<link rel="stylesheet" href="style.css?v=2.2.0" />
 </head>
 <body>
   <div id="stage">
@@ -21,6 +21,14 @@
       <!-- 互动提示：由 JS 定位到互动物在世界中的位置 -->
       <div id="prompt" class="hidden">
         <i class="kbd">E</i><span id="prompt-text"></span>
+      </div>
+
+      <!-- 回自己帐篷的指引：帐篷在画面里就浮在它上方，出了画面就贴到
+           屏幕边缘变成方向箭头。位置与箭头角度由 JS 每帧写 transform -->
+      <div id="guide" class="hidden">
+        <i class="g-arrow"></i>
+        <span class="g-tag" id="guide-tag">B3</span>
+        <span class="g-dist" id="guide-dist"></span>
       </div>
 
       <!-- 左下：双手装备 -->
@@ -240,8 +248,8 @@
     </div>
   </div>
 
-  <div id="build"><span id="build-ver">v2.0.2</span></div>
+  <div id="build"><span id="build-ver">v2.2.0</span></div>
 
-  <script type="module" src="src/main.js?v=2.0.2"></script>
+  <script type="module" src="src/main.js?v=2.2.0"></script>
 </body>
 </html>
